@@ -1,14 +1,21 @@
 import json
+from importlib.metadata import version as pkg_version
 
 from memodi.database.connection import health_check
 
 
 def ping() -> str:
-    """Check if mimeco is alive."""
     return "pong"
 
 
 def status() -> str:
-    """Check mimeco server status including database connectivity."""
     result = health_check()
     return json.dumps(result, indent=2)
+
+
+def version() -> str:
+    try:
+        v = pkg_version("memodi")
+    except Exception:
+        v = "unknown"
+    return json.dumps({"version": v})

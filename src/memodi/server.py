@@ -1,7 +1,7 @@
 from mcp.server.fastmcp import FastMCP
 
 from memodi.tools import graph, memory, workflow
-from memodi.tools.system import ping, status
+from memodi.tools.system import ping, status, version
 
 mcp = FastMCP("memodi", host="0.0.0.0", port=8787)
 
@@ -16,6 +16,12 @@ def memodi_ping() -> str:
 def memodi_status() -> str:
     """Check memodi health: server, database, and loaded extensions."""
     return status()
+
+
+@mcp.tool()
+def memodi_version() -> str:
+    """Return the memodi server version."""
+    return version()
 
 
 @mcp.tool()
