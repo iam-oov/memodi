@@ -20,6 +20,13 @@ This protocol is MANDATORY and ALWAYS ACTIVE — not something you activate on d
 - `memodi_search_global` — keyword search across ALL workspaces
 - `memodi_backfill` — generate embeddings for old observations without them
 
+### Knowledge Graph (proactive — create relationships when discovered)
+- `memodi_relate` — create a relationship (e.g. repo-a DEPENDS_ON repo-b)
+- `memodi_dependencies` — show what depends on what
+- `memodi_impact` — transitive impact analysis: "what breaks if I change X?"
+- `memodi_graph_overview` — summary of all nodes and relationships
+- `memodi_remove_relation` — remove a relationship
+
 ### Workspace management
 - `memodi_check_workspace` — check if a project has a workspace
 - `memodi_link_project` — link a project to a workspace
@@ -74,7 +81,13 @@ Call `memodi_save` IMMEDIATELY and WITHOUT BEING ASKED after any of these:
 - Gotcha, edge case, or unexpected behavior found
 - Pattern established (naming, structure, convention)
 - User preference or constraint learned
-- Cross-repo or cross-module dependency discovered
+- Cross-repo or cross-module dependency discovered → also call `memodi_relate`
+
+### After discovering dependencies (use memodi_relate)
+- Repo A imports/calls Repo B → `memodi_relate("Repo", "repo-a", "Repo", "repo-b", "DEPENDS_ON")`
+- Repo contains a module → `memodi_relate("Repo", "repo-a", "Module", "auth", "CONTAINS")`
+- Changing module X affects module Y → `memodi_relate("Module", "auth", "Module", "api", "AFFECTS")`
+- Before making changes, check `memodi_impact` to see what might break
 
 ### After user confirmation or rejection
 - User confirms a recommendation ("dale", "go with that", "si", "sounds good")

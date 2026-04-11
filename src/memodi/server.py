@@ -1,6 +1,6 @@
 from mcp.server.fastmcp import FastMCP
 
-from memodi.tools import memory, workflow
+from memodi.tools import graph, memory, workflow
 from memodi.tools.system import ping, status
 
 mcp = FastMCP("memodi", host="0.0.0.0", port=8787)
@@ -156,6 +156,43 @@ def memodi_task_update(
 ) -> str:
     """Update the status of a specific task in the workflow."""
     return workflow.task_update(workflow_id, task_index, status, notes)
+
+
+@mcp.tool()
+def memodi_relate(
+    from_type: str,
+    from_name: str,
+    to_type: str,
+    to_name: str,
+    relation: str,
+    properties: dict | None = None,
+) -> str:
+    """Create a relationship in the knowledge graph (e.g. repo-a DEPENDS_ON repo-b)."""
+    return graph.relate(from_type, from_name, to_type, to_name, relation, properties)
+
+
+@mcp.tool()
+def memodi_dependencies(name: str) -> str:
+    """Show what a node depends on and what depends on it."""
+    return graph.dependencies(name)
+
+
+@mcp.tool()
+def memodi_impact(name: str, max_depth: int = 5) -> str:
+    """Transitive impact analysis: what is affected if this node changes?"""
+    return graph.impact_analysis(name, max_depth)
+
+
+@mcp.tool()
+def memodi_graph_overview() -> str:
+    """Get a summary of all nodes and relationships in the knowledge graph."""
+    return graph.graph_overview()
+
+
+@mcp.tool()
+def memodi_remove_relation(from_name: str, to_name: str, relation: str) -> str:
+    """Remove a relationship from the knowledge graph."""
+    return graph.remove_relation(from_name, to_name, relation)
 
 
 def main():
