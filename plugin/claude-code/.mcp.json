@@ -1,11 +1,7 @@
 {
   "mcpServers": {
     "memodi": {
-      "command": "uvx",
-      "args": [
-        "--from", "git+https://github.com/iam-oov/memodi",
-        "memodi"
-      ]
+      "url": "http://localhost:8787/sse"
     }
   }
 }

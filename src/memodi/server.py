@@ -3,7 +3,7 @@ from mcp.server.fastmcp import FastMCP
 from memodi.tools import memory, workflow
 from memodi.tools.system import ping, status
 
-mcp = FastMCP("memodi")
+mcp = FastMCP("memodi", host="0.0.0.0", port=8787)
 
 
 @mcp.tool()
@@ -141,7 +141,12 @@ def memodi_task_update(
 
 
 def main():
-    mcp.run(transport="stdio")
+    import sys
+
+    if "--http" in sys.argv:
+        mcp.run(transport="sse")
+    else:
+        mcp.run(transport="stdio")
 
 
 if __name__ == "__main__":

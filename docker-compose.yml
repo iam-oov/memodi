@@ -18,5 +18,22 @@ services:
       timeout: 5s
       retries: 5
 
+  server:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.mcp
+    container_name: memodi-server
+    ports:
+      - "8787:8787"
+    environment:
+      MEMODI_DB_HOST: db
+      MEMODI_DB_PORT: 5432
+      MEMODI_DB_USER: memodi
+      MEMODI_DB_PASSWORD: memodi_dev
+      MEMODI_DB_NAME: memodi
+    depends_on:
+      db:
+        condition: service_healthy
+
 volumes:
   memodi_data:
