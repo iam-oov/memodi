@@ -79,6 +79,24 @@ def memodi_check_workspace(project: str) -> str:
 
 
 @mcp.tool()
+def memodi_search_similar(project: str, query: str, limit: int = 10) -> str:
+    """Semantic search — find observations by meaning, not just keywords."""
+    return memory.search_similar(project, query, limit)
+
+
+@mcp.tool()
+def memodi_search_hybrid(project: str, query: str, limit: int = 10) -> str:
+    """Hybrid search — combines keyword (BM25) and semantic (vector) via RRF."""
+    return memory.search_hybrid(project, query, limit)
+
+
+@mcp.tool()
+def memodi_backfill(project: str) -> str:
+    """Generate embeddings for observations that don't have one yet."""
+    return memory.backfill_embeddings(project)
+
+
+@mcp.tool()
 def memodi_plan(project: str, name: str, objective: str) -> str:
     """Start a new workflow plan. Returns active workflow if one exists."""
     return workflow.plan(project, name, objective)

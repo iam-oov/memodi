@@ -80,6 +80,7 @@ def save_observation(
     topic_key: str | None = None,
     session_id: str | None = None,
     metadata: dict | None = None,
+    embedding: list[float] | None = None,
 ) -> dict:
     if type not in ALLOWED_TYPES:
         raise ValueError(f"type must be one of: {', '.join(sorted(ALLOWED_TYPES))}")
@@ -96,33 +97,80 @@ def save_observation(
             (project_id, topic_key),
         ).fetchone()
         if existing:
-            row = conn.execute(
-                """
-                UPDATE observations
-                SET title = %s,
-                    content = %s,
-                    type = %s,
-                    session_id = %s,
-                    metadata = %s,
-                    revision_count = revision_count + 1,
-                    updated_at = now()
-                WHERE id = %s
-                RETURNING *
-                """,
-                (title, content, type, session_id, meta, existing["id"]),
-            ).fetchone()
+            if embedding is not None:
+                row = conn.execute(
+                    """
+                    UPDATE observations
+                    SET title = %s,
+                        content = %s,
+                        type = %s,
+                        session_id = %s,
+                        metadata = %s,
+                        embedding = %s,
+                        revision_count = revision_count + 1,
+                        updated_at = now()
+                    WHERE id = %s
+                    RETURNING *
+                    """,
+                    (
+                        title,
+                        content,
+                        type,
+                        session_id,
+                        meta,
+                        str(embedding),
+                        existing["id"],
+                    ),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    """
+                    UPDATE observations
+                    SET title = %s,
+                        content = %s,
+                        type = %s,
+                        session_id = %s,
+                        metadata = %s,
+                        revision_count = revision_count + 1,
+                        updated_at = now()
+                    WHERE id = %s
+                    RETURNING *
+                    """,
+                    (title, content, type, session_id, meta, existing["id"]),
+                ).fetchone()
             conn.commit()
             return dict(row)
 
-    row = conn.execute(
-        """
-        INSERT INTO observations
-            (project_id, session_id, type, title, content, topic_key, metadata)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
-        RETURNING *
-        """,
-        (project_id, session_id, type, title, content, topic_key, meta),
-    ).fetchone()
+    if embedding is not None:
+        row = conn.execute(
+            """
+            INSERT INTO observations
+                (project_id, session_id, type, title, content,
+                 topic_key, metadata, embedding)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING *
+            """,
+            (
+                project_id,
+                session_id,
+                type,
+                title,
+                content,
+                topic_key,
+                meta,
+                str(embedding),
+            ),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            """
+            INSERT INTO observations
+                (project_id, session_id, type, title, content, topic_key, metadata)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            RETURNING *
+            """,
+            (project_id, session_id, type, title, content, topic_key, meta),
+        ).fetchone()
     conn.commit()
     return dict(row)
 
@@ -296,3 +344,124 @@ def get_project_workspace(project_name: str) -> dict | None:
         (project_name,),
     ).fetchone()
     return dict(row) if row else None
+
+
+def search_similar(
+    project_id: str,
+    embedding: list[float],
+    limit: int = 10,
+    workspace_id: str | None = None,
+) -> list[dict]:
+    conn = get_connection()
+    query_embedding = str(embedding)
+    if workspace_id:
+        rows = conn.execute(
+            """
+            SELECT o.*, 1 - (o.embedding <=> %s::vector) AS similarity
+            FROM observations o
+            JOIN projects p ON p.id = o.project_id
+            WHERE o.project_id = %s
+              AND p.workspace_id = %s
+              AND o.deleted_at IS NULL
+              AND o.embedding IS NOT NULL
+            ORDER BY o.embedding <=> %s::vector
+            LIMIT %s
+            """,
+            (query_embedding, project_id, workspace_id, query_embedding, limit),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """
+            SELECT *, 1 - (embedding <=> %s::vector) AS similarity
+            FROM observations
+            WHERE project_id = %s
+              AND deleted_at IS NULL
+              AND embedding IS NOT NULL
+            ORDER BY embedding <=> %s::vector
+            LIMIT %s
+            """,
+            (query_embedding, project_id, query_embedding, limit),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def search_hybrid(
+    project_id: str,
+    query: str,
+    embedding: list[float],
+    limit: int = 10,
+    workspace_id: str | None = None,
+) -> list[dict]:
+    conn = get_connection()
+    query_embedding = str(embedding)
+    k = 60  # RRF constant
+
+    sql = """
+        WITH keyword AS (
+            SELECT id,
+                   ROW_NUMBER() OVER (
+                       ORDER BY
+                           ts_rank(search_vector, plainto_tsquery('simple', %s)) DESC
+                   ) AS rank
+            FROM observations
+            WHERE project_id = %s
+              AND deleted_at IS NULL
+              AND search_vector @@ plainto_tsquery('simple', %s)
+        ),
+        semantic AS (
+            SELECT id,
+                   ROW_NUMBER() OVER (ORDER BY embedding <=> %s::vector) AS rank
+            FROM observations
+            WHERE project_id = %s
+              AND deleted_at IS NULL
+              AND embedding IS NOT NULL
+        )
+        SELECT o.*,
+               COALESCE(1.0 / (%s + k.rank), 0)
+                   + COALESCE(1.0 / (%s + s.rank), 0) AS rrf_score
+        FROM observations o
+        LEFT JOIN keyword k ON o.id = k.id
+        LEFT JOIN semantic s ON o.id = s.id
+        WHERE o.project_id = %s
+          AND o.deleted_at IS NULL
+          AND (k.id IS NOT NULL OR s.id IS NOT NULL)
+        ORDER BY rrf_score DESC
+        LIMIT %s
+    """
+    params = [
+        query,
+        project_id,
+        query,
+        query_embedding,
+        project_id,
+        k,
+        k,
+        project_id,
+        limit,
+    ]
+    rows = conn.execute(sql, params).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_observations_without_embedding(
+    project_id: str, batch_size: int = 100
+) -> list[dict]:
+    conn = get_connection()
+    rows = conn.execute(
+        """
+        SELECT id, title, content FROM observations
+        WHERE project_id = %s AND embedding IS NULL AND deleted_at IS NULL
+        LIMIT %s
+        """,
+        (project_id, batch_size),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def update_observation_embedding(observation_id: str, embedding: list[float]) -> None:
+    conn = get_connection()
+    conn.execute(
+        "UPDATE observations SET embedding = %s WHERE id = %s",
+        (str(embedding), observation_id),
+    )
+    conn.commit()

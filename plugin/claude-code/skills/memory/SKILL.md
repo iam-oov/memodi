@@ -11,11 +11,14 @@ This protocol is MANDATORY and ALWAYS ACTIVE — not something you activate on d
 ## AVAILABLE TOOLS
 
 ### Memory (always use proactively)
-- `memodi_save` — save observations: decisions, bugs, discoveries, patterns
-- `memodi_search` — full-text search across all observations
+- `memodi_save` — save observations (auto-generates semantic embedding)
+- `memodi_search` — keyword search (exact words)
+- `memodi_search_similar` — semantic search (finds by meaning, not words)
+- `memodi_search_hybrid` — best of both: keyword + semantic with RRF scoring
 - `memodi_context` — load recent observations for a project
 - `memodi_list_projects` — list all known projects
-- `memodi_search_global` — search across ALL workspaces
+- `memodi_search_global` — keyword search across ALL workspaces
+- `memodi_backfill` — generate embeddings for old observations without them
 
 ### Workspace management
 - `memodi_check_workspace` — check if a project has a workspace
@@ -103,7 +106,7 @@ Call `memodi_save` IMMEDIATELY and WITHOUT BEING ASKED after any of these:
 
 When the user asks to recall something — any variation of "remember", "recall", "what did we do", "acordate", "que hicimos", or references to past work:
 1. Call `memodi_context` with the project name — gets recent observations
-2. If not found, call `memodi_search` with relevant keywords
+2. If not found, call `memodi_search_hybrid` — combines keyword + semantic
 3. Use `memodi_list_projects` if unsure which project to search
 
 Also search memory PROACTIVELY when:
@@ -111,6 +114,12 @@ Also search memory PROACTIVELY when:
 - Starting something that might have been done before
 - User mentions a topic you have no context on
 - User references another project — search that project's observations
+
+### Which search tool to use
+- `memodi_search` — when you know the exact words (e.g. "JWT", "LiveKit")
+- `memodi_search_similar` — when searching by concept (e.g. "how do we handle auth?")
+- `memodi_search_hybrid` — default choice, best results, combines both
+- `memodi_search_global` — when you need cross-workspace results
 
 ## WORKFLOW PROTOCOL (only when user requests it)
 

@@ -19,7 +19,10 @@ def save(
     metadata: dict | None = None,
 ) -> str:
     _ensure()
+    from memodi.embeddings import generate_embedding
+
     proj = repository.get_or_create_project(project)
+    embedding = generate_embedding(f"{title} {content}")
     obs = repository.save_observation(
         project_id=proj["id"],
         title=title,
@@ -27,6 +30,7 @@ def save(
         type=type,
         topic_key=topic_key,
         metadata=metadata,
+        embedding=embedding,
     )
     result = json.loads(json.dumps(obs, default=str))
     if proj.get("workspace_id") is None:
@@ -106,3 +110,51 @@ def check_workspace(project: str) -> str:
         {"linked": False, "available_workspaces": workspaces},
         default=str,
     )
+
+
+@handle_errors
+def search_similar(project: str, query: str, limit: int = 10) -> str:
+    _ensure()
+    from memodi.embeddings import generate_embedding
+
+    proj = repository.get_or_create_project(project)
+    embedding = generate_embedding(query)
+    results = repository.search_similar(
+        project_id=proj["id"],
+        embedding=embedding,
+        limit=limit,
+        workspace_id=proj.get("workspace_id"),
+    )
+    return json.dumps(results, default=str)
+
+
+@handle_errors
+def search_hybrid(project: str, query: str, limit: int = 10) -> str:
+    _ensure()
+    from memodi.embeddings import generate_embedding
+
+    proj = repository.get_or_create_project(project)
+    embedding = generate_embedding(query)
+    results = repository.search_hybrid(
+        project_id=proj["id"],
+        query=query,
+        embedding=embedding,
+        limit=limit,
+        workspace_id=proj.get("workspace_id"),
+    )
+    return json.dumps(results, default=str)
+
+
+@handle_errors
+def backfill_embeddings(project: str) -> str:
+    _ensure()
+    from memodi.embeddings import generate_embedding
+
+    proj = repository.get_or_create_project(project)
+    observations = repository.get_observations_without_embedding(proj["id"])
+    count = 0
+    for obs in observations:
+        embedding = generate_embedding(f"{obs['title']} {obs['content']}")
+        repository.update_observation_embedding(obs["id"], embedding)
+        count += 1
+    return json.dumps({"backfilled": count, "project": project})
