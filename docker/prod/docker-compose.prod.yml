@@ -1,41 +1,20 @@
 services:
-  db:
-    build:
-      context: ../..
-      dockerfile: docker/Dockerfile.db
-    container_name: memodi-db
-    environment:
-      POSTGRES_USER: ${MEMODI_DB_USER}
-      POSTGRES_PASSWORD: ${MEMODI_DB_PASSWORD}
-      POSTGRES_DB: ${MEMODI_DB_NAME}
-    volumes:
-      - /data/memodi/pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${MEMODI_DB_USER}"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-    networks:
-      - internal
-
   server:
     build:
       context: ../..
       dockerfile: docker/Dockerfile.mcp
     container_name: memodi-server
     environment:
-      MEMODI_DB_HOST: db
+      MEMODI_DB_HOST: host.docker.internal
       MEMODI_DB_PORT: 5432
       MEMODI_DB_USER: ${MEMODI_DB_USER}
       MEMODI_DB_PASSWORD: ${MEMODI_DB_PASSWORD}
       MEMODI_DB_NAME: ${MEMODI_DB_NAME}
-    depends_on:
-      db:
-        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     networks:
-      - internal
+      - memodi
 
   caddy:
     image: caddy:2-alpine
@@ -47,18 +26,16 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile
       - caddy_data:/data
       - caddy_config:/config
-    depends_on:
-      - server
-    restart: unless-stopped
     environment:
       MEMODI_API_KEY: ${MEMODI_API_KEY}
       MEMODI_DOMAIN: ${MEMODI_DOMAIN}
+    restart: unless-stopped
     networks:
-      - internal
+      - memodi
 
 volumes:
   caddy_data:
   caddy_config:
 
 networks:
-  internal:
+  memodi:
