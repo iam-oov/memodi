@@ -82,7 +82,7 @@
 
 - [ ] Dominio propio (reemplazar sslip.io)
 - [ ] Optimizar imagen Docker (ONNX en vez de PyTorch: 5.88GB → ~1.5GB)
-- [ ] CI/CD automatico (GitHub Actions → deploy)
+- [ ] CI/CD automatico (GitHub Actions → SSH deploy al server, sin entrar manual)
 - [ ] Monitoreo (health check endpoint + alertas)
 - [ ] Rate limiting en Caddy
 - [ ] Multi-user con API keys por usuario

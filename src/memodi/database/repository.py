@@ -333,6 +333,37 @@ def link_project_to_workspace(
     return get_or_create_project(project_name, workspace_id=ws["id"])
 
 
+def delete_workspace(workspace_name: str) -> bool:
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT id FROM workspaces WHERE name = %s",
+        (workspace_name,),
+    ).fetchone()
+    if not row:
+        return False
+    ws_id = row["id"]
+    conn.execute(
+        "UPDATE projects SET workspace_id = NULL WHERE workspace_id = %s",
+        (ws_id,),
+    )
+    conn.execute("DELETE FROM workspaces WHERE id = %s", (ws_id,))
+    conn.commit()
+    return True
+
+
+def rename_workspace(old_name: str, new_name: str) -> dict | None:
+    conn = get_connection()
+    row = conn.execute(
+        """
+        UPDATE workspaces SET name = %s, updated_at = now()
+        WHERE name = %s RETURNING *
+        """,
+        (new_name, old_name),
+    ).fetchone()
+    conn.commit()
+    return dict(row) if row else None
+
+
 def get_project_workspace(project_name: str) -> dict | None:
     conn = get_connection()
     row = conn.execute(

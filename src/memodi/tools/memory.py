@@ -100,6 +100,24 @@ def link_project(project: str, workspace: str) -> str:
 
 
 @handle_errors
+def delete_workspace(workspace: str) -> str:
+    _ensure()
+    deleted = repository.delete_workspace(workspace)
+    if deleted:
+        return json.dumps({"deleted": True, "workspace": workspace})
+    return json.dumps({"deleted": False, "error": f"Workspace '{workspace}' not found"})
+
+
+@handle_errors
+def rename_workspace(old_name: str, new_name: str) -> str:
+    _ensure()
+    result = repository.rename_workspace(old_name, new_name)
+    if result:
+        return json.dumps(result, default=str)
+    return json.dumps({"error": f"Workspace '{old_name}' not found"})
+
+
+@handle_errors
 def check_workspace(project: str) -> str:
     _ensure()
     ws = repository.get_project_workspace(project)

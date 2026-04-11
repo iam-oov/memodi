@@ -79,6 +79,18 @@ def memodi_check_workspace(project: str) -> str:
 
 
 @mcp.tool()
+def memodi_delete_workspace(workspace: str) -> str:
+    """Delete a workspace. Projects in it become unlinked."""
+    return memory.delete_workspace(workspace)
+
+
+@mcp.tool()
+def memodi_rename_workspace(old_name: str, new_name: str) -> str:
+    """Rename a workspace."""
+    return memory.rename_workspace(old_name, new_name)
+
+
+@mcp.tool()
 def memodi_search_similar(project: str, query: str, limit: int = 10) -> str:
     """Semantic search — find observations by meaning, not just keywords."""
     return memory.search_similar(project, query, limit)
