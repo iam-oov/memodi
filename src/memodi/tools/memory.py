@@ -1,0 +1,85 @@
+import json
+
+from memodi.config import settings
+from memodi.database import repository
+from memodi.database.connection import ensure_schema
+
+
+def _ensure() -> None:
+    ensure_schema()
+
+
+def _resolve_workspace() -> dict | None:
+    if settings.workspace:
+        return repository.get_or_create_workspace(settings.workspace)
+    return None
+
+
+def save(
+    project: str,
+    title: str,
+    content: str,
+    type: str,
+    topic_key: str | None = None,
+    metadata: dict | None = None,
+) -> str:
+    _ensure()
+    ws = _resolve_workspace()
+    workspace_id = ws["id"] if ws else None
+    proj = repository.get_or_create_project(project, workspace_id=workspace_id)
+    obs = repository.save_observation(
+        project_id=proj["id"],
+        title=title,
+        content=content,
+        type=type,
+        topic_key=topic_key,
+        metadata=metadata,
+    )
+    return json.dumps(obs, default=str)
+
+
+def search(
+    project: str,
+    query: str,
+    type: str | None = None,
+    limit: int = 10,
+) -> str:
+    _ensure()
+    ws = _resolve_workspace()
+    workspace_id = ws["id"] if ws else None
+    proj = repository.get_or_create_project(project, workspace_id=workspace_id)
+    results = repository.search_observations(
+        project_id=proj["id"],
+        query=query,
+        type=type,
+        limit=limit,
+        workspace_id=workspace_id,
+    )
+    return json.dumps(results, default=str)
+
+
+def context(project: str, limit: int = 20) -> str:
+    _ensure()
+    ws = _resolve_workspace()
+    workspace_id = ws["id"] if ws else None
+    proj = repository.get_or_create_project(project, workspace_id=workspace_id)
+    results = repository.get_recent_observations(
+        project_id=proj["id"],
+        limit=limit,
+        workspace_id=workspace_id,
+    )
+    return json.dumps(results, default=str)
+
+
+def list_projects() -> str:
+    _ensure()
+    ws = _resolve_workspace()
+    workspace_id = ws["id"] if ws else None
+    results = repository.list_projects(workspace_id=workspace_id)
+    return json.dumps(results, default=str)
+
+
+def search_global(query: str, type: str | None = None, limit: int = 10) -> str:
+    _ensure()
+    results = repository.search_observations_global(query=query, type=type, limit=limit)
+    return json.dumps(results, default=str)

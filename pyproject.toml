@@ -1,0 +1,51 @@
+[project]
+name = "memodi"
+version = "0.1.0"
+description = "Persistent distributed memory for AI coding agents via MCP"
+readme = "README.md"
+authors = [{ name = "osvaldo hinojosa", email = "osvaldo.javier14@gmail.com" }]
+requires-python = ">=3.12"
+dependencies = [
+    "mcp[cli]>=1.0.0",
+    "psycopg[binary]>=3.2.0",
+    "pydantic-settings>=2.0.0",
+]
+
+[project.scripts]
+memodi = "memodi.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/memodi"]
+
+[dependency-groups]
+dev = ["pytest>=8.0.0", "pytest-asyncio>=0.24.0", "ruff>=0.11.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "N",   # pep8-naming
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "SIM", # flake8-simplify
+    "TCH", # flake8-type-checking
+    "RUF", # ruff-specific
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["memodi"]

@@ -1,0 +1,250 @@
+import json
+
+from memodi.database.connection import get_connection
+
+ALLOWED_TYPES = {
+    "decision",
+    "bugfix",
+    "discovery",
+    "pattern",
+    "config",
+    "preference",
+    "architecture",
+}
+
+
+def get_or_create_workspace(name: str) -> dict:
+    conn = get_connection()
+    row = conn.execute("SELECT * FROM workspaces WHERE name = %s", (name,)).fetchone()
+    if row:
+        return dict(row)
+    row = conn.execute(
+        "INSERT INTO workspaces (name) VALUES (%s) RETURNING *", (name,)
+    ).fetchone()
+    conn.commit()
+    return dict(row)
+
+
+def get_or_create_project(name: str, workspace_id: str | None = None) -> dict:
+    conn = get_connection()
+    if workspace_id:
+        row = conn.execute(
+            "SELECT * FROM projects WHERE name = %s AND workspace_id = %s",
+            (name, workspace_id),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT * FROM projects WHERE name = %s AND workspace_id IS NULL",
+            (name,),
+        ).fetchone()
+    if row:
+        return dict(row)
+    row = conn.execute(
+        "INSERT INTO projects (name, workspace_id) VALUES (%s, %s) RETURNING *",
+        (name, workspace_id),
+    ).fetchone()
+    conn.commit()
+    return dict(row)
+
+
+def create_session(project_id: str) -> dict:
+    conn = get_connection()
+    row = conn.execute(
+        "INSERT INTO sessions (project_id) VALUES (%s) RETURNING *",
+        (project_id,),
+    ).fetchone()
+    conn.commit()
+    return dict(row)
+
+
+def end_session(session_id: str, summary: str | None = None) -> dict:
+    conn = get_connection()
+    row = conn.execute(
+        """
+        UPDATE sessions
+        SET ended_at = now(), summary = %s
+        WHERE id = %s
+        RETURNING *
+        """,
+        (summary, session_id),
+    ).fetchone()
+    conn.commit()
+    return dict(row)
+
+
+def save_observation(
+    project_id: str,
+    title: str,
+    content: str,
+    type: str,
+    topic_key: str | None = None,
+    session_id: str | None = None,
+    metadata: dict | None = None,
+) -> dict:
+    if type not in ALLOWED_TYPES:
+        raise ValueError(f"type must be one of: {', '.join(sorted(ALLOWED_TYPES))}")
+
+    conn = get_connection()
+    meta = json.dumps(metadata or {})
+
+    if topic_key:
+        existing = conn.execute(
+            """
+            SELECT id FROM observations
+            WHERE project_id = %s AND topic_key = %s AND deleted_at IS NULL
+            """,
+            (project_id, topic_key),
+        ).fetchone()
+        if existing:
+            row = conn.execute(
+                """
+                UPDATE observations
+                SET title = %s,
+                    content = %s,
+                    type = %s,
+                    session_id = %s,
+                    metadata = %s,
+                    revision_count = revision_count + 1,
+                    updated_at = now()
+                WHERE id = %s
+                RETURNING *
+                """,
+                (title, content, type, session_id, meta, existing["id"]),
+            ).fetchone()
+            conn.commit()
+            return dict(row)
+
+    row = conn.execute(
+        """
+        INSERT INTO observations
+            (project_id, session_id, type, title, content, topic_key, metadata)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        RETURNING *
+        """,
+        (project_id, session_id, type, title, content, topic_key, meta),
+    ).fetchone()
+    conn.commit()
+    return dict(row)
+
+
+def search_observations(
+    project_id: str,
+    query: str,
+    type: str | None = None,
+    limit: int = 10,
+    workspace_id: str | None = None,
+) -> list[dict]:
+    conn = get_connection()
+    if workspace_id:
+        base = """
+            SELECT o.*, ts_rank(o.search_vector, q) AS rank
+            FROM observations o
+            JOIN projects p ON p.id = o.project_id,
+            plainto_tsquery('english', %s) q
+            WHERE o.project_id = %s
+              AND p.workspace_id = %s
+              AND o.deleted_at IS NULL
+              AND o.search_vector @@ q
+        """
+        params: list = [query, project_id, workspace_id]
+    else:
+        base = """
+            SELECT *, ts_rank(search_vector, query) AS rank
+            FROM observations, plainto_tsquery('english', %s) query
+            WHERE project_id = %s
+              AND deleted_at IS NULL
+              AND search_vector @@ query
+        """
+        params = [query, project_id]
+
+    if type:
+        base += " AND o.type = %s" if workspace_id else " AND type = %s"
+        params.append(type)
+
+    base += " ORDER BY rank DESC LIMIT %s"
+    params.append(limit)
+
+    rows = conn.execute(base, params).fetchall()
+    return [dict(r) for r in rows]
+
+
+def search_observations_global(
+    query: str,
+    type: str | None = None,
+    limit: int = 10,
+) -> list[dict]:
+    conn = get_connection()
+    base = """
+        SELECT o.*, p.name AS project_name, ts_rank(o.search_vector, q) AS rank
+        FROM observations o
+        JOIN projects p ON p.id = o.project_id,
+        plainto_tsquery('english', %s) q
+        WHERE o.deleted_at IS NULL
+          AND o.search_vector @@ q
+    """
+    params: list = [query]
+
+    if type:
+        base += " AND o.type = %s"
+        params.append(type)
+
+    base += " ORDER BY rank DESC LIMIT %s"
+    params.append(limit)
+
+    rows = conn.execute(base, params).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_recent_observations(
+    project_id: str,
+    limit: int = 20,
+    workspace_id: str | None = None,
+) -> list[dict]:
+    conn = get_connection()
+    if workspace_id:
+        rows = conn.execute(
+            """
+            SELECT o.* FROM observations o
+            JOIN projects p ON p.id = o.project_id
+            WHERE o.project_id = %s
+              AND p.workspace_id = %s
+              AND o.deleted_at IS NULL
+            ORDER BY o.created_at DESC
+            LIMIT %s
+            """,
+            (project_id, workspace_id, limit),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """
+            SELECT * FROM observations
+            WHERE project_id = %s AND deleted_at IS NULL
+            ORDER BY created_at DESC
+            LIMIT %s
+            """,
+            (project_id, limit),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_observation(observation_id: str) -> dict | None:
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT * FROM observations WHERE id = %s AND deleted_at IS NULL",
+        (observation_id,),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def list_projects(workspace_id: str | None = None) -> list[dict]:
+    conn = get_connection()
+    if workspace_id:
+        rows = conn.execute(
+            "SELECT * FROM projects WHERE workspace_id = %s ORDER BY created_at DESC",
+            (workspace_id,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM projects ORDER BY created_at DESC"
+        ).fetchall()
+    return [dict(r) for r in rows]

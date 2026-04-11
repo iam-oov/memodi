@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "memodi": {
+      "command": "memodi",
+      "args": []
+    }
+  }
+}
