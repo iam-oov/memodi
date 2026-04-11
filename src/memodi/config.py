@@ -1,26 +1,8 @@
-from pathlib import Path
-
 from pydantic_settings import BaseSettings
 
 
-def _find_env_file() -> str | None:
-    candidates = [
-        Path.home() / ".config" / "memodi" / ".env",
-        Path(".env"),
-    ]
-    for path in candidates:
-        if path.is_file():
-            return str(path)
-    return None
-
-
 class Settings(BaseSettings):
-    model_config = {
-        "env_prefix": "MEMODI_",
-        "env_file": _find_env_file(),
-        "env_file_encoding": "utf-8",
-        "extra": "ignore",
-    }
+    model_config = {"env_prefix": "MEMODI_"}
 
     db_host: str = "localhost"
     db_port: int = 5432
