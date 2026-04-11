@@ -16,7 +16,7 @@ Los agentes de IA olvidan todo entre sesiones. Las soluciones existentes son:
 memodi combina tres capacidades en una sola instancia de PostgreSQL:
 - **Document store** (JSONB) — tareas, estado, decisiones, metadata
 - **Busqueda semantica** (pgvector) — "ya resolvimos algo parecido?"
-- **Grafo de conocimiento** (Apache AGE) — dependencias entre repos, relaciones entre modulos (Phase 4)
+- **Grafo de conocimiento** (Apache AGE) — dependencias entre repos, relaciones entre modulos, analisis de impacto
 
 ## Arquitectura
 
@@ -93,6 +93,15 @@ Abrí Claude Code en cualquier proyecto. El agente va a:
 | `memodi_backfill` | Generar embeddings para observaciones viejas |
 | `memodi_list_projects` | Listar proyectos conocidos |
 
+### Grafo de conocimiento (proactivo — el agente crea relaciones al descubrirlas)
+| Tool | Descripcion |
+|------|-------------|
+| `memodi_relate` | Crear relacion (ej: repo-a DEPENDS_ON repo-b) |
+| `memodi_dependencies` | Que depende de que |
+| `memodi_impact` | Analisis de impacto transitivo: "que se rompe si cambio X?" |
+| `memodi_graph_overview` | Resumen de todos los nodos y relaciones |
+| `memodi_remove_relation` | Eliminar una relacion |
+
 ### Workspaces (el agente pregunta al usuario)
 | Tool | Descripcion |
 |------|-------------|
@@ -111,6 +120,32 @@ Abrí Claude Code en cualquier proyecto. El agente va a:
 | `memodi_unify` | Cerrar el loop |
 | `memodi_progress` | Ver estado del workflow activo |
 | `memodi_task_update` | Actualizar estado de una tarea |
+
+## Modelo del grafo
+
+```
+Repo ──DEPENDS_ON──► Repo
+Repo ──CONTAINS────► Module
+Module ──AFFECTS───► Module
+```
+
+| Nodo | Propiedades | Ejemplo |
+|------|-------------|---------|
+| Repo | name, language, description | repo-a, Python |
+| Module | name, description | auth, database |
+
+| Relacion | De → A | Ejemplo |
+|----------|--------|---------|
+| DEPENDS_ON | Repo → Repo | repo-c depende de repo-a |
+| CONTAINS | Repo → Module | repo-a contiene auth |
+| AFFECTS | Module → Module | auth afecta a api |
+
+### Limitaciones conocidas de Apache AGE
+
+- **Sin union de tipos en paths variables**: `[:DEPENDS_ON|AFFECTS*1..5]` no funciona. AGE no soporta el operador `|` en variable-length patterns. El impact analysis usa un solo tipo de relacion por query.
+- **Sin parametros Cypher**: AGE no soporta `$1`, `$2` en Cypher. Los valores se interpolan directamente en el query string.
+- **LOAD requerido por conexion**: Cada conexion necesita `LOAD 'age'` y `SET search_path` antes de cualquier operacion de grafo.
+- **agtype**: AGE devuelve un tipo custom `agtype` que necesita casteo a JSON/text para Python.
 
 ## Desarrollo
 

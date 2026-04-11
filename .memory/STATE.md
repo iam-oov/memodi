@@ -2,8 +2,8 @@
 
 ## Current Position
 
-- **Phase**: 3 — Vector Search (COMPLETE)
-- **Status**: Ready for Phase 4 (Knowledge Graph) or Phase 5 (Production)
+- **Phase**: 4 — Knowledge Graph (COMPLETE)
+- **Status**: Ready for Phase 5 (Production deployment)
 - **Last Activity**: 2026-04-11
 
 ## Completed
@@ -12,11 +12,12 @@
 - Phase 1: Document store (JSONB), FTS (tsvector), save/search/context/list_projects
 - Phase 2: Workflow engine (Plan/Apply/Verify/Unify), state machine, transition validation
 - Phase 2.5: Quality pass — HTTP transport, plugin structure, error handling, security
-- Phase 3: Vector search — pgvector HNSW, sentence-transformers multilingual, RRF hybrid search
+- Phase 3: Vector search — pgvector HNSW, sentence-transformers multilingual, RRF hybrid
+- Phase 4: Knowledge graph — Apache AGE, Cypher, dependency tracking, impact analysis
 
 ## Active Work
 
-- Next: Phase 4 (Knowledge Graph) OR Phase 5 (Production deployment)
+- Next: Phase 5 (Production deployment to Hetzner or similar)
 
 ## Decisions Made
 
@@ -34,3 +35,9 @@
 - Hybrid search: RRF (Reciprocal Rank Fusion) with k=60
 - Embedding generation: lazy loading, at save time
 - Docker image: 5.88GB with PyTorch (optimize to ~1.5GB with ONNX in Phase 5)
+- Graph: Apache AGE with Cypher, graph name 'memodi'
+- Graph creation in Python (not SQL migration) due to LOAD 'age' requirement
+- AGE limitation: no union types in variable-length paths (|)
+- AGE limitation: no parameterized Cypher queries
+- Workspace/Team NOT in graph — already in relational tables
+- Edge upsert via DELETE+CREATE (AGE MERGE for edges is limited)

@@ -54,14 +54,16 @@
 - [x] Docker image with model pre-downloaded
 - [x] SKILL updated with search strategy guide
 
-## Phase 4 — Knowledge Graph
+## Phase 4 — Knowledge Graph (DONE)
 > Apache AGE for relationship traversal and impact analysis
 
-- [ ] AGE graph schema: repos, modules, teams, tasks
-- [ ] MCP tools: `relate`, `dependencies`, `impact_analysis`
-- [ ] Relationship types: depends_on, affects, owned_by, part_of
-- [ ] Traversal queries: "what breaks if I change X?"
-- [ ] Cross-workspace relationship visibility
+- [x] AGE connection helper (LOAD, search_path, agtype parsing)
+- [x] Graph schema: Repo, Module nodes + DEPENDS_ON, CONTAINS, AFFECTS edges
+- [x] MCP tools: relate, dependencies, impact, graph_overview, remove_relation
+- [x] Transitive impact analysis (variable-length Cypher paths)
+- [x] Edge upsert (DELETE+CREATE pattern)
+- [x] SKILL updated with proactive relationship creation
+- [x] Documented AGE limitations (no union in paths, no params, LOAD per conn)
 
 ## Phase 5 — Production Deployment
 > Deploy to Hetzner, production-ready

@@ -19,7 +19,7 @@ Claude Code ──HTTP──► memodi-server (Docker, port 8787) ──► Post
 | Workflow Engine | JSONB | Plan/Apply/Verify/Unify cycle | Done |
 | Workspace Scoping | FK relations | Multi-workspace isolation | Done |
 | Vector Search | pgvector | Semantic similarity (cosine, HNSW, 384d) | Done |
-| Knowledge Graph | Apache AGE | Relationships: repos, modules, teams | Phase 4 |
+| Knowledge Graph | Apache AGE | Dependencies, impact analysis (Cypher) | Done |
 
 ## Tech Stack
 
@@ -48,6 +48,14 @@ The skill tells Claude WHEN and WHY to use memory. The MCP server handles HOW.
 - Tests required for every tool exposed via MCP
 - Conventional commits (no AI attribution)
 - Migrations in src/memodi/migrations/ (package-relative)
+
+## Apache AGE Gotchas
+
+- Every connection needs `LOAD 'age'` + `SET search_path = ag_catalog, "$user", public` before graph ops
+- AGE does NOT support parameterized Cypher ($1, $2) — values are interpolated
+- AGE does NOT support `|` union in variable-length paths (e.g. `[:A|B*1..5]`)
+- `agtype` results must be cast to JSON/text for Python consumption
+- Graph creation (`ensure_graph()`) is in Python, not SQL migrations, because of LOAD requirement
 
 ## Rules
 
