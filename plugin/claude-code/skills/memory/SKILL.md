@@ -46,27 +46,32 @@ This protocol is MANDATORY and ALWAYS ACTIVE — not something you activate on d
 - `memodi_ping` — check if server is alive
 - `memodi_status` — check database health and extensions
 
-## WORKSPACE ONBOARDING (mandatory on first interaction with a project)
+## WORKSPACE AUTO-DETECTION (mandatory at session start)
 
-Before the FIRST `memodi_save` for a project, check if it has a workspace:
+At the START of every session, before any save or search:
 
-1. Call `memodi_check_workspace` with the project name (derive from working directory)
-2. If `linked: true` → proceed normally, workspace is set
-3. If `linked: false`:
-   a. Call `memodi_list_workspaces` to get existing workspaces
-   b. Show the user the available workspaces with their project count
-   c. Ask: "Este proyecto no tiene workspace. ¿Lo linkeo a uno existente o creo uno nuevo?"
-   d. WAIT for the user's answer — do NOT assume or continue
-   e. Call `memodi_link_project` with the user's choice
+1. Get the current working directory (pwd)
+2. Call `memodi_resolve_path` with the full path
+3. If `resolved: true` → workspace is known, use it for all operations. Derive project name from the last directory component of pwd.
+4. If `resolved: false` → this is a new path, run ONBOARDING below
+
+## WORKSPACE ONBOARDING (only for new/unregistered paths)
+
+1. Call `memodi_list_workspaces` to get existing workspaces
+2. Show the user the available workspaces with their project count
+3. Ask: "Este directorio no esta registrado. ¿A que workspace pertenece?"
+4. WAIT for the user's answer — do NOT assume or continue
+5. Call `memodi_register_path` with the full pwd path and the workspace name
+6. Call `memodi_link_project` with the project name (last dir component) and workspace
 
 ### Workspace naming rules
 - Use SHORT DESCRIPTIVE names: "trabajo", "personal", "tesis", "escuela"
 - NEVER use file paths as workspace names
 - NEVER use project names as workspace names
 - A workspace groups MULTIPLE related projects
-- Examples: "trabajo" contains repo-a, repo-b, repo-c, repo-d
+- Examples: "phone-call-memodi" contains repo-a, repo-b, repo-c, repo-d
 
-This check only happens ONCE per project. After linking, all future saves go through automatically.
+This registration happens ONCE per path. After that, memodi auto-detects the workspace from the directory.
 
 ## PROACTIVE SAVE TRIGGERS (mandatory — do NOT wait for user to ask)
 

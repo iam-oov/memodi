@@ -79,6 +79,18 @@ def memodi_link_project(project: str, workspace: str) -> str:
 
 
 @mcp.tool()
+def memodi_register_path(path: str, workspace: str) -> str:
+    """Register a path to a workspace. Multiple paths per workspace."""
+    return memory.register_path(path, workspace)
+
+
+@mcp.tool()
+def memodi_resolve_path(path: str) -> str:
+    """Resolve a path to its workspace. Use with pwd."""
+    return memory.resolve_path(path)
+
+
+@mcp.tool()
 def memodi_check_workspace(project: str) -> str:
     """Check if a project has a workspace. Lists available ones if not."""
     return memory.check_workspace(project)

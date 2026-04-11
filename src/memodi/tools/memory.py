@@ -100,6 +100,24 @@ def link_project(project: str, workspace: str) -> str:
 
 
 @handle_errors
+def register_path(path: str, workspace: str) -> str:
+    _ensure()
+    result = repository.register_path(path, workspace)
+    return json.dumps(result, default=str)
+
+
+@handle_errors
+def resolve_path(path: str) -> str:
+    _ensure()
+    ws = repository.resolve_path(path)
+    if ws:
+        return json.dumps(
+            {"resolved": True, "workspace": ws}, default=str
+        )
+    return json.dumps({"resolved": False, "path": path})
+
+
+@handle_errors
 def delete_workspace(workspace: str) -> str:
     _ensure()
     deleted = repository.delete_workspace(workspace)

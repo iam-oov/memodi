@@ -333,6 +333,48 @@ def link_project_to_workspace(
     return get_or_create_project(project_name, workspace_id=ws["id"])
 
 
+def register_path(path: str, workspace_name: str) -> dict:
+    conn = get_connection()
+    ws = get_or_create_workspace(workspace_name)
+    existing = conn.execute(
+        "SELECT * FROM workspace_paths WHERE path = %s",
+        (path,),
+    ).fetchone()
+    if existing:
+        conn.execute(
+            """
+            UPDATE workspace_paths
+            SET workspace_id = %s WHERE path = %s
+            RETURNING *
+            """,
+            (ws["id"], path),
+        )
+        conn.commit()
+    else:
+        conn.execute(
+            """
+            INSERT INTO workspace_paths (workspace_id, path)
+            VALUES (%s, %s)
+            """,
+            (ws["id"], path),
+        )
+        conn.commit()
+    return {"path": path, "workspace": workspace_name}
+
+
+def resolve_path(path: str) -> dict | None:
+    conn = get_connection()
+    row = conn.execute(
+        """
+        SELECT w.* FROM workspaces w
+        JOIN workspace_paths wp ON wp.workspace_id = w.id
+        WHERE wp.path = %s
+        """,
+        (path,),
+    ).fetchone()
+    return dict(row) if row else None
+
+
 def delete_workspace(workspace_name: str) -> bool:
     conn = get_connection()
     row = conn.execute(
@@ -342,6 +384,10 @@ def delete_workspace(workspace_name: str) -> bool:
     if not row:
         return False
     ws_id = row["id"]
+    conn.execute(
+        "DELETE FROM workspace_paths WHERE workspace_id = %s",
+        (ws_id,),
+    )
     conn.execute(
         "UPDATE projects SET workspace_id = NULL WHERE workspace_id = %s",
         (ws_id,),
