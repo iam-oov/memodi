@@ -15,7 +15,7 @@ Los agentes de IA olvidan todo entre sesiones. Las soluciones existentes son:
 
 memodi combina tres capacidades en una sola instancia de PostgreSQL:
 - **Document store** (JSONB) — tareas, estado, decisiones, metadata
-- **Busqueda semantica** (pgvector) — "ya resolvimos algo parecido?" (Phase 3)
+- **Busqueda semantica** (pgvector) — "ya resolvimos algo parecido?"
 - **Grafo de conocimiento** (Apache AGE) — dependencias entre repos, relaciones entre modulos (Phase 4)
 
 ## Arquitectura
@@ -84,10 +84,13 @@ Abrí Claude Code en cualquier proyecto. El agente va a:
 ### Memoria (proactivo — el agente los usa sin que le pidas)
 | Tool | Descripcion |
 |------|-------------|
-| `memodi_save` | Guardar observacion (decision, bug, descubrimiento) |
-| `memodi_search` | Buscar por texto en las observaciones |
+| `memodi_save` | Guardar observacion (auto-genera embedding semantico) |
+| `memodi_search` | Buscar por keywords exactos |
+| `memodi_search_similar` | Buscar por significado (semantica) |
+| `memodi_search_hybrid` | Mejor de ambos: keyword + semantica con RRF |
 | `memodi_context` | Cargar contexto reciente de un proyecto |
-| `memodi_search_global` | Buscar en TODOS los workspaces |
+| `memodi_search_global` | Buscar keywords en TODOS los workspaces |
+| `memodi_backfill` | Generar embeddings para observaciones viejas |
 | `memodi_list_projects` | Listar proyectos conocidos |
 
 ### Workspaces (el agente pregunta al usuario)

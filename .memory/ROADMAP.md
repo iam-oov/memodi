@@ -41,14 +41,18 @@
 - [x] Migrations in package (src/memodi/migrations/)
 - [x] .dockerignore
 
-## Phase 3 — Vector Search (NEXT)
+## Phase 3 — Vector Search (DONE)
 > pgvector + embeddings for semantic similarity
 
-- [ ] pgvector schema and indexes
-- [ ] Embedding generation (sentence-transformers or API)
-- [ ] MCP tool: `search_similar`
-- [ ] Auto-embed on save (decisions, code deltas)
-- [ ] Cosine similarity queries
+- [x] pgvector schema (vector(384)) + HNSW index (cosine)
+- [x] Embedding model: paraphrase-multilingual-MiniLM-L12-v2 (ES+EN)
+- [x] Auto-embed on save (title + content)
+- [x] MCP tool: `search_similar` (semantic only)
+- [x] MCP tool: `search_hybrid` (RRF keyword + semantic)
+- [x] MCP tool: `backfill` (embed old observations)
+- [x] Lazy model loading (first search, not startup)
+- [x] Docker image with model pre-downloaded
+- [x] SKILL updated with search strategy guide
 
 ## Phase 4 — Knowledge Graph
 > Apache AGE for relationship traversal and impact analysis

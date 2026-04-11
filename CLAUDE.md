@@ -18,7 +18,7 @@ Claude Code ──HTTP──► memodi-server (Docker, port 8787) ──► Post
 | Full-text Search | tsvector (simple) | Keyword search multi-language | Done |
 | Workflow Engine | JSONB | Plan/Apply/Verify/Unify cycle | Done |
 | Workspace Scoping | FK relations | Multi-workspace isolation | Done |
-| Vector Search | pgvector | Semantic similarity (cosine distance) | Phase 3 |
+| Vector Search | pgvector | Semantic similarity (cosine, HNSW, 384d) | Done |
 | Knowledge Graph | Apache AGE | Relationships: repos, modules, teams | Phase 4 |
 
 ## Tech Stack
@@ -26,6 +26,7 @@ Claude Code ──HTTP──► memodi-server (Docker, port 8787) ──► Post
 - **Language**: Python 3.12+
 - **MCP SDK**: FastMCP (streamable-http transport)
 - **Database**: PostgreSQL 16+ (pgvector + Apache AGE)
+- **Embeddings**: paraphrase-multilingual-MiniLM-L12-v2 (384d, ES+EN)
 - **Infra**: Docker Compose (DB + server)
 - **Config**: System env vars with MEMODI_ prefix
 
