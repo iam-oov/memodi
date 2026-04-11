@@ -7,14 +7,13 @@ class Settings(BaseSettings):
         "env_prefix": "MEMODI_",
         "env_file": ".env",
         "env_file_encoding": "utf-8",
-        "env_ignore_empty": True,
         "extra": "ignore",
     }
 
     db_host: str = "localhost"
     db_port: int = 5432
-    db_user: str = "memodi"
-    db_password: str = "memodi_dev"
+    db_user: str
+    db_password: str
     db_name: str = "memodi"
     workspace: str | None = None
 
