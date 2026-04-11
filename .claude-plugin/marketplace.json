@@ -1,0 +1,22 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "memodi",
+  "description": "Persistent distributed memory for AI coding agents — PostgreSQL-backed with FTS, workflow engine, and workspace scoping",
+  "owner": {
+    "name": "Osvaldo Hinojosa",
+    "email": "osvaldo.javier14@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "memodi",
+      "description": "Persistent distributed memory with workspace scoping, full-text search, and workflow engine. Gives Claude memory that persists across sessions and projects.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Osvaldo Hinojosa"
+      },
+      "source": "./plugin/claude-code",
+      "category": "productivity",
+      "homepage": "https://github.com/iam-oov/memodi"
+    }
+  ]
+}
