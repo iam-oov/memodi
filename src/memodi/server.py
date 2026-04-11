@@ -144,7 +144,7 @@ def main():
     import sys
 
     if "--http" in sys.argv:
-        mcp.run(transport="sse")
+        mcp.run(transport="streamable-http")
     else:
         mcp.run(transport="stdio")
 
