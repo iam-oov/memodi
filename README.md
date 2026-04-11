@@ -21,8 +21,8 @@ memodi combina tres capacidades en una sola instancia de PostgreSQL:
 ## Arquitectura
 
 ```
-Claude Code ──HTTP──► memodi-server (Docker) ──► PostgreSQL
-  (cerebro)          (puerto 8787)               (JSONB + pgvector + AGE)
+Internet ──HTTPS──► Caddy (auth + TLS) ──► memodi-server (uv + systemd) ──► PostgreSQL
+                    puerto 443              puerto 8787                       nativo en SSD
 ```
 
 Claude decide que vale la pena recordar. memodi persiste y consulta. Sin llamadas extra a LLMs — Claude ya esta ahi.
@@ -31,28 +31,7 @@ El agente usa memodi de forma PROACTIVA — guarda decisiones, bugs y descubrimi
 
 ## Quick Start
 
-### 1. Configurar variables de entorno
-
-Agregar a `~/.zshrc` o `~/.bashrc`:
-
-```bash
-export MEMODI_DB_HOST=localhost
-export MEMODI_DB_USER=memodi
-export MEMODI_DB_PASSWORD=memodi_dev
-export MEMODI_DB_NAME=memodi
-```
-
-### 2. Levantar los servicios
-
-```bash
-docker compose up -d
-```
-
-Esto levanta:
-- **memodi-db** — PostgreSQL 16 con pgvector y Apache AGE
-- **memodi-server** — servidor MCP HTTP en puerto 8787
-
-### 3. Instalar el plugin en Claude Code
+### 1. Instalar el plugin en Claude Code
 
 En `~/.claude/settings.json`:
 
@@ -72,14 +51,39 @@ En `~/.claude/settings.json`:
 }
 ```
 
-### 4. Listo
+### 2. Conectar a produccion
 
-Abrí Claude Code en cualquier proyecto. El agente va a:
+Crear `.mcp.json` en la raiz del proyecto:
+
+```json
+{
+  "mcpServers": {
+    "memodi": {
+      "type": "http",
+      "url": "https://tu-server/mcp",
+      "headers": {
+        "X-Api-Key": "TU_API_KEY"
+      }
+    }
+  }
+}
+```
+
+### 3. Listo
+
+Abri Claude Code en cualquier proyecto. El agente va a:
 1. Detectar que es un proyecto nuevo
-2. Preguntarte a que workspace queres linkarlo
+2. Listar workspaces existentes y preguntarte a cual linkarlo
 3. Empezar a guardar decisiones automaticamente
 
-## Tools MCP disponibles
+## Tools MCP (31 tools)
+
+### Sistema
+| Tool | Descripcion |
+|------|-------------|
+| `memodi_ping` | Verificar que el server esta vivo |
+| `memodi_status` | Salud del server y extensiones de PostgreSQL |
+| `memodi_version` | Version del server en produccion |
 
 ### Memoria (proactivo — el agente los usa sin que le pidas)
 | Tool | Descripcion |
@@ -102,12 +106,14 @@ Abrí Claude Code en cualquier proyecto. El agente va a:
 | `memodi_graph_overview` | Resumen de todos los nodos y relaciones |
 | `memodi_remove_relation` | Eliminar una relacion |
 
-### Workspaces (el agente pregunta al usuario)
+### Workspaces
 | Tool | Descripcion |
 |------|-------------|
 | `memodi_check_workspace` | Verificar si un proyecto tiene workspace |
 | `memodi_link_project` | Linkar proyecto a un workspace |
 | `memodi_list_workspaces` | Listar workspaces disponibles |
+| `memodi_delete_workspace` | Eliminar un workspace |
+| `memodi_rename_workspace` | Renombrar un workspace |
 
 ### Workflow (solo cuando el usuario pide planificacion)
 | Tool | Descripcion |
@@ -142,53 +148,50 @@ Module ──AFFECTS───► Module
 
 ### Limitaciones conocidas de Apache AGE
 
-- **Sin union de tipos en paths variables**: `[:DEPENDS_ON|AFFECTS*1..5]` no funciona. AGE no soporta el operador `|` en variable-length patterns. El impact analysis usa un solo tipo de relacion por query.
-- **Sin parametros Cypher**: AGE no soporta `$1`, `$2` en Cypher. Los valores se interpolan directamente en el query string.
-- **LOAD requerido por conexion**: Cada conexion necesita `LOAD 'age'` y `SET search_path` antes de cualquier operacion de grafo.
-- **agtype**: AGE devuelve un tipo custom `agtype` que necesita casteo a JSON/text para Python.
+- **Sin union de tipos en paths variables**: `[:DEPENDS_ON|AFFECTS*1..5]` no funciona en variable-length patterns
+- **Sin parametros Cypher**: los valores se interpolan directamente en el query string
+- **LOAD requerido por conexion**: cada conexion necesita `LOAD 'age'` y `SET search_path`
 
 ## Produccion
 
-memodi corre en Hetzner CX23 con PostgreSQL nativo y Caddy para HTTPS.
+### Stack
+- **Server**: Hetzner CX23 (2 vCPU, 4GB RAM, Ubuntu 24)
+- **PostgreSQL 16**: nativo en SSD con pgvector + Apache AGE
+- **memodi-server**: Python via uv + systemd (puerto 8787)
+- **Caddy**: Docker, HTTPS automatico + API key auth
+- **CI/CD**: GitHub Actions — push a main → test → deploy automatico
 
-```
-Internet ──HTTPS──► Caddy (auth + TLS) ──► memodi-server ──► PostgreSQL
-                    puerto 443              puerto 8787       nativo en SSD
-```
-
-### Conectar un proyecto a produccion
-
-Crear `.mcp.json` en la raiz del proyecto:
-
-```json
-{
-  "mcpServers": {
-    "memodi": {
-      "type": "http",
-      "url": "https://62-238-15-94.sslip.io/mcp",
-      "headers": {
-        "X-Api-Key": "TU_API_KEY"
-      }
-    }
-  }
-}
-```
-
-### Deploy updates
+### Deploy manual (si es necesario)
 
 ```bash
-ssh memodi@62.238.15.94
-cd memodi && git pull
-cd docker/prod && docker compose -f docker-compose.prod.yml up -d --build
+ssh memodi@tu-server
+cd memodi && git pull && ~/.local/bin/uv sync
+sudo systemctl restart memodi
 ```
 
-## Desarrollo
+### Backups
 
 ```bash
+# Diario automatico via cron
+0 3 * * * source /home/memodi/memodi/docker/prod/.env && /home/memodi/memodi/docker/prod/backup.sh
+
+# Restore
+./docker/prod/restore.sh /data/memodi/backups/memodi_20260411.sql.gz
+```
+
+## Desarrollo local
+
+```bash
+# Levantar PostgreSQL local
+docker compose up -d
+
+# Configurar env vars
+export MEMODI_DB_USER=memodi MEMODI_DB_PASSWORD=memodi_dev
+
 # Instalar dependencias
 uv sync
 
-# Correr tests (necesita env vars y DB corriendo)
+# Correr tests
 uv run pytest -v
 
 # Lint
