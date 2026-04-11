@@ -61,9 +61,8 @@ jobs:
           host: ${{ secrets.HETZNER_HOST }}
           username: memodi
           key: ${{ secrets.HETZNER_SSH_KEY }}
-          command_timeout: 10m
           script: |
             cd memodi
             git pull origin main
-            cd docker/prod
-            docker compose -f docker-compose.prod.yml up -d --build
+            ~/.local/bin/uv sync
+            sudo systemctl restart memodi

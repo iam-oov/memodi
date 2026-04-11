@@ -1,0 +1,17 @@
+[Unit]
+Description=Memodi MCP Server
+After=postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=memodi
+WorkingDirectory=/home/memodi/memodi
+EnvironmentFile=/home/memodi/memodi/docker/prod/.env
+Environment=MEMODI_DB_HOST=localhost
+ExecStart=/home/memodi/.local/bin/uv run memodi --http
+Restart=unless-stopped
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
