@@ -25,6 +25,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Enable pgvector extension
+        env:
+          PGPASSWORD: memodi_dev
+        run: psql -h localhost -U memodi -d memodi -c "CREATE EXTENSION IF NOT EXISTS vector;"
+
       - uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
@@ -41,6 +46,7 @@ jobs:
           MEMODI_DB_PASSWORD: memodi_dev
           MEMODI_DB_NAME: memodi
           MEMODI_DB_HOST: localhost
+          CI: "true"
         run: uv run pytest -v
 
   deploy:

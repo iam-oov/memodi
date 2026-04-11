@@ -1,10 +1,16 @@
 import json
+import os
 
 import pytest
 
-from memodi.database.connection import ensure_schema, get_connection
-from memodi.database.graph import _prepare_connection, ensure_graph
-from memodi.tools.graph import (
+pytestmark = pytest.mark.skipif(
+    os.environ.get("CI") == "true",
+    reason="Apache AGE not available in CI",
+)
+
+from memodi.database.connection import ensure_schema, get_connection  # noqa: E402
+from memodi.database.graph import _prepare_connection, ensure_graph  # noqa: E402
+from memodi.tools.graph import (  # noqa: E402
     dependencies,
     graph_overview,
     impact_analysis,
