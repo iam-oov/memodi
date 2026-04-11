@@ -248,3 +248,51 @@ def list_projects(workspace_id: str | None = None) -> list[dict]:
             "SELECT * FROM projects ORDER BY created_at DESC"
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def list_workspaces() -> list[dict]:
+    conn = get_connection()
+    rows = conn.execute("""
+        SELECT w.*, COUNT(p.id) AS project_count
+        FROM workspaces w
+        LEFT JOIN projects p ON p.workspace_id = w.id
+        GROUP BY w.id
+        ORDER BY w.created_at DESC
+    """).fetchall()
+    return [dict(r) for r in rows]
+
+
+def link_project_to_workspace(
+    project_name: str,
+    workspace_name: str,
+) -> dict:
+    conn = get_connection()
+    ws = get_or_create_workspace(workspace_name)
+    row = conn.execute(
+        "SELECT * FROM projects WHERE name = %s AND workspace_id IS NULL",
+        (project_name,),
+    ).fetchone()
+    if row:
+        row = conn.execute(
+            """
+            UPDATE projects SET workspace_id = %s, updated_at = now()
+            WHERE id = %s RETURNING *
+            """,
+            (ws["id"], row["id"]),
+        ).fetchone()
+        conn.commit()
+        return dict(row)
+    return get_or_create_project(project_name, workspace_id=ws["id"])
+
+
+def get_project_workspace(project_name: str) -> dict | None:
+    conn = get_connection()
+    row = conn.execute(
+        """
+        SELECT w.* FROM workspaces w
+        JOIN projects p ON p.workspace_id = w.id
+        WHERE p.name = %s
+        """,
+        (project_name,),
+    ).fetchone()
+    return dict(row) if row else None

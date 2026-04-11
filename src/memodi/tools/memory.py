@@ -83,3 +83,27 @@ def search_global(query: str, type: str | None = None, limit: int = 10) -> str:
     _ensure()
     results = repository.search_observations_global(query=query, type=type, limit=limit)
     return json.dumps(results, default=str)
+
+
+def list_workspaces() -> str:
+    _ensure()
+    results = repository.list_workspaces()
+    return json.dumps(results, default=str)
+
+
+def link_project(project: str, workspace: str) -> str:
+    _ensure()
+    result = repository.link_project_to_workspace(project, workspace)
+    return json.dumps(result, default=str)
+
+
+def check_workspace(project: str) -> str:
+    _ensure()
+    ws = repository.get_project_workspace(project)
+    if ws:
+        return json.dumps({"linked": True, "workspace": ws}, default=str)
+    workspaces = repository.list_workspaces()
+    return json.dumps(
+        {"linked": False, "available_workspaces": workspaces},
+        default=str,
+    )

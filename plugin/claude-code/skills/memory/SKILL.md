@@ -15,6 +15,12 @@ This protocol is MANDATORY and ALWAYS ACTIVE — not something you activate on d
 - `memodi_search` — full-text search across all observations
 - `memodi_context` — load recent observations for a project
 - `memodi_list_projects` — list all known projects
+- `memodi_search_global` — search across ALL workspaces
+
+### Workspace management
+- `memodi_check_workspace` — check if a project has a workspace
+- `memodi_link_project` — link a project to a workspace
+- `memodi_list_workspaces` — list all workspaces with project count
 
 ### Workflow (only when user requests structured work)
 - `memodi_plan` — start a new workflow plan
@@ -29,6 +35,21 @@ This protocol is MANDATORY and ALWAYS ACTIVE — not something you activate on d
 ### System
 - `memodi_ping` — check if server is alive
 - `memodi_status` — check database health and extensions
+
+## WORKSPACE ONBOARDING (mandatory on first interaction with a project)
+
+Before the FIRST `memodi_save` for a project, check if it has a workspace:
+
+1. Call `memodi_check_workspace` with the project name (derive from working directory)
+2. If `linked: true` → proceed normally, workspace is set
+3. If `linked: false` → ASK the user:
+   - Show the available workspaces from the response
+   - Ask: "This project has no workspace. Link it to an existing one or create a new one?"
+   - WAIT for the user's answer — do NOT assume or continue
+4. Call `memodi_link_project` with the user's choice
+5. Then proceed with the save
+
+This check only happens ONCE per project. After linking, all future saves go through automatically.
 
 ## PROACTIVE SAVE TRIGGERS (mandatory — do NOT wait for user to ask)
 

@@ -63,6 +63,24 @@ def memodi_search_global(
 
 
 @mcp.tool()
+def memodi_list_workspaces() -> str:
+    """List all workspaces with their project count."""
+    return memory.list_workspaces()
+
+
+@mcp.tool()
+def memodi_link_project(project: str, workspace: str) -> str:
+    """Link a project to a workspace. Creates the workspace if it doesn't exist."""
+    return memory.link_project(project, workspace)
+
+
+@mcp.tool()
+def memodi_check_workspace(project: str) -> str:
+    """Check if a project has a workspace. Lists available ones if not."""
+    return memory.check_workspace(project)
+
+
+@mcp.tool()
 def memodi_plan(project: str, name: str, objective: str) -> str:
     """Start a new workflow plan. Returns active workflow if one exists."""
     return workflow.plan(project, name, objective)

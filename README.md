@@ -1,44 +1,44 @@
 # memodi
 
-**Memoria Distribuida** — Persistent, distributed memory for AI coding agents.
+**Memoria Distribuida** — Memoria persistente y distribuida para agentes de IA.
 
-## What is memodi?
+## Que es memodi?
 
-An MCP server that gives Claude Code (and any MCP-compatible agent) persistent memory distributed across workspaces and projects. Think of it as `git pull` for context — switch projects and pick up exactly where things left off.
+Un servidor MCP que le da a Claude Code (y a cualquier agente compatible con MCP) memoria persistente distribuida entre workspaces y proyectos. Pensalo como `git pull` para contexto — cambias de proyecto y retomas exactamente donde quedaste.
 
-## Why?
+## Por que?
 
-AI agents forget everything between sessions. Existing solutions are either:
-- **Local-only** (SQLite) — can't share across teams
-- **Too heavy** (full knowledge graph infra) — overkill for small teams
-- **No relationships** — can't answer "what breaks if I change this?"
+Los agentes de IA olvidan todo entre sesiones. Las soluciones existentes son:
+- **Solo locales** (SQLite) — no se pueden compartir entre equipos
+- **Demasiado pesadas** (infra completa de knowledge graph) — overkill para equipos chicos
+- **Sin relaciones** — no pueden responder "que se rompe si cambio esto?"
 
-memodi combines three capabilities in one PostgreSQL instance:
-- **Document store** (JSONB) — tasks, state, decisions, metadata
-- **Semantic search** (pgvector) — "have we solved something similar?"
-- **Knowledge graph** (Apache AGE) — repo dependencies, module relationships, impact analysis
+memodi combina tres capacidades en una sola instancia de PostgreSQL:
+- **Document store** (JSONB) — tareas, estado, decisiones, metadata
+- **Busqueda semantica** (pgvector) — "ya resolvimos algo parecido?"
+- **Grafo de conocimiento** (Apache AGE) — dependencias entre repos, relaciones entre modulos, analisis de impacto
 
 ## Quick Start
 
 ```bash
-# Start the database
+# Levantar la base de datos
 docker compose up -d
 
-# Install memodi
+# Instalar memodi
 pip install -e .
 
-# Connect from Claude Code via .mcp.json
+# Conectar desde Claude Code via .mcp.json
 ```
 
-## Architecture
+## Arquitectura
 
 ```
 Claude Code ──MCP──► memodi (Python) ──► PostgreSQL
-  (brain)           (persistence)       (JSONB + pgvector + AGE)
+  (cerebro)         (persistencia)       (JSONB + pgvector + AGE)
 ```
 
-Claude decides what's worth remembering. memodi persists and retrieves. No extra LLM calls — Claude is already there.
+Claude decide que vale la pena recordar. memodi persiste y consulta. Sin llamadas extra a LLMs — Claude ya esta ahi.
 
-## License
+## Licencia
 
 TBD
