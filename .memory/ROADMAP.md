@@ -65,11 +65,24 @@
 - [x] SKILL updated with proactive relationship creation
 - [x] Documented AGE limitations (no union in paths, no params, LOAD per conn)
 
-## Phase 5 — Production Deployment
+## Phase 5 — Production Deployment (DONE)
 > Deploy to Hetzner, production-ready
 
-- [ ] Deploy memodi-server + PostgreSQL a Hetzner
-- [ ] Update plugin URL a produccion
-- [ ] Auth/API keys para acceso seguro
-- [ ] Backup strategy para PostgreSQL
-- [ ] Monitoreo y health checks
+- [x] Hetzner CX23 (Ubuntu 24, 2 vCPU, 4GB RAM)
+- [x] PostgreSQL 16 nativo con pgvector + AGE (SSD directo)
+- [x] memodi-server + Caddy en Docker (stateless)
+- [x] HTTPS via Caddy + Let's Encrypt (auto-renewal)
+- [x] API key auth en Caddy (X-Api-Key header)
+- [x] Backup script (pg_dump diario, 7 dias retencion)
+- [x] Restore script documentado
+- [x] Setup script para Ubuntu 24
+- [x] Domain temporal: 62-238-15-94.sslip.io
+
+## Future — Nice to have
+
+- [ ] Dominio propio (reemplazar sslip.io)
+- [ ] Optimizar imagen Docker (ONNX en vez de PyTorch: 5.88GB → ~1.5GB)
+- [ ] CI/CD automatico (GitHub Actions → deploy)
+- [ ] Monitoreo (health check endpoint + alertas)
+- [ ] Rate limiting en Caddy
+- [ ] Multi-user con API keys por usuario

@@ -147,6 +147,41 @@ Module ──AFFECTS───► Module
 - **LOAD requerido por conexion**: Cada conexion necesita `LOAD 'age'` y `SET search_path` antes de cualquier operacion de grafo.
 - **agtype**: AGE devuelve un tipo custom `agtype` que necesita casteo a JSON/text para Python.
 
+## Produccion
+
+memodi corre en Hetzner CX23 con PostgreSQL nativo y Caddy para HTTPS.
+
+```
+Internet ──HTTPS──► Caddy (auth + TLS) ──► memodi-server ──► PostgreSQL
+                    puerto 443              puerto 8787       nativo en SSD
+```
+
+### Conectar un proyecto a produccion
+
+Crear `.mcp.json` en la raiz del proyecto:
+
+```json
+{
+  "mcpServers": {
+    "memodi": {
+      "type": "http",
+      "url": "https://62-238-15-94.sslip.io/mcp",
+      "headers": {
+        "X-Api-Key": "TU_API_KEY"
+      }
+    }
+  }
+}
+```
+
+### Deploy updates
+
+```bash
+ssh memodi@62.238.15.94
+cd memodi && git pull
+cd docker/prod && docker compose -f docker-compose.prod.yml up -d --build
+```
+
 ## Desarrollo
 
 ```bash
