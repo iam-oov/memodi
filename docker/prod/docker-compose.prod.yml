@@ -2,9 +2,7 @@ services:
   caddy:
     image: caddy:2-alpine
     container_name: memodi-caddy
-    ports:
-      - "80:80"
-      - "443:443"
+    network_mode: host
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile
       - caddy_data:/data
@@ -12,8 +10,6 @@ services:
     environment:
       MEMODI_API_KEY: ${MEMODI_API_KEY}
       MEMODI_DOMAIN: ${MEMODI_DOMAIN}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     restart: unless-stopped
 
 volumes:

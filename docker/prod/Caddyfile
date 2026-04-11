@@ -4,5 +4,5 @@
 	}
 	respond @unauthorized "Unauthorized" 401
 
-	reverse_proxy host.docker.internal:8787
+	reverse_proxy localhost:8787
 }
