@@ -140,7 +140,7 @@ def search_observations(
             SELECT o.*, ts_rank(o.search_vector, q) AS rank
             FROM observations o
             JOIN projects p ON p.id = o.project_id,
-            plainto_tsquery('english', %s) q
+            plainto_tsquery('simple', %s) q
             WHERE o.project_id = %s
               AND p.workspace_id = %s
               AND o.deleted_at IS NULL
@@ -150,7 +150,7 @@ def search_observations(
     else:
         base = """
             SELECT *, ts_rank(search_vector, query) AS rank
-            FROM observations, plainto_tsquery('english', %s) query
+            FROM observations, plainto_tsquery('simple', %s) query
             WHERE project_id = %s
               AND deleted_at IS NULL
               AND search_vector @@ query
@@ -178,7 +178,7 @@ def search_observations_global(
         SELECT o.*, p.name AS project_name, ts_rank(o.search_vector, q) AS rank
         FROM observations o
         JOIN projects p ON p.id = o.project_id,
-        plainto_tsquery('english', %s) q
+        plainto_tsquery('simple', %s) q
         WHERE o.deleted_at IS NULL
           AND o.search_vector @@ q
     """

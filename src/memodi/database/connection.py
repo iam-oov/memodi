@@ -1,3 +1,4 @@
+import contextlib
 from pathlib import Path
 
 import psycopg
@@ -6,14 +7,22 @@ from psycopg.rows import dict_row
 from memodi.config import settings
 
 _conn: psycopg.Connection | None = None
+_schema_ensured = False
 
-MIGRATIONS_DIR = Path(__file__).parent.parent.parent.parent / "docker" / "migrations"
+MIGRATIONS_DIR = Path(__file__).parent.parent / "migrations"
 
 
 def get_connection() -> psycopg.Connection:
     global _conn
-    if _conn is None or _conn.closed:
-        _conn = psycopg.connect(settings.db_url, row_factory=dict_row)
+    if _conn is not None and not _conn.closed:
+        try:
+            _conn.execute("SELECT 1")
+            return _conn
+        except Exception:
+            with contextlib.suppress(Exception):
+                _conn.close()
+            _conn = None
+    _conn = psycopg.connect(settings.db_url, row_factory=dict_row)
     return _conn
 
 
@@ -32,6 +41,10 @@ def run_migration(path: str) -> None:
 
 
 def ensure_schema() -> None:
+    global _schema_ensured
+    if _schema_ensured:
+        return
+
     conn = get_connection()
     conn.execute("""
         CREATE TABLE IF NOT EXISTS _migrations (
@@ -53,6 +66,8 @@ def ensure_schema() -> None:
             run_migration(str(migration_path))
             conn.execute("INSERT INTO _migrations (name) VALUES (%s)", (name,))
             conn.commit()
+
+    _schema_ensured = True
 
 
 def health_check() -> dict:

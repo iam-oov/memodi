@@ -39,9 +39,7 @@ def cleanup(project_name):
         """,
         (project_name,),
     )
-    conn.execute(
-        "DELETE FROM projects WHERE name = %s", (project_name,)
-    )
+    conn.execute("DELETE FROM projects WHERE name = %s", (project_name,))
     conn.commit()
 
 
@@ -92,9 +90,7 @@ def _cleanup_workspace(ws_name: str) -> None:
         """,
         (ws_name,),
     )
-    conn.execute(
-        "DELETE FROM workspaces WHERE name = %s", (ws_name,)
-    )
+    conn.execute("DELETE FROM workspaces WHERE name = %s", (ws_name,))
     conn.commit()
 
 
@@ -106,13 +102,9 @@ def test_save_and_search(project_name):
         type="decision",
     )
 
-    results = json.loads(
-        search(project=project_name, query="JWT tokens")
-    )
+    results = json.loads(search(project=project_name, query="JWT tokens"))
     assert len(results) >= 1
-    assert any(
-        "Authentication decision" in r["title"] for r in results
-    )
+    assert any("Authentication decision" in r["title"] for r in results)
 
 
 def test_save_upsert_by_topic_key(project_name):
@@ -136,9 +128,7 @@ def test_save_upsert_by_topic_key(project_name):
     proj = repository.get_or_create_project(project_name)
     observations = repository.get_recent_observations(proj["id"])
 
-    topic_obs = [
-        o for o in observations if o["topic_key"] == topic
-    ]
+    topic_obs = [o for o in observations if o["topic_key"] == topic]
     assert len(topic_obs) == 1
     assert topic_obs[0]["revision_count"] == 2
     assert topic_obs[0]["title"] == "Auth model v2"
@@ -160,9 +150,7 @@ def test_context_returns_recent(project_name):
     assert "Third obs" in result_titles
     assert "Second obs" in result_titles
     assert "First obs" in result_titles
-    assert result_titles.index("Third obs") < result_titles.index(
-        "First obs"
-    )
+    assert result_titles.index("Third obs") < result_titles.index("First obs")
 
 
 def test_list_projects(project_name):
@@ -202,16 +190,12 @@ def test_workspace_isolation():
             type="decision",
         )
 
-        results_a = json.loads(
-            search(project=proj_a, query="auth")
-        )
+        results_a = json.loads(search(project=proj_a, query="auth"))
         titles_a = [r["title"] for r in results_a]
         assert "Decision in workspace A" in titles_a
         assert "Decision in workspace B" not in titles_a
 
-        results_b = json.loads(
-            search(project=proj_b, query="auth")
-        )
+        results_b = json.loads(search(project=proj_b, query="auth"))
         titles_b = [r["title"] for r in results_b]
         assert "Decision in workspace B" in titles_b
         assert "Decision in workspace A" not in titles_b
@@ -244,9 +228,7 @@ def test_search_global_crosses_workspaces():
             type="architecture",
         )
 
-        results = json.loads(
-            search_global(query="hexagonal architecture")
-        )
+        results = json.loads(search_global(query="hexagonal architecture"))
         titles = [r["title"] for r in results]
         assert "Global decision alpha" in titles
         assert "Global decision beta" in titles
@@ -263,20 +245,12 @@ def test_no_workspace_backward_compatible(project_name):
         type="discovery",
     )
 
-    results = json.loads(
-        search(project=project_name, query="backward compatible")
-    )
+    results = json.loads(search(project=project_name, query="backward compatible"))
     assert len(results) >= 1
-    assert any(
-        "Backward compatible observation" in r["title"]
-        for r in results
-    )
+    assert any("Backward compatible observation" in r["title"] for r in results)
 
     ctx = json.loads(context(project=project_name))
-    assert any(
-        "Backward compatible observation" in r["title"]
-        for r in ctx
-    )
+    assert any("Backward compatible observation" in r["title"] for r in ctx)
 
     projects = json.loads(list_projects())
     names = [r["name"] for r in projects]

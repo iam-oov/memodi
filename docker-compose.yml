@@ -18,23 +18,5 @@ services:
       timeout: 5s
       retries: 5
 
-  mcp:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.mcp
-    container_name: memodi-mcp
-    depends_on:
-      db:
-        condition: service_healthy
-    environment:
-      MEMODI_DB_HOST: db
-      MEMODI_DB_PORT: 5432
-      MEMODI_DB_USER: memodi
-      MEMODI_DB_PASSWORD: memodi_dev
-      MEMODI_DB_NAME: memodi
-    stdin_open: true
-    profiles:
-      - mcp
-
 volumes:
   memodi_data:

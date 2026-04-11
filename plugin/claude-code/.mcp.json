@@ -1,15 +1,10 @@
 {
   "mcpServers": {
     "memodi": {
-      "command": "docker",
+      "command": "uvx",
       "args": [
-        "run", "--rm", "-i",
-        "--network", "memodi_default",
-        "-e", "MEMODI_DB_HOST=db",
-        "-e", "MEMODI_DB_USER=memodi",
-        "-e", "MEMODI_DB_PASSWORD=memodi_dev",
-        "-e", "MEMODI_DB_NAME=memodi",
-        "memodi-mcp"
+        "--from", "git+https://github.com/iam-oov/memodi",
+        "memodi"
       ]
     }
   }

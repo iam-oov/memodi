@@ -55,9 +55,7 @@ def memodi_list_projects() -> str:
 
 
 @mcp.tool()
-def memodi_search_global(
-    query: str, type: str | None = None, limit: int = 10
-) -> str:
+def memodi_search_global(query: str, type: str | None = None, limit: int = 10) -> str:
     """Search across ALL workspaces for similar decisions or patterns."""
     return memory.search_global(query, type, limit)
 
@@ -97,17 +95,13 @@ def memodi_update_plan(
 
 
 @mcp.tool()
-def memodi_approve_plan(
-    workflow_id: str, notes: str | None = None
-) -> str:
+def memodi_approve_plan(workflow_id: str, notes: str | None = None) -> str:
     """Approve the plan and move the workflow to 'apply' phase."""
     return workflow.approve_plan(workflow_id, notes)
 
 
 @mcp.tool()
-def memodi_apply_done(
-    workflow_id: str, notes: str | None = None
-) -> str:
+def memodi_apply_done(workflow_id: str, notes: str | None = None) -> str:
     """Mark implementation as done, move to 'verify' phase."""
     return workflow.apply_done(workflow_id, notes)
 
@@ -124,9 +118,7 @@ def memodi_verify(
 
 
 @mcp.tool()
-def memodi_unify(
-    workflow_id: str, summary: str, notes: str | None = None
-) -> str:
+def memodi_unify(workflow_id: str, summary: str, notes: str | None = None) -> str:
     """Close the loop: record summary and mark workflow as completed."""
     return workflow.unify(workflow_id, summary, notes)
 
