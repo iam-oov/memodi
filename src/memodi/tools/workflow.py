@@ -1,6 +1,5 @@
 import json
 
-from memodi.config import settings
 from memodi.database import repository, workflow_repository
 from memodi.database.connection import ensure_schema
 
@@ -9,17 +8,9 @@ def _ensure() -> None:
     ensure_schema()
 
 
-def _resolve_workspace() -> dict | None:
-    if settings.workspace:
-        return repository.get_or_create_workspace(settings.workspace)
-    return None
-
-
 def plan(project: str, name: str, objective: str) -> str:
     _ensure()
-    ws = _resolve_workspace()
-    workspace_id = ws["id"] if ws else None
-    proj = repository.get_or_create_project(project, workspace_id=workspace_id)
+    proj = repository.get_or_create_project(project)
     active = workflow_repository.get_active_workflow(proj["id"])
     if active:
         return json.dumps(active, default=str)
@@ -37,7 +28,9 @@ def update_plan(
     tasks: list[dict],
 ) -> str:
     _ensure()
-    wf = workflow_repository.update_plan(workflow_id, acceptance_criteria, tasks)
+    wf = workflow_repository.update_plan(
+        workflow_id, acceptance_criteria, tasks
+    )
     return json.dumps(wf, default=str)
 
 
@@ -49,7 +42,9 @@ def approve_plan(workflow_id: str, notes: str | None = None) -> str:
 
 def apply_done(workflow_id: str, notes: str | None = None) -> str:
     _ensure()
-    wf = workflow_repository.transition_phase(workflow_id, "verify", notes)
+    wf = workflow_repository.transition_phase(
+        workflow_id, "verify", notes
+    )
     return json.dumps(wf, default=str)
 
 
@@ -62,11 +57,15 @@ def verify(
     _ensure()
     workflow_repository.update_result(workflow_id, result)
     to_phase = "unify" if passed else "apply"
-    wf = workflow_repository.transition_phase(workflow_id, to_phase, notes)
+    wf = workflow_repository.transition_phase(
+        workflow_id, to_phase, notes
+    )
     return json.dumps(wf, default=str)
 
 
-def unify(workflow_id: str, summary: str, notes: str | None = None) -> str:
+def unify(
+    workflow_id: str, summary: str, notes: str | None = None
+) -> str:
     _ensure()
     wf = workflow_repository.get_workflow(workflow_id)
     if wf is None:
@@ -74,18 +73,20 @@ def unify(workflow_id: str, summary: str, notes: str | None = None) -> str:
     existing_result = wf.get("result") or {}
     existing_result["summary"] = summary
     workflow_repository.update_result(workflow_id, existing_result)
-    wf = workflow_repository.transition_phase(workflow_id, "completed", notes)
+    wf = workflow_repository.transition_phase(
+        workflow_id, "completed", notes
+    )
     return json.dumps(wf, default=str)
 
 
 def progress(project: str) -> str:
     _ensure()
-    ws = _resolve_workspace()
-    workspace_id = ws["id"] if ws else None
-    proj = repository.get_or_create_project(project, workspace_id=workspace_id)
+    proj = repository.get_or_create_project(project)
     active = workflow_repository.get_active_workflow(proj["id"])
     if active is None:
-        return json.dumps({"status": "no active workflow", "project": project})
+        return json.dumps(
+            {"status": "no active workflow", "project": project}
+        )
     return json.dumps(active, default=str)
 
 
@@ -96,5 +97,7 @@ def task_update(
     notes: str | None = None,
 ) -> str:
     _ensure()
-    wf = workflow_repository.update_task_status(workflow_id, task_index, status, notes)
+    wf = workflow_repository.update_task_status(
+        workflow_id, task_index, status, notes
+    )
     return json.dumps(wf, default=str)

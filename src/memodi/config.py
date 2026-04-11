@@ -1,4 +1,3 @@
-from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -15,14 +14,6 @@ class Settings(BaseSettings):
     db_user: str
     db_password: str
     db_name: str = "memodi"
-    workspace: str | None = None
-
-    @field_validator("workspace", mode="before")
-    @classmethod
-    def empty_str_to_none(cls, v: str | None) -> str | None:
-        if v == "":
-            return None
-        return v
 
     @property
     def db_url(self) -> str:
