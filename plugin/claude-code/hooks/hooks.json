@@ -1,0 +1,29 @@
+{
+  "description": "Memodi persistent memory hooks — connectivity check, context injection, and compaction recovery",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/session-start.sh",
+            "timeout": 5,
+            "statusMessage": "Connecting to memodi..."
+          }
+        ]
+      },
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/post-compaction.sh",
+            "timeout": 5,
+            "statusMessage": "Recovering memodi context after compaction..."
+          }
+        ]
+      }
+    ]
+  }
+}
