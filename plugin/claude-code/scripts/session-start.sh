@@ -53,9 +53,14 @@ Workspace detection needed. Execute these steps NOW, before responding to the us
    - If resolved: false -> follow WORKSPACE ONBOARDING in the memodi skill
 
 2. Call memodi_context with the project name (last component of the path)
-   to load recent observations and decisions
+   to load recent observations and the last session summary
+
+3. Load session tools via ToolSearch("select:memodi_session_start")
+   then call memodi_session_start with the project name
 
 PROACTIVE SAVE REMINDER: After every decision, bug fix, discovery, convention, or user confirmation — call memodi_save immediately. Do NOT wait to be asked.
+
+SESSION CLOSE REMINDER: Before the conversation ends, call memodi_session_end with a structured summary (Goal / Accomplished / Next Steps).
 EOF
 
 exit 0

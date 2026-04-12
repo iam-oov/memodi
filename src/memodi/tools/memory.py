@@ -23,12 +23,16 @@ def save(
 
     proj = repository.get_or_create_project(project)
     embedding = generate_embedding(f"{title} {content}")
+    # Auto-attach active session if one exists
+    active_session = repository.get_active_session(proj["id"])
+    session_id = str(active_session["id"]) if active_session else None
     obs = repository.save_observation(
         project_id=proj["id"],
         title=title,
         content=content,
         type=type,
         topic_key=topic_key,
+        session_id=session_id,
         metadata=metadata,
         embedding=embedding,
     )
@@ -63,12 +67,16 @@ def search(
 def context(project: str, limit: int = 20) -> str:
     _ensure()
     proj = repository.get_or_create_project(project)
-    results = repository.get_recent_observations(
+    last_session = repository.get_latest_session_summary(proj["id"])
+    observations = repository.get_recent_observations(
         project_id=proj["id"],
         limit=limit,
         workspace_id=proj.get("workspace_id"),
     )
-    return json.dumps(results, default=str)
+    return json.dumps(
+        {"last_session": last_session, "observations": observations},
+        default=str,
+    )
 
 
 @handle_errors

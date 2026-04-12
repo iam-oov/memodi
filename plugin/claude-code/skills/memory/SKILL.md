@@ -10,7 +10,7 @@ This protocol is MANDATORY and ALWAYS ACTIVE — not something you activate on d
 
 ## TOOL LOADING
 
-Memodi has **8 core tools** always in your context and **24 deferred tools** available via ToolSearch.
+Memodi has **8 core tools** always in your context and **26 deferred tools** available via ToolSearch.
 
 - **Core tools** — ready to use immediately, no extra steps needed
 - **Deferred tools** — call `ToolSearch("select:memodi_toolname")` to load them first
@@ -60,6 +60,10 @@ Memodi has **8 core tools** always in your context and **24 deferred tools** ava
 - `memodi_unify` — close the loop, mark completed
 - `memodi_progress` — show active workflow state
 - `memodi_task_update` — update a specific task's status
+
+**Session lifecycle** — `ToolSearch("select:memodi_session_start,memodi_session_end")`
+- `memodi_session_start` — start a session (observations auto-attach to it)
+- `memodi_session_end` — close session with structured summary
 
 **System extras** — `ToolSearch("select:memodi_status,memodi_version")`
 - `memodi_status` — check database health and extensions
@@ -189,3 +193,30 @@ plan ──approve──► apply ──done──► verify ──pass──►
 
 Memory (memodi_save/search_hybrid/context) is ALWAYS proactive.
 Workflow (memodi_plan/approve/verify/unify) is ON DEMAND.
+
+## SESSION LIFECYCLE
+
+Sessions group observations within a work period. Observations are auto-attached to the active session.
+
+### Starting a session
+After workspace detection and context loading, load session tools and start a session:
+1. `ToolSearch("select:memodi_session_start")`
+2. Call `memodi_session_start` with the project name
+
+### Ending a session
+Before the user ends the conversation or says "done"/"listo"/"that's it":
+1. `ToolSearch("select:memodi_session_end")`
+2. Call `memodi_session_end` with a structured summary:
+
+```
+## Goal
+[What we were working on]
+
+## Accomplished
+- [Completed items with key details]
+
+## Next Steps
+- [What remains to be done]
+```
+
+`memodi_context` returns the last session summary — the next session starts with context from the previous one.

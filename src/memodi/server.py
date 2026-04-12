@@ -1,7 +1,7 @@
 from mcp.server.fastmcp import FastMCP
 from mcp.types import Tool as MCPTool
 
-from memodi.tools import graph, memory, workflow
+from memodi.tools import graph, memory, session, workflow
 from memodi.tools.system import ping, status, version
 
 # Tools always loaded into Claude's context. All others are deferred
@@ -22,7 +22,7 @@ mcp = FastMCP(
     host="0.0.0.0",
     port=8787,
     instructions=(
-        "memodi provides 8 core tools (always available) and 24 deferred tools "
+        "memodi provides 8 core tools (always available) and 26 deferred tools "
         "(load via ToolSearch). Core: memodi_save, memodi_search_hybrid, "
         "memodi_context, memodi_check_workspace, memodi_resolve_path, "
         "memodi_link_project, memodi_ping, memodi_relate."
@@ -260,6 +260,18 @@ def memodi_remove_relation(from_name: str, to_name: str, relation: str) -> str:
 def memodi_delete_relation(from_name: str, to_name: str, relation: str) -> str:
     """Hard delete a relationship. Permanently removes it from the graph."""
     return graph.delete_relation(from_name, to_name, relation)
+
+
+@mcp.tool()
+def memodi_session_start(project: str) -> str:
+    """Start a session. Observations auto-attach to it."""
+    return session.session_start(project)
+
+
+@mcp.tool()
+def memodi_session_end(project: str, summary: str) -> str:
+    """Close the active session with a summary (Goal / Accomplished / Next Steps)."""
+    return session.session_end(project, summary)
 
 
 async def _list_tools_with_deferred() -> list[MCPTool]:

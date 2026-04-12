@@ -51,6 +51,6 @@ async def test_all_core_tools_are_registered():
 @pytest.mark.asyncio
 async def test_total_tool_count():
     tools = await _list_tools_with_deferred()
-    assert len(tools) == 32, (
-        f"Expected 32 tools (8 core + 24 deferred), got {len(tools)}"
+    assert len(tools) == 34, (
+        f"Expected 34 tools (8 core + 26 deferred), got {len(tools)}"
     )

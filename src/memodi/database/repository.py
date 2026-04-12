@@ -78,6 +78,36 @@ def end_session(session_id: str, summary: str | None = None) -> dict:
     return dict(row)
 
 
+def get_active_session(project_id: str) -> dict | None:
+    """Get the most recent unclosed session for a project."""
+    conn = get_connection()
+    row = conn.execute(
+        """
+        SELECT * FROM sessions
+        WHERE project_id = %s AND ended_at IS NULL
+        ORDER BY started_at DESC
+        LIMIT 1
+        """,
+        (project_id,),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def get_latest_session_summary(project_id: str) -> dict | None:
+    """Get the most recent completed session with a summary."""
+    conn = get_connection()
+    row = conn.execute(
+        """
+        SELECT * FROM sessions
+        WHERE project_id = %s AND ended_at IS NOT NULL AND summary IS NOT NULL
+        ORDER BY ended_at DESC
+        LIMIT 1
+        """,
+        (project_id,),
+    ).fetchone()
+    return dict(row) if row else None
+
+
 def save_observation(
     project_id: str,
     title: str,
