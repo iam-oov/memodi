@@ -1,9 +1,33 @@
 from mcp.server.fastmcp import FastMCP
+from mcp.types import Tool as MCPTool
 
 from memodi.tools import graph, memory, workflow
 from memodi.tools.system import ping, status, version
 
-mcp = FastMCP("memodi", host="0.0.0.0", port=8787)
+# Tools always loaded into Claude's context. All others are deferred
+# and loaded on-demand via ToolSearch to save tokens.
+CORE_TOOLS: set[str] = {
+    "memodi_save",
+    "memodi_search_hybrid",
+    "memodi_context",
+    "memodi_check_workspace",
+    "memodi_resolve_path",
+    "memodi_link_project",
+    "memodi_ping",
+    "memodi_relate",
+}
+
+mcp = FastMCP(
+    "memodi",
+    host="0.0.0.0",
+    port=8787,
+    instructions=(
+        "memodi provides 8 core tools (always available) and 21 deferred tools "
+        "(load via ToolSearch). Core: memodi_save, memodi_search_hybrid, "
+        "memodi_context, memodi_check_workspace, memodi_resolve_path, "
+        "memodi_link_project, memodi_ping, memodi_relate."
+    ),
+)
 
 
 @mcp.tool()
@@ -223,6 +247,34 @@ def memodi_graph_overview() -> str:
 def memodi_remove_relation(from_name: str, to_name: str, relation: str) -> str:
     """Remove a relationship from the knowledge graph."""
     return graph.remove_relation(from_name, to_name, relation)
+
+
+async def _list_tools_with_deferred() -> list[MCPTool]:
+    """Override list_tools to mark non-core tools with defer_loading=True.
+
+    Claude Code reads this field and excludes deferred tools from the initial
+    context, making them discoverable via ToolSearch on demand.
+    """
+    tools = mcp._tool_manager.list_tools()
+    result = []
+    for info in tools:
+        tool = MCPTool(
+            name=info.name,
+            title=info.title,
+            description=info.description,
+            inputSchema=info.parameters,
+            outputSchema=info.output_schema,
+            annotations=info.annotations,
+            icons=info.icons,
+            _meta=info.meta,
+        )
+        if info.name not in CORE_TOOLS:
+            tool.defer_loading = True
+        result.append(tool)
+    return result
+
+
+mcp._mcp_server.list_tools()(_list_tools_with_deferred)
 
 
 def main():

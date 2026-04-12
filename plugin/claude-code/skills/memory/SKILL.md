@@ -8,31 +8,49 @@ description: "ALWAYS ACTIVE — Persistent shared memory protocol. You MUST save
 You have access to Memodi, a persistent memory system backed by PostgreSQL.
 This protocol is MANDATORY and ALWAYS ACTIVE — not something you activate on demand.
 
+## TOOL LOADING
+
+Memodi has **8 core tools** always in your context and **23 deferred tools** available via ToolSearch.
+
+- **Core tools** — ready to use immediately, no extra steps needed
+- **Deferred tools** — call `ToolSearch("select:memodi_toolname")` to load them first
+
 ## AVAILABLE TOOLS
 
-### Memory (always use proactively)
-- `memodi_save` — save observations (auto-generates semantic embedding)
+### Core Tools (always available)
+
+| Tool | Purpose |
+|------|---------|
+| `memodi_save` | Save observations (auto-generates semantic embedding) |
+| `memodi_search_hybrid` | Best search: keyword + semantic with RRF scoring |
+| `memodi_context` | Load recent observations for a project |
+| `memodi_check_workspace` | Check if a project has a workspace |
+| `memodi_resolve_path` | Resolve a filesystem path to its workspace |
+| `memodi_link_project` | Link a project to a workspace |
+| `memodi_ping` | Check if server is alive |
+| `memodi_relate` | Create a relationship in the knowledge graph |
+
+### Deferred Tools (load via ToolSearch first)
+
+**Alternative search** — `ToolSearch("select:memodi_search,memodi_search_similar,memodi_search_global")`
 - `memodi_search` — keyword search (exact words)
 - `memodi_search_similar` — semantic search (finds by meaning, not words)
-- `memodi_search_hybrid` — best of both: keyword + semantic with RRF scoring
-- `memodi_context` — load recent observations for a project
-- `memodi_list_projects` — list all known projects
 - `memodi_search_global` — keyword search across ALL workspaces
-- `memodi_backfill` — generate embeddings for old observations without them
 
-### Knowledge Graph (proactive — create relationships when discovered)
-- `memodi_relate` — create a relationship (e.g. repo-a DEPENDS_ON repo-b)
+**Workspace admin** — `ToolSearch("select:memodi_list_workspaces,memodi_register_path,memodi_list_projects")`
+- `memodi_list_workspaces` — list all workspaces with project count
+- `memodi_register_path` — register a filesystem path to a workspace
+- `memodi_list_projects` — list all known projects
+- `memodi_delete_workspace` — delete a workspace
+- `memodi_rename_workspace` — rename a workspace
+
+**Graph queries** — `ToolSearch("select:memodi_dependencies,memodi_impact,memodi_graph_overview,memodi_remove_relation")`
 - `memodi_dependencies` — show what depends on what
 - `memodi_impact` — transitive impact analysis: "what breaks if I change X?"
 - `memodi_graph_overview` — summary of all nodes and relationships
 - `memodi_remove_relation` — remove a relationship
 
-### Workspace management
-- `memodi_check_workspace` — check if a project has a workspace
-- `memodi_link_project` — link a project to a workspace
-- `memodi_list_workspaces` — list all workspaces with project count
-
-### Workflow (only when user requests structured work)
+**Workflow** — `ToolSearch("select:memodi_plan,memodi_update_plan,memodi_approve_plan,memodi_apply_done,memodi_verify,memodi_unify,memodi_progress,memodi_task_update")`
 - `memodi_plan` — start a new workflow plan
 - `memodi_update_plan` — define acceptance criteria and tasks
 - `memodi_approve_plan` — approve plan, move to apply
@@ -42,27 +60,31 @@ This protocol is MANDATORY and ALWAYS ACTIVE — not something you activate on d
 - `memodi_progress` — show active workflow state
 - `memodi_task_update` — update a specific task's status
 
-### System
-- `memodi_ping` — check if server is alive
+**System extras** — `ToolSearch("select:memodi_status,memodi_version")`
 - `memodi_status` — check database health and extensions
+- `memodi_version` — return server version
+
+**Maintenance** — `ToolSearch("select:memodi_backfill")`
+- `memodi_backfill` — generate embeddings for old observations without them
 
 ## WORKSPACE AUTO-DETECTION (mandatory at session start)
 
 At the START of every session, before any save or search:
 
 1. Get the current working directory (pwd)
-2. Call `memodi_resolve_path` with the full path
+2. Call `memodi_resolve_path` with the full path (core — always available)
 3. If `resolved: true` → workspace is known, use it for all operations. Derive project name from the last directory component of pwd.
 4. If `resolved: false` → this is a new path, run ONBOARDING below
 
 ## WORKSPACE ONBOARDING (only for new/unregistered paths)
 
-1. Call `memodi_list_workspaces` to get existing workspaces
-2. Show the user the available workspaces with their project count
-3. Ask: "Este directorio no esta registrado. ¿A que workspace pertenece?"
-4. WAIT for the user's answer — do NOT assume or continue
-5. Call `memodi_register_path` with the full pwd path and the workspace name
-6. Call `memodi_link_project` with the project name (last dir component) and workspace
+1. Load workspace tools: `ToolSearch("select:memodi_list_workspaces,memodi_register_path")`
+2. Call `memodi_list_workspaces` to get existing workspaces
+3. Show the user the available workspaces with their project count
+4. Ask: "Este directorio no esta registrado. ¿A que workspace pertenece?"
+5. WAIT for the user's answer — do NOT assume or continue
+6. Call `memodi_register_path` with the full pwd path and the workspace name
+7. Call `memodi_link_project` with the project name (last dir component) and workspace
 
 ### Workspace naming rules
 - Use SHORT DESCRIPTIVE names: "trabajo", "personal", "tesis", "escuela"
@@ -99,7 +121,7 @@ Call `memodi_save` IMMEDIATELY and WITHOUT BEING ASKED after any of these:
 - Repo A imports/calls Repo B → `memodi_relate("Repo", "repo-a", "Repo", "repo-b", "DEPENDS_ON")`
 - Repo contains a module → `memodi_relate("Repo", "repo-a", "Module", "auth", "CONTAINS")`
 - Changing module X affects module Y → `memodi_relate("Module", "auth", "Module", "api", "AFFECTS")`
-- Before making changes, check `memodi_impact` to see what might break
+- Before making changes, load graph tools and check `memodi_impact` to see what might break
 
 ### After user confirmation or rejection
 - User confirms a recommendation ("dale", "go with that", "si", "sounds good")
@@ -130,9 +152,9 @@ Call `memodi_save` IMMEDIATELY and WITHOUT BEING ASKED after any of these:
 ## WHEN TO SEARCH MEMORY
 
 When the user asks to recall something — any variation of "remember", "recall", "what did we do", "acordate", "que hicimos", or references to past work:
-1. Call `memodi_context` with the project name — gets recent observations
-2. If not found, call `memodi_search_hybrid` — combines keyword + semantic
-3. Use `memodi_list_projects` if unsure which project to search
+1. Call `memodi_context` with the project name — gets recent observations (core — always available)
+2. If not found, call `memodi_search_hybrid` — combines keyword + semantic (core — always available)
+3. For project discovery, load `ToolSearch("select:memodi_list_projects")` then call it
 
 Also search memory PROACTIVELY when:
 - Starting work on a project — call `memodi_context` first to load recent observations
@@ -141,14 +163,16 @@ Also search memory PROACTIVELY when:
 - User references another project — search that project's observations
 
 ### Which search tool to use
-- `memodi_search` — when you know the exact words (e.g. "JWT", "LiveKit")
-- `memodi_search_similar` — when searching by concept (e.g. "how do we handle auth?")
-- `memodi_search_hybrid` — default choice, best results, combines both
-- `memodi_search_global` — when you need cross-workspace results
+- `memodi_search_hybrid` — default choice, always available, best results
+- `memodi_search` — when you know exact words (load via ToolSearch first)
+- `memodi_search_similar` — when searching by concept (load via ToolSearch first)
+- `memodi_search_global` — cross-workspace results (load via ToolSearch first)
 
 ## WORKFLOW PROTOCOL (only when user requests it)
 
 The workflow tools implement a Plan → Apply → Verify → Unify cycle. Use them ONLY when the user explicitly asks for structured planning or says things like "planifiquemos", "hagamos un plan", "let's plan this".
+
+First, load all workflow tools: `ToolSearch("select:memodi_plan,memodi_update_plan,memodi_approve_plan,memodi_apply_done,memodi_verify,memodi_unify,memodi_progress,memodi_task_update")`
 
 ```
 plan ──approve──► apply ──done──► verify ──pass──► unify ──► completed
@@ -158,5 +182,5 @@ plan ──approve──► apply ──done──► verify ──pass──►
                                   apply (back to fix)
 ```
 
-Memory (memodi_save/search/context) is ALWAYS proactive.
+Memory (memodi_save/search_hybrid/context) is ALWAYS proactive.
 Workflow (memodi_plan/approve/verify/unify) is ON DEMAND.
