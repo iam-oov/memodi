@@ -91,42 +91,32 @@ def get_dependents(name: str) -> list[dict]:
 def get_impact(name: str, max_depth: int = 5) -> list[dict]:
     """Transitive impact analysis: what is affected if this changes?
 
-    Fetches all nodes reachable via DEPENDS_ON paths, then filters in Python
-    to only include paths where all relationships are current (invalid_at IS NULL).
-    AGE does not support ALL() predicates on variable-length paths.
+    BFS traversal that only follows current edges (invalid_at IS NULL).
+    AGE does not support ALL() predicates on variable-length paths,
+    so we walk one hop at a time and filter in each step.
     """
     ensure_graph()
-    # Step 1: get all potentially affected nodes with their path relationships
-    # We query each depth level individually to filter invalid edges
-    all_affected: set[str] = set()
+    visited: set[str] = set()
+    frontier: set[str] = {name}
 
-    for depth in range(1, max_depth + 1):
-        query = (
-            f"MATCH (start {{name: '{name}'}})"
-            f"<-[r:DEPENDS_ON*{depth}..{depth}]-(affected)"
-            " RETURN DISTINCT affected.name AS name"
-        )
-        results = cypher_query(query, "name agtype")
-        for r in results:
-            all_affected.add(r["name"])
+    for _ in range(max_depth):
+        if not frontier:
+            break
+        next_frontier: set[str] = set()
+        for node in frontier:
+            results = cypher_query(
+                f"MATCH (a)-[r:DEPENDS_ON]->(b {{name: '{node}'}})"
+                " WHERE r.invalid_at IS NULL"
+                " RETURN a.name AS name",
+                "name agtype",
+            )
+            for r in results:
+                if r["name"] not in visited and r["name"] != name:
+                    next_frontier.add(r["name"])
+        visited.update(next_frontier)
+        frontier = next_frontier
 
-    # Step 2: for each candidate, verify the path uses only current edges
-    # by checking direct current dependency on the chain
-    # For simplicity in v1, we do a single hop filter:
-    # only include nodes whose DIRECT dependency edge is current
-    verified: list[dict] = []
-    for candidate in all_affected:
-        # Check if there's a current path from candidate to target
-        check = cypher_query(
-            f"MATCH (a {{name: '{candidate}'}})-[r:DEPENDS_ON]->(b)"
-            " WHERE r.invalid_at IS NULL"
-            " RETURN b.name AS name",
-            "name agtype",
-        )
-        if check:
-            verified.append({"name": candidate})
-
-    return verified
+    return [{"name": n} for n in visited]
 
 
 def get_modules(repo_name: str) -> list[dict]:
