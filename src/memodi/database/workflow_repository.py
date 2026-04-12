@@ -50,9 +50,22 @@ def get_active_workflow(project_id: str) -> dict | None:
     return dict(row) if row else None
 
 
+def _classify_scope(
+    acceptance_criteria: list[dict],
+    tasks: list[dict],
+) -> str:
+    """Classify plan scope based on AC and task count."""
+    if len(tasks) <= 2 and len(acceptance_criteria) <= 1:
+        return "quick-fix"
+    elif len(tasks) <= 5:
+        return "standard"
+    return "complex"
+
+
 def _validate_plan(
     acceptance_criteria: list[dict],
     tasks: list[dict],
+    scope: str,
 ) -> list[str]:
     """Validate AC and task structure. Returns list of warnings."""
     warnings = []
@@ -80,7 +93,8 @@ def _validate_plan(
         if "status" not in task:
             task["status"] = "pending"
         criteria = task.get("criteria", [])
-        if not criteria:
+        # Only warn about missing criteria for standard+ plans
+        if not criteria and scope != "quick-fix":
             warnings.append(
                 f"Task '{task['name']}' has no 'criteria' linking to ACs"
             )
@@ -90,6 +104,12 @@ def _validate_plan(
                     f"Task '{task['name']}' references unknown criterion "
                     f"'{cid}'. Valid IDs: {sorted(ac_ids)}"
                 )
+
+    if scope == "complex":
+        warnings.append(
+            f"Complex plan ({len(tasks)} tasks). "
+            "Consider splitting into multiple smaller plans for better focus."
+        )
 
     return warnings
 
@@ -111,21 +131,38 @@ def update_plan(
             f"Cannot update plan in phase '{row['phase']}' — only allowed in 'plan'"
         )
 
-    warnings = _validate_plan(acceptance_criteria, tasks)
+    scope = _classify_scope(acceptance_criteria, tasks)
+    warnings = _validate_plan(acceptance_criteria, tasks, scope)
+
+    # Store scope in the result JSONB (avoids migration)
+    existing_result = json.loads(
+        conn.execute(
+            "SELECT result FROM workflows WHERE id = %s", (workflow_id,)
+        ).fetchone()["result"]
+        or "{}"
+    )
+    existing_result["scope"] = scope
 
     row = conn.execute(
         """
         UPDATE workflows
         SET acceptance_criteria = %s,
             tasks = %s,
+            result = %s,
             updated_at = now()
         WHERE id = %s
         RETURNING *
         """,
-        (json.dumps(acceptance_criteria), json.dumps(tasks), workflow_id),
+        (
+            json.dumps(acceptance_criteria),
+            json.dumps(tasks),
+            json.dumps(existing_result),
+            workflow_id,
+        ),
     ).fetchone()
     conn.commit()
     result = dict(row)
+    result["_scope"] = scope
     if warnings:
         result["_warnings"] = warnings
     return result
