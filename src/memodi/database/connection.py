@@ -22,7 +22,11 @@ def get_connection() -> psycopg.Connection:
             with contextlib.suppress(Exception):
                 _conn.close()
             _conn = None
-    _conn = psycopg.connect(settings.db_url, row_factory=dict_row)
+    _conn = psycopg.connect(
+        settings.db_url,
+        row_factory=dict_row,
+        options="-c idle_in_transaction_session_timeout=30s",
+    )
     return _conn
 
 

@@ -7,28 +7,12 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: pgvector/pgvector:pg16
-        env:
-          POSTGRES_USER: memodi
-          POSTGRES_PASSWORD: memodi_dev
-          POSTGRES_DB: memodi
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U memodi"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 5
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Enable pgvector extension
-        env:
-          PGPASSWORD: memodi_dev
-        run: psql -h localhost -U memodi -d memodi -c "CREATE EXTENSION IF NOT EXISTS vector;"
+      - name: Start database
+        run: docker compose up -d db --wait
 
       - uses: astral-sh/setup-uv@v4
         with:
@@ -46,7 +30,6 @@ jobs:
           MEMODI_DB_PASSWORD: memodi_dev
           MEMODI_DB_NAME: memodi
           MEMODI_DB_HOST: localhost
-          CI: "true"
         run: uv run pytest -v
 
   deploy:
@@ -66,6 +49,12 @@ jobs:
             git pull origin main
             ~/.local/bin/uv sync
             sudo systemctl restart memodi
+            sleep 3
+            systemctl is-active --quiet memodi || {
+              echo "DEPLOY FAILED: memodi service not active"
+              journalctl -u memodi -n 30 --no-pager
+              exit 1
+            }
             cd docker/prod
             docker compose -f docker-compose.prod.yml down
             docker compose -f docker-compose.prod.yml up -d
