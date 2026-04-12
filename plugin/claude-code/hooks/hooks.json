@@ -1,5 +1,5 @@
 {
-  "description": "Memodi persistent memory hooks — connectivity check, context injection, and compaction recovery",
+  "description": "Memodi persistent memory hooks — connectivity, context injection, compaction recovery, and subagent capture",
   "hooks": {
     "SessionStart": [
       {
@@ -21,6 +21,17 @@
             "command": "${CLAUDE_PLUGIN_ROOT}/scripts/post-compaction.sh",
             "timeout": 5,
             "statusMessage": "Recovering memodi context after compaction..."
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/subagent-stop.sh",
+            "timeout": 15
           }
         ]
       }
