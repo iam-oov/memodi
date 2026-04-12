@@ -10,7 +10,7 @@ This protocol is MANDATORY and ALWAYS ACTIVE — not something you activate on d
 
 ## TOOL LOADING
 
-Memodi has **8 core tools** always in your context and **23 deferred tools** available via ToolSearch.
+Memodi has **8 core tools** always in your context and **24 deferred tools** available via ToolSearch.
 
 - **Core tools** — ready to use immediately, no extra steps needed
 - **Deferred tools** — call `ToolSearch("select:memodi_toolname")` to load them first
@@ -44,11 +44,12 @@ Memodi has **8 core tools** always in your context and **23 deferred tools** ava
 - `memodi_delete_workspace` — delete a workspace
 - `memodi_rename_workspace` — rename a workspace
 
-**Graph queries** — `ToolSearch("select:memodi_dependencies,memodi_impact,memodi_graph_overview,memodi_remove_relation")`
-- `memodi_dependencies` — show what depends on what
+**Graph queries** — `ToolSearch("select:memodi_dependencies,memodi_impact,memodi_graph_overview,memodi_remove_relation,memodi_delete_relation")`
+- `memodi_dependencies` — show what depends on what (current relationships only)
 - `memodi_impact` — transitive impact analysis: "what breaks if I change X?"
-- `memodi_graph_overview` — summary of all nodes and relationships
-- `memodi_remove_relation` — remove a relationship
+- `memodi_graph_overview` — summary of all nodes and relationships (includes valid_at)
+- `memodi_remove_relation` — invalidate a relationship (soft delete, preserves history)
+- `memodi_delete_relation` — permanently remove a relationship (hard delete)
 
 **Workflow** — `ToolSearch("select:memodi_plan,memodi_update_plan,memodi_approve_plan,memodi_apply_done,memodi_verify,memodi_unify,memodi_progress,memodi_task_update")`
 - `memodi_plan` — start a new workflow plan
@@ -118,9 +119,13 @@ Call `memodi_save` IMMEDIATELY and WITHOUT BEING ASKED after any of these:
 - Cross-repo or cross-module dependency discovered → also call `memodi_relate`
 
 ### After discovering dependencies (use memodi_relate)
+Relationships are **temporal** — they automatically track when they were created (valid_at).
+Re-creating the same relationship invalidates the old version and creates a new one.
+
 - Repo A imports/calls Repo B → `memodi_relate("Repo", "repo-a", "Repo", "repo-b", "DEPENDS_ON")`
 - Repo contains a module → `memodi_relate("Repo", "repo-a", "Module", "auth", "CONTAINS")`
 - Changing module X affects module Y → `memodi_relate("Module", "auth", "Module", "api", "AFFECTS")`
+- Dependency no longer exists → load graph tools, use `memodi_remove_relation` (invalidates, keeps history)
 - Before making changes, load graph tools and check `memodi_impact` to see what might break
 
 ### After user confirmation or rejection

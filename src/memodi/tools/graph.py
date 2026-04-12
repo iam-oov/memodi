@@ -19,6 +19,7 @@ def relate(
     to_name: str,
     relation: str,
     properties: dict | None = None,
+    valid_at: str | None = None,
 ) -> str:
     _ensure()
     graph_repository.add_edge(
@@ -28,6 +29,7 @@ def relate(
         to_name=to_name,
         edge_label=relation,
         properties=properties,
+        valid_at=valid_at,
     )
     return json.dumps(
         {"created": True, "relation": relation, "from": from_name, "to": to_name},
@@ -61,8 +63,24 @@ def graph_overview() -> str:
 
 @handle_errors
 def remove_relation(from_name: str, to_name: str, relation: str) -> str:
+    """Soft delete: marks relationship as invalid (sets invalid_at)."""
     _ensure()
-    deleted = graph_repository.remove_edge(from_name, to_name, relation)
+    invalidated = graph_repository.remove_edge(from_name, to_name, relation)
+    return json.dumps(
+        {
+            "invalidated": invalidated,
+            "from": from_name,
+            "to": to_name,
+            "relation": relation,
+        }
+    )
+
+
+@handle_errors
+def delete_relation(from_name: str, to_name: str, relation: str) -> str:
+    """Hard delete: physically removes all relationships of this type between nodes."""
+    _ensure()
+    deleted = graph_repository.hard_delete_edge(from_name, to_name, relation)
     return json.dumps(
         {"deleted": deleted, "from": from_name, "to": to_name, "relation": relation}
     )

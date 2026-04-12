@@ -22,7 +22,7 @@ mcp = FastMCP(
     host="0.0.0.0",
     port=8787,
     instructions=(
-        "memodi provides 8 core tools (always available) and 21 deferred tools "
+        "memodi provides 8 core tools (always available) and 24 deferred tools "
         "(load via ToolSearch). Core: memodi_save, memodi_search_hybrid, "
         "memodi_context, memodi_check_workspace, memodi_resolve_path, "
         "memodi_link_project, memodi_ping, memodi_relate."
@@ -220,9 +220,16 @@ def memodi_relate(
     to_name: str,
     relation: str,
     properties: dict | None = None,
+    valid_at: str | None = None,
 ) -> str:
-    """Create a relationship in the knowledge graph (e.g. repo-a DEPENDS_ON repo-b)."""
-    return graph.relate(from_type, from_name, to_type, to_name, relation, properties)
+    """Create a relationship in the knowledge graph (e.g. repo-a DEPENDS_ON repo-b).
+
+    Relationships are temporal: valid_at is set automatically (or pass ISO 8601).
+    Re-creating the same relationship invalidates the old one and creates a new version.
+    """
+    return graph.relate(
+        from_type, from_name, to_type, to_name, relation, properties, valid_at
+    )
 
 
 @mcp.tool()
@@ -245,8 +252,14 @@ def memodi_graph_overview() -> str:
 
 @mcp.tool()
 def memodi_remove_relation(from_name: str, to_name: str, relation: str) -> str:
-    """Remove a relationship from the knowledge graph."""
+    """Invalidate a relationship (soft delete). Sets invalid_at, preserves history."""
     return graph.remove_relation(from_name, to_name, relation)
+
+
+@mcp.tool()
+def memodi_delete_relation(from_name: str, to_name: str, relation: str) -> str:
+    """Hard delete a relationship. Permanently removes it from the graph."""
+    return graph.delete_relation(from_name, to_name, relation)
 
 
 async def _list_tools_with_deferred() -> list[MCPTool]:
