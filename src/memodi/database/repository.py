@@ -1,6 +1,12 @@
+import hashlib
 import json
 
 from memodi.database.connection import get_connection
+
+
+def _content_hash(title: str, content: str) -> str:
+    """SHA-256 hash of title+content for deduplication."""
+    return hashlib.sha256(f"{title}\n{content}".encode()).hexdigest()
 
 ALLOWED_TYPES = {
     "decision",
@@ -88,6 +94,8 @@ def save_observation(
     conn = get_connection()
     meta = json.dumps(metadata or {})
 
+    chash = _content_hash(title, content)
+
     if topic_key:
         existing = conn.execute(
             """
@@ -107,6 +115,7 @@ def save_observation(
                         session_id = %s,
                         metadata = %s,
                         embedding = %s,
+                        content_hash = %s,
                         revision_count = revision_count + 1,
                         updated_at = now()
                     WHERE id = %s
@@ -119,6 +128,7 @@ def save_observation(
                         session_id,
                         meta,
                         str(embedding),
+                        chash,
                         existing["id"],
                     ),
                 ).fetchone()
@@ -131,23 +141,52 @@ def save_observation(
                         type = %s,
                         session_id = %s,
                         metadata = %s,
+                        content_hash = %s,
                         revision_count = revision_count + 1,
                         updated_at = now()
                     WHERE id = %s
                     RETURNING *
                     """,
-                    (title, content, type, session_id, meta, existing["id"]),
+                    (title, content, type, session_id, meta, chash, existing["id"]),
                 ).fetchone()
             conn.commit()
             return dict(row)
+
+    # Dedup: check for identical content in same project within 15 min window
+    existing_dup = conn.execute(
+        """
+        SELECT id FROM observations
+        WHERE project_id = %s
+          AND content_hash = %s
+          AND deleted_at IS NULL
+          AND created_at > now() - interval '15 minutes'
+        LIMIT 1
+        """,
+        (project_id, chash),
+    ).fetchone()
+    if existing_dup:
+        row = conn.execute(
+            """
+            UPDATE observations
+            SET duplicate_count = duplicate_count + 1,
+                updated_at = now()
+            WHERE id = %s
+            RETURNING *
+            """,
+            (existing_dup["id"],),
+        ).fetchone()
+        conn.commit()
+        result = dict(row)
+        result["_deduplicated"] = True
+        return result
 
     if embedding is not None:
         row = conn.execute(
             """
             INSERT INTO observations
                 (project_id, session_id, type, title, content,
-                 topic_key, metadata, embedding)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                 topic_key, metadata, embedding, content_hash)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING *
             """,
             (
@@ -159,17 +198,19 @@ def save_observation(
                 topic_key,
                 meta,
                 str(embedding),
+                chash,
             ),
         ).fetchone()
     else:
         row = conn.execute(
             """
             INSERT INTO observations
-                (project_id, session_id, type, title, content, topic_key, metadata)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                (project_id, session_id, type, title, content,
+                 topic_key, metadata, content_hash)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING *
             """,
-            (project_id, session_id, type, title, content, topic_key, meta),
+            (project_id, session_id, type, title, content, topic_key, meta, chash),
         ).fetchone()
     conn.commit()
     return dict(row)
