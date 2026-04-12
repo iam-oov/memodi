@@ -250,7 +250,8 @@ def test_no_workspace_backward_compatible(project_name):
     assert any("Backward compatible observation" in r["title"] for r in results)
 
     ctx = json.loads(context(project=project_name))
-    assert any("Backward compatible observation" in r["title"] for r in ctx["observations"])
+    obs = ctx["observations"]
+    assert any("Backward compatible observation" in r["title"] for r in obs)
 
     projects = json.loads(list_projects())
     names = [r["name"] for r in projects]

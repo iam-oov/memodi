@@ -64,7 +64,12 @@ def test_full_workflow_cycle(project_name):
         wf_id,
         acceptance_criteria=[{"id": "AC-1", "description": "JWT issued on login"}],
         tasks=[
-            {"name": "Add /login endpoint", "status": "pending", "criteria": ["AC-1"], "files": []}
+            {
+                "name": "Add /login endpoint",
+                "status": "pending",
+                "criteria": ["AC-1"],
+                "files": [],
+            }
         ],
     )
 
