@@ -145,7 +145,7 @@ def test_context_returns_recent(project_name):
         )
 
     results = json.loads(context(project=project_name, limit=10))
-    result_titles = [r["title"] for r in results]
+    result_titles = [r["title"] for r in results["observations"]]
 
     assert "Third obs" in result_titles
     assert "Second obs" in result_titles
@@ -250,7 +250,7 @@ def test_no_workspace_backward_compatible(project_name):
     assert any("Backward compatible observation" in r["title"] for r in results)
 
     ctx = json.loads(context(project=project_name))
-    assert any("Backward compatible observation" in r["title"] for r in ctx)
+    assert any("Backward compatible observation" in r["title"] for r in ctx["observations"])
 
     projects = json.loads(list_projects())
     names = [r["name"] for r in projects]

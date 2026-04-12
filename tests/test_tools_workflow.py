@@ -62,9 +62,9 @@ def test_full_workflow_cycle(project_name):
 
     update_plan(
         wf_id,
-        acceptance_criteria=[{"criterion": "JWT issued on login", "met": False}],
+        acceptance_criteria=[{"id": "AC-1", "description": "JWT issued on login"}],
         tasks=[
-            {"description": "Add /login endpoint", "status": "pending", "files": []}
+            {"name": "Add /login endpoint", "status": "pending", "criteria": ["AC-1"], "files": []}
         ],
     )
 
@@ -119,8 +119,8 @@ def test_task_update(project_name):
         wf_id,
         acceptance_criteria=[],
         tasks=[
-            {"description": "Bump psycopg", "status": "pending", "files": []},
-            {"description": "Bump fastmcp", "status": "pending", "files": []},
+            {"name": "Bump psycopg", "status": "pending", "files": []},
+            {"name": "Bump fastmcp", "status": "pending", "files": []},
         ],
     )
 
