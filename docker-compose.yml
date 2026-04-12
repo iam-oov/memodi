@@ -1,5 +1,6 @@
 services:
   db:
+    image: ghcr.io/iam-oov/memodi-db:latest
     build:
       context: .
       dockerfile: docker/Dockerfile.db
