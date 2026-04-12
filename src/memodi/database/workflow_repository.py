@@ -50,6 +50,50 @@ def get_active_workflow(project_id: str) -> dict | None:
     return dict(row) if row else None
 
 
+def _validate_plan(
+    acceptance_criteria: list[dict],
+    tasks: list[dict],
+) -> list[str]:
+    """Validate AC and task structure. Returns list of warnings."""
+    warnings = []
+    ac_ids: set[str] = set()
+
+    for i, ac in enumerate(acceptance_criteria):
+        if "id" not in ac:
+            raise ValueError(
+                f"Acceptance criterion {i} missing 'id' field. "
+                "Use format: {\"id\": \"AC-1\", \"description\": \"...\"}"
+            )
+        if "description" not in ac:
+            raise ValueError(
+                f"Acceptance criterion '{ac['id']}' missing 'description'. "
+                "Use Given/When/Then format for clarity."
+            )
+        ac_ids.add(ac["id"])
+
+    for i, task in enumerate(tasks):
+        if "name" not in task:
+            raise ValueError(
+                f"Task {i} missing 'name' field. "
+                "Use format: {\"name\": \"...\", \"criteria\": [\"AC-1\"]}"
+            )
+        if "status" not in task:
+            task["status"] = "pending"
+        criteria = task.get("criteria", [])
+        if not criteria:
+            warnings.append(
+                f"Task '{task['name']}' has no 'criteria' linking to ACs"
+            )
+        for cid in criteria:
+            if cid not in ac_ids:
+                raise ValueError(
+                    f"Task '{task['name']}' references unknown criterion "
+                    f"'{cid}'. Valid IDs: {sorted(ac_ids)}"
+                )
+
+    return warnings
+
+
 def update_plan(
     workflow_id: str,
     acceptance_criteria: list[dict],
@@ -66,6 +110,9 @@ def update_plan(
         raise ValueError(
             f"Cannot update plan in phase '{row['phase']}' — only allowed in 'plan'"
         )
+
+    warnings = _validate_plan(acceptance_criteria, tasks)
+
     row = conn.execute(
         """
         UPDATE workflows
@@ -78,7 +125,10 @@ def update_plan(
         (json.dumps(acceptance_criteria), json.dumps(tasks), workflow_id),
     ).fetchone()
     conn.commit()
-    return dict(row)
+    result = dict(row)
+    if warnings:
+        result["_warnings"] = warnings
+    return result
 
 
 def transition_phase(
