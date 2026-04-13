@@ -7,7 +7,8 @@ MCP server (Python) that gives Claude Code persistent, distributed memory across
 ## Architecture
 
 ```
-Claude Code ──HTTP──► memodi-server (Docker, port 8787) ──► PostgreSQL
+Local dev:  Claude Code ──HTTP──► memodi-server (docker compose) ──► PostgreSQL (docker)
+Production: Claude Code ──HTTPS──► Caddy ──► memodi-server (uv + systemd) ──► PostgreSQL (native)
 ```
 
 ### Storage layers (PostgreSQL)
@@ -27,8 +28,22 @@ Claude Code ──HTTP──► memodi-server (Docker, port 8787) ──► Post
 - **MCP SDK**: FastMCP (streamable-http transport)
 - **Database**: PostgreSQL 16+ (pgvector + Apache AGE)
 - **Embeddings**: paraphrase-multilingual-MiniLM-L12-v2 (384d, ES+EN)
-- **Infra**: Docker Compose (DB + server)
+- **Local infra**: Docker Compose (DB from GHCR pre-built image, server from source)
+- **Production infra**: uv + systemd (server), native PostgreSQL, Caddy in Docker (TLS + API key)
 - **Config**: System env vars with MEMODI_ prefix
+
+## CI/CD Pipeline
+
+4 GitHub Actions workflows, single responsibility each:
+
+| Workflow | Trigger | Purpose |
+|----------|---------|---------|
+| `ci.yml` | PR to main, push to main | Lint + tests (38 tests, full coverage) |
+| `deploy.yml` | `ci.yml` succeeds on main | SSH to Hetzner + restart + health check |
+| `release.yml` | Tag `v*` | Auto-generated changelog + GitHub Release |
+| `db-image.yml` | Changes to `Dockerfile.db` | Build + push to `ghcr.io/iam-oov/memodi-db` |
+
+Deploy verifies `systemctl is-active memodi` after restart and fails the pipeline with journal logs if the service didn't come up.
 
 ## Plugin Structure
 
@@ -63,4 +78,5 @@ The skill tells Claude WHEN and WHY to use memory. The MCP server handles HOW.
 - Every MCP tool must have a clear, single responsibility
 - PostgreSQL is the ONLY persistence — no local files for shared state
 - Credentials come from system env vars only — never hardcode, never commit
-- Docker Compose for local dev, Hetzner for production (future)
+- Docker Compose for local dev, Hetzner for production
+- Connection pool sets `idle_in_transaction_session_timeout=30s` — DB kills abandoned transactions automatically

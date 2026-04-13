@@ -159,7 +159,30 @@ Module ──AFFECTS───► Module
 - **PostgreSQL 16**: nativo en SSD con pgvector + Apache AGE
 - **memodi-server**: Python via uv + systemd (puerto 8787)
 - **Caddy**: Docker, HTTPS automatico + API key auth
-- **CI/CD**: GitHub Actions — push a main → test → deploy automatico
+- **Imagen DB**: pre-buildeada en GHCR (`ghcr.io/iam-oov/memodi-db:latest`) con pgvector + Apache AGE
+
+### Pipeline CI/CD
+
+4 workflows de GitHub Actions, cada uno con una sola responsabilidad:
+
+| Workflow | Trigger | Que hace |
+|----------|---------|----------|
+| `ci.yml` | PR a main, push a main | Lint + tests (38 tests, 0 skippeados) |
+| `deploy.yml` | `ci.yml` pasa en main | SSH a Hetzner + `systemctl restart` + health check |
+| `release.yml` | Tag `v*` | Changelog desde el tag anterior + GitHub Release |
+| `db-image.yml` | Cambios en `Dockerfile.db` | Build + push a GHCR |
+
+El deploy falla con `exit 1` si `systemctl is-active memodi` no responde despues del restart, y vuelca los ultimos 30 logs del servicio. Se acabaron los deploys "verdes" con un server muerto.
+
+### Crear un release
+
+```bash
+# Bump version en pyproject.toml, commit, tag, push
+git tag v0.4.0
+git push origin v0.4.0
+```
+
+El workflow genera el changelog automaticamente desde el tag anterior y crea el GitHub Release.
 
 ### Deploy manual (si es necesario)
 
@@ -182,6 +205,9 @@ sudo systemctl restart memodi
 ## Desarrollo local
 
 ```bash
+# Pull la imagen pre-buildeada de DB (pgvector + AGE incluidos)
+docker compose pull db
+
 # Levantar PostgreSQL local
 docker compose up -d
 
@@ -191,12 +217,22 @@ export MEMODI_DB_USER=memodi MEMODI_DB_PASSWORD=memodi_dev
 # Instalar dependencias
 uv sync
 
-# Correr tests
+# Correr tests (incluye los 12 tests de graph que requieren Apache AGE)
 uv run pytest -v
 
 # Lint
 uv run ruff check src/ tests/
 ```
+
+Si no pulleas la imagen, docker compose la buildea desde `docker/Dockerfile.db` — compila pgvector y AGE desde source (lento pero funciona offline).
+
+## Contribuir
+
+1. Abri un PR apuntando a `main`
+2. `ci.yml` corre lint + tests automaticamente — vas a ver el check en el PR
+3. Si CI pasa y el PR se mergea, `deploy.yml` arranca solo
+
+Las conexiones a PostgreSQL tienen `idle_in_transaction_session_timeout=30s` — transacciones colgadas se matan solas. Si corres tests y los abortas a la mitad, no vas a dejar locks bloqueando la DB.
 
 ## Licencia
 
