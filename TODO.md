@@ -15,4 +15,4 @@
 - [ ] Custom domain for Hetzner server (replace sslip.io)
 - [ ] Monitor Claude Code for plugin HTTP MCP fix — could simplify install back to plugin-only
 - [x] `memodi_save` type validation: add `session` as a valid type — fixed
-- [ ] Plugin scripts (`session-start.sh`, `post-compaction.sh`, `subagent-stop.sh`) still reference localhost:8787 as fallback — should fallback to production URL instead
+- [x] Plugin scripts now default to production URL instead of localhost:8787 — fixed

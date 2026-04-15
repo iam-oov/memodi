@@ -11,6 +11,9 @@
 
 PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
+# --- Server URL (env var or production default) ---
+MEMODI_URL="${MEMODI_URL:-https://62-238-15-94.sslip.io}"
+
 # --- Parse stdin JSON ---
 INPUT=$(cat)
 MESSAGE=$(printf '%s' "$INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('last_assistant_message',''))" 2>/dev/null)
@@ -53,18 +56,6 @@ if sections:
 # Nothing meaningful extracted
 [ -z "$EXTRACTED" ] && exit 0
 
-# --- Detect server URL from .mcp.json ---
-MEMODI_URL=""
-if [ -f "${PLUGIN_ROOT}/.mcp.json" ]; then
-  MEMODI_URL=$(python3 -c "
-import json
-with open('${PLUGIN_ROOT}/.mcp.json') as f:
-    cfg = json.load(f)
-url = cfg.get('mcpServers',{}).get('memodi',{}).get('url','')
-print(url.rsplit('/mcp',1)[0] if url.endswith('/mcp') else url)
-" 2>/dev/null)
-fi
-MEMODI_URL="${MEMODI_URL:-http://localhost:8787}"
 
 # --- Build auth header ---
 AUTH_HEADER=""
