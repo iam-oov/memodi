@@ -22,30 +22,47 @@ mcp = FastMCP(
     host="0.0.0.0",
     port=8787,
     instructions=(
-        "memodi provides 8 core tools (always available) and 26 deferred tools "
-        "(load via ToolSearch). Core: memodi_save, memodi_search_hybrid, "
-        "memodi_context, memodi_check_workspace, memodi_resolve_path, "
+        "memodi provides 8 core tools (always available) and "
+        "26 deferred tools (load via ToolSearch). Core: "
+        "memodi_save, memodi_search_hybrid, memodi_context, "
+        "memodi_check_workspace, memodi_resolve_path, "
         "memodi_link_project, memodi_ping, memodi_relate."
     ),
 )
 
 
+# --- System ---
+
+
 @mcp.tool()
 def memodi_ping() -> str:
-    """Check if memodi is alive. Returns 'pong'."""
+    """Quick connectivity check — returns 'pong'.
+
+    Use at session start or when memory tools seem unresponsive.
+    """
     return ping()
 
 
 @mcp.tool()
 def memodi_status() -> str:
-    """Check memodi health: server, database, and loaded extensions."""
+    """Server health check — reports database, pgvector, and AGE status.
+
+    Use when diagnosing connection issues or verifying the stack
+    is operational.
+    """
     return status()
 
 
 @mcp.tool()
 def memodi_version() -> str:
-    """Return the memodi server version."""
+    """Returns the deployed server version.
+
+    Use to verify production matches expected release.
+    """
     return version()
+
+
+# --- Memory (core) ---
 
 
 @mcp.tool()
@@ -57,8 +74,16 @@ def memodi_save(
     topic_key: str | None = None,
     metadata: dict | None = None,
 ) -> str:
-    """Save an observation. If topic_key exists for the project, upserts it."""
-    return memory.save(project, title, content, type, topic_key, metadata)
+    """Persist a decision, discovery, bugfix, pattern, config,
+    preference, architecture, or session summary.
+
+    Call PROACTIVELY after any significant event — don't wait
+    to be asked. Use topic_key to update evolving topics
+    (same key = upsert).
+    """
+    return memory.save(
+        project, title, content, type, topic_key, metadata
+    )
 
 
 @mcp.tool()
@@ -68,91 +93,176 @@ def memodi_search(
     type: str | None = None,
     limit: int = 10,
 ) -> str:
-    """Full-text search observations for a project."""
+    """Keyword search across saved observations.
+
+    Use when you need exact term matches. For meaning-based
+    search, prefer memodi_search_hybrid.
+    """
     return memory.search(project, query, type, limit)
 
 
 @mcp.tool()
 def memodi_context(project: str, limit: int = 20) -> str:
-    """Return the most recent observations for a project."""
+    """Load recent observations for a project.
+
+    Use at session start to recover context, or when the user
+    says 'what did we do', 'where were we', 'catch me up'.
+    """
     return memory.context(project, limit)
 
 
 @mcp.tool()
 def memodi_list_projects() -> str:
-    """List all known projects."""
+    """List all known projects with their workspace assignments.
+
+    Use to see what memodi is tracking or to help the user
+    pick a project.
+    """
     return memory.list_projects()
 
 
 @mcp.tool()
-def memodi_search_global(query: str, type: str | None = None, limit: int = 10) -> str:
-    """Search across ALL workspaces for similar decisions or patterns."""
+def memodi_search_global(
+    query: str, type: str | None = None, limit: int = 10
+) -> str:
+    """Cross-workspace search — find decisions, patterns, or
+    discoveries from ANY project.
+
+    Use when the user asks 'have we solved this before?' or you
+    suspect prior art in another repo.
+    """
     return memory.search_global(query, type, limit)
+
+
+# --- Workspace management ---
 
 
 @mcp.tool()
 def memodi_list_workspaces() -> str:
-    """List all workspaces with their project count."""
+    """List all workspaces and how many projects each contains.
+
+    Use during workspace onboarding or when the user asks what
+    workspaces exist.
+    """
     return memory.list_workspaces()
 
 
 @mcp.tool()
 def memodi_link_project(project: str, workspace: str) -> str:
-    """Link a project to a workspace. Creates the workspace if it doesn't exist."""
+    """Link a project to a workspace (creates it if new).
+
+    Use after resolve_path returns unlinked, or when the user
+    confirms which workspace a project belongs to.
+    """
     return memory.link_project(project, workspace)
 
 
 @mcp.tool()
 def memodi_register_path(path: str, workspace: str) -> str:
-    """Register a path to a workspace. Multiple paths per workspace."""
+    """Map a filesystem path to a workspace so future sessions
+    auto-detect it.
+
+    Use after linking a project to register its directory for
+    resolve_path lookups.
+    """
     return memory.register_path(path, workspace)
 
 
 @mcp.tool()
 def memodi_resolve_path(path: str) -> str:
-    """Resolve a path to its workspace. Use with pwd."""
+    """Resolve a filesystem path (e.g. cwd) to its workspace.
+
+    Use at session start to detect which workspace the user is
+    in. Returns resolved: true/false.
+    """
     return memory.resolve_path(path)
 
 
 @mcp.tool()
 def memodi_check_workspace(project: str) -> str:
-    """Check if a project has a workspace. Lists available ones if not."""
+    """Check if a project is linked to a workspace.
+
+    If not, returns available workspaces for the user to choose
+    from. Use for workspace onboarding.
+    """
     return memory.check_workspace(project)
 
 
 @mcp.tool()
 def memodi_delete_workspace(workspace: str) -> str:
-    """Delete a workspace. Projects in it become unlinked."""
+    """Delete a workspace and unlink all its projects.
+
+    Destructive — ask the user for confirmation first.
+    """
     return memory.delete_workspace(workspace)
 
 
 @mcp.tool()
-def memodi_rename_workspace(old_name: str, new_name: str) -> str:
-    """Rename a workspace."""
+def memodi_rename_workspace(
+    old_name: str, new_name: str
+) -> str:
+    """Rename a workspace.
+
+    All linked projects and paths stay connected under the
+    new name.
+    """
     return memory.rename_workspace(old_name, new_name)
 
 
+# --- Search (deferred) ---
+
+
 @mcp.tool()
-def memodi_search_similar(project: str, query: str, limit: int = 10) -> str:
-    """Semantic search — find observations by meaning, not just keywords."""
+def memodi_search_similar(
+    project: str, query: str, limit: int = 10
+) -> str:
+    """Semantic (vector) search — finds observations by meaning
+    even when exact words differ.
+
+    Use when keyword search returns nothing or the user's query
+    is conceptual ('how did we handle auth?').
+    """
     return memory.search_similar(project, query, limit)
 
 
 @mcp.tool()
-def memodi_search_hybrid(project: str, query: str, limit: int = 10) -> str:
-    """Hybrid search — combines keyword (BM25) and semantic (vector) via RRF."""
+def memodi_search_hybrid(
+    project: str, query: str, limit: int = 10
+) -> str:
+    """Best-of-both search — combines keyword (BM25) and
+    semantic (vector) via Reciprocal Rank Fusion.
+
+    DEFAULT search tool: use this unless you specifically need
+    only keyword or only semantic results.
+    """
     return memory.search_hybrid(project, query, limit)
 
 
 @mcp.tool()
 def memodi_backfill(project: str) -> str:
-    """Generate embeddings for observations that don't have one yet."""
+    """Generate vector embeddings for old observations that
+    lack them.
+
+    Use after importing data or if semantic search returns
+    incomplete results.
+    """
     return memory.backfill_embeddings(project)
 
 
+# --- Workflow ---
+
+
 @mcp.tool()
-def memodi_plan(project: str, name: str, objective: str) -> str:
-    """Start a new workflow plan. Returns active workflow if one exists."""
+def memodi_plan(
+    project: str, name: str, objective: str
+) -> str:
+    """Start a structured plan to track multi-step work — test
+    suites, refactors, feature implementations, checklists.
+
+    Use when the user wants to break work into trackable tasks
+    with a plan→apply→verify→unify cycle. Returns the active
+    workflow if one already exists.
+    """
     return workflow.plan(project, name, objective)
 
 
@@ -162,19 +272,39 @@ def memodi_update_plan(
     acceptance_criteria: list[dict],
     tasks: list[dict],
 ) -> str:
-    """Update acceptance criteria and tasks for a workflow in 'plan' phase."""
-    return workflow.update_plan(workflow_id, acceptance_criteria, tasks)
+    """Define what 'done' looks like — set acceptance criteria
+    and task list for a plan.
+
+    Call after memodi_plan to flesh out the work before
+    approving it.
+    """
+    return workflow.update_plan(
+        workflow_id, acceptance_criteria, tasks
+    )
 
 
 @mcp.tool()
-def memodi_approve_plan(workflow_id: str, notes: str | None = None) -> str:
-    """Approve the plan and move the workflow to 'apply' phase."""
+def memodi_approve_plan(
+    workflow_id: str, notes: str | None = None
+) -> str:
+    """Lock in the plan and start implementation.
+
+    Moves workflow from 'plan' to 'apply' phase. Call after the
+    user has reviewed and agreed with the plan.
+    """
     return workflow.approve_plan(workflow_id, notes)
 
 
 @mcp.tool()
-def memodi_apply_done(workflow_id: str, notes: str | None = None) -> str:
-    """Mark implementation as done, move to 'verify' phase."""
+def memodi_apply_done(
+    workflow_id: str, notes: str | None = None
+) -> str:
+    """Signal that implementation is complete, ready for
+    verification.
+
+    Moves workflow from 'apply' to 'verify' phase. Call after
+    all tasks are done.
+    """
     return workflow.apply_done(workflow_id, notes)
 
 
@@ -185,19 +315,35 @@ def memodi_verify(
     passed: bool,
     notes: str | None = None,
 ) -> str:
-    """Record verification result. 'unify' if passed, 'apply' if failed."""
+    """Record whether the implementation passes verification.
+
+    If passed → moves to 'unify'. If failed → returns to
+    'apply' for fixes. Include what was checked and what failed.
+    """
     return workflow.verify(workflow_id, result, passed, notes)
 
 
 @mcp.tool()
-def memodi_unify(workflow_id: str, summary: str, notes: str | None = None) -> str:
-    """Close the loop: record summary and mark workflow as completed."""
+def memodi_unify(
+    workflow_id: str, summary: str, notes: str | None = None
+) -> str:
+    """Close the loop — record what was accomplished and mark
+    the workflow as done.
+
+    The final step in plan→apply→verify→unify. Include a
+    summary of outcomes and learnings.
+    """
     return workflow.unify(workflow_id, summary, notes)
 
 
 @mcp.tool()
 def memodi_progress(project: str) -> str:
-    """Show the active workflow state for a project."""
+    """Show current workflow status — which phase, what tasks
+    remain, acceptance criteria progress.
+
+    Use when the user asks 'where are we?', 'what's left?', or
+    to resume work on an active plan.
+    """
     return workflow.progress(project)
 
 
@@ -208,8 +354,17 @@ def memodi_task_update(
     status: str,
     notes: str | None = None,
 ) -> str:
-    """Update the status of a specific task in the workflow."""
-    return workflow.task_update(workflow_id, task_index, status, notes)
+    """Mark a task as in_progress, done, or blocked.
+
+    Use during the 'apply' phase to track progress through
+    individual tasks in the plan.
+    """
+    return workflow.task_update(
+        workflow_id, task_index, status, notes
+    )
+
+
+# --- Knowledge graph ---
 
 
 @mcp.tool()
@@ -222,63 +377,116 @@ def memodi_relate(
     properties: dict | None = None,
     valid_at: str | None = None,
 ) -> str:
-    """Create a relationship in the knowledge graph (e.g. repo-a DEPENDS_ON repo-b).
+    """Create a relationship in the knowledge graph
+    (e.g. repo-a DEPENDS_ON repo-b).
 
-    Relationships are temporal: valid_at is set automatically (or pass ISO 8601).
-    Re-creating the same relationship invalidates the old one and creates a new version.
+    Relationships are temporal: valid_at is set automatically
+    (or pass ISO 8601). Re-creating the same relationship
+    invalidates the old one and creates a new version.
     """
     return graph.relate(
-        from_type, from_name, to_type, to_name, relation, properties, valid_at
+        from_type,
+        from_name,
+        to_type,
+        to_name,
+        relation,
+        properties,
+        valid_at,
     )
 
 
 @mcp.tool()
 def memodi_dependencies(name: str) -> str:
-    """Show what a node depends on and what depends on it."""
+    """Show upstream and downstream dependencies for a node.
+
+    Use when the user asks 'what does X depend on?' or 'what
+    uses X?' to understand coupling.
+    """
     return graph.dependencies(name)
 
 
 @mcp.tool()
 def memodi_impact(name: str, max_depth: int = 5) -> str:
-    """Transitive impact analysis: what is affected if this node changes?"""
+    """Transitive impact analysis — 'what breaks if I change X?'
+
+    Walks the dependency graph up to max_depth. Use before
+    refactors, breaking changes, or to assess blast radius.
+    """
     return graph.impact_analysis(name, max_depth)
 
 
 @mcp.tool()
 def memodi_graph_overview() -> str:
-    """Get a summary of all nodes and relationships in the knowledge graph."""
+    """Full map of the knowledge graph — all nodes and
+    relationships.
+
+    Use to understand the system topology or when the user asks
+    'how is everything connected?'
+    """
     return graph.graph_overview()
 
 
 @mcp.tool()
-def memodi_remove_relation(from_name: str, to_name: str, relation: str) -> str:
-    """Invalidate a relationship (soft delete). Sets invalid_at, preserves history."""
+def memodi_remove_relation(
+    from_name: str, to_name: str, relation: str
+) -> str:
+    """Soft-delete a relationship — marks it with invalid_at
+    but keeps history.
+
+    Use when a dependency is removed but you want to preserve
+    the audit trail.
+    """
     return graph.remove_relation(from_name, to_name, relation)
 
 
 @mcp.tool()
-def memodi_delete_relation(from_name: str, to_name: str, relation: str) -> str:
-    """Hard delete a relationship. Permanently removes it from the graph."""
+def memodi_delete_relation(
+    from_name: str, to_name: str, relation: str
+) -> str:
+    """Permanently remove a relationship from the graph — no
+    history kept.
+
+    Use only to fix mistakes. Prefer memodi_remove_relation for
+    normal cleanup.
+    """
     return graph.delete_relation(from_name, to_name, relation)
+
+
+# --- Sessions ---
 
 
 @mcp.tool()
 def memodi_session_start(project: str) -> str:
-    """Start a session. Observations auto-attach to it."""
+    """Begin tracking a work session — all subsequent
+    memodi_save calls auto-attach to this session.
+
+    Closes any previous active session. Use at the start of
+    every conversation.
+    """
     return session.session_start(project)
 
 
 @mcp.tool()
 def memodi_session_end(project: str, summary: str) -> str:
-    """Close the active session with a summary (Goal / Accomplished / Next Steps)."""
+    """End the current session with a structured summary
+    (Goal / Accomplished / Next Steps).
+
+    Call before the conversation ends so the next session can
+    pick up where this one left off.
+    """
     return session.session_end(project, summary)
 
 
-async def _list_tools_with_deferred() -> list[MCPTool]:
-    """Override list_tools to mark non-core tools with defer_loading=True.
+# --- Deferred tool loading ---
 
-    Claude Code reads this field and excludes deferred tools from the initial
-    context, making them discoverable via ToolSearch on demand.
+
+async def _list_tools_with_deferred() -> list[MCPTool]:
+    """Override list_tools to mark non-core tools with
+    defer_loading=True.
+
+    Claude Code reads this field and excludes deferred tools
+    from the initial context, making them discoverable via
+    ToolSearch on demand.
     """
     tools = mcp._tool_manager.list_tools()
     result = []

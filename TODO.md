@@ -7,7 +7,7 @@
 
 ## High Impact
 
-- [ ] Rewrite MCP tool descriptions — current ones say WHAT but not WHEN/WHY. Agents don't connect user intent to the right tool. Add "When to use", context triggers, and examples to each description. Discovered via dogfooding: agent didn't suggest `memodi_plan` for a testing checklist because the description ("Start a new workflow plan") has no contextual signals.
+- [x] Rewrite MCP tool descriptions — all 34 tools now include WHEN/WHY context triggers, not just WHAT they do
 
 ## Improvements
 
