@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "memodi": {
-      "type": "http",
-      "url": "https://62-238-15-94.sslip.io/mcp",
-      "headersHelper": "${CLAUDE_PLUGIN_ROOT}/scripts/auth-headers.sh"
-    }
-  }
-}

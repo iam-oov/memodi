@@ -10,7 +10,7 @@
     {
       "name": "memodi",
       "description": "Persistent distributed memory with workspace scoping, full-text search, and workflow engine. Gives Claude memory that persists across sessions and projects.",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "author": {
         "name": "Osvaldo Hinojosa"
       },
