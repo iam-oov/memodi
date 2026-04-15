@@ -31,24 +31,49 @@ El agente usa memodi de forma PROACTIVA — guarda decisiones, bugs y descubrimi
 
 ## Quick Start
 
-### 1. Configurar la API key
+Necesitas: [Claude Code](https://docs.anthropic.com/en/docs/claude-code) instalado y una API key de memodi.
 
-Agregalo a tu shell profile (`~/.zshrc` o `~/.bashrc`):
+### Instalacion rapida
+
+```bash
+export MEMODI_API_KEY="tu-api-key"
+curl -sf https://raw.githubusercontent.com/iam-oov/memodi/main/install.sh | sh
+```
+
+> Si preferis no ejecutar scripts remotos directamente (comprensible), segui la instalacion manual.
+
+### Instalacion manual
+
+**1. Configurar la API key** — agregalo a tu shell profile (`~/.zshrc` o `~/.bashrc`):
 
 ```bash
 export MEMODI_API_KEY="tu-api-key"
 ```
 
-### 2. Instalar el plugin
+**2. Agregar el marketplace de memodi:**
 
 ```bash
 claude plugin marketplace add iam-oov/memodi
+```
+
+**3. Instalar el plugin** (hooks de sesion + skill de memoria):
+
+```bash
 claude plugin install memodi@memodi
 ```
 
-El plugin configura todo automaticamente: conexion MCP al server, hooks de sesion, y el skill de memoria.
+**4. Configurar la conexion al server:**
 
-### 3. Listo
+```bash
+claude mcp add --transport http \
+  -H "X-Api-Key: $MEMODI_API_KEY" \
+  --scope user \
+  memodi https://62-238-15-94.sslip.io/mcp
+```
+
+**5. Reiniciar Claude Code.**
+
+### Verificar
 
 Abri Claude Code en cualquier proyecto. El agente va a:
 1. Detectar que es un proyecto nuevo
