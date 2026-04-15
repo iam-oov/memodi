@@ -31,43 +31,22 @@ El agente usa memodi de forma PROACTIVA — guarda decisiones, bugs y descubrimi
 
 ## Quick Start
 
-### 1. Instalar el plugin en Claude Code
+### 1. Configurar la API key
 
-En `~/.claude/settings.json`:
+Agregalo a tu shell profile (`~/.zshrc` o `~/.bashrc`):
 
-```json
-{
-  "enabledPlugins": {
-    "memodi@memodi": true
-  },
-  "extraKnownMarketplaces": {
-    "memodi": {
-      "source": {
-        "source": "github",
-        "repo": "iam-oov/memodi"
-      }
-    }
-  }
-}
+```bash
+export MEMODI_API_KEY="tu-api-key"
 ```
 
-### 2. Conectar a produccion
+### 2. Instalar el plugin
 
-Crear `.mcp.json` en la raiz del proyecto:
-
-```json
-{
-  "mcpServers": {
-    "memodi": {
-      "type": "http",
-      "url": "https://tu-server/mcp",
-      "headers": {
-        "X-Api-Key": "TU_API_KEY"
-      }
-    }
-  }
-}
+```bash
+claude plugin marketplace add iam-oov/memodi
+claude plugin install memodi@memodi
 ```
+
+El plugin configura todo automaticamente: conexion MCP al server, hooks de sesion, y el skill de memoria.
 
 ### 3. Listo
 
