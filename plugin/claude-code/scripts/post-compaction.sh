@@ -25,14 +25,18 @@ print(url.rsplit('/mcp',1)[0] if url.endswith('/mcp') else url)
 fi
 MEMODI_URL="${MEMODI_URL:-http://localhost:8787}"
 
+# --- Build auth header ---
+AUTH_HEADER=""
+[ -n "$MEMODI_API_KEY" ] && AUTH_HEADER="-H X-Api-Key:${MEMODI_API_KEY}"
+
 # --- Check connectivity ---
-if ! curl -sf --max-time 1 "${MEMODI_URL}/mcp" > /dev/null 2>&1; then
+if ! curl -sf --max-time 1 $AUTH_HEADER "${MEMODI_URL}/mcp" > /dev/null 2>&1; then
   cat <<'EOF'
 ## Memodi — POST-COMPACTION (server unreachable)
 
 Context was compacted and the memodi server is NOT reachable.
 Memory recovery is not possible. Continue working but observations will NOT be persisted.
-Try: `docker compose up -d` in the memodi repo.
+Check that MEMODI_API_KEY is set, or try: `docker compose up -d` for local dev.
 EOF
   exit 0
 fi

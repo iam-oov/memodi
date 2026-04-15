@@ -25,17 +25,21 @@ print(url.rsplit('/mcp',1)[0] if url.endswith('/mcp') else url)
 fi
 MEMODI_URL="${MEMODI_URL:-http://localhost:8787}"
 
+# --- Build auth header ---
+AUTH_HEADER=""
+[ -n "$MEMODI_API_KEY" ] && AUTH_HEADER="-H X-Api-Key:${MEMODI_API_KEY}"
+
 # --- Check connectivity ---
-if ! curl -sf --max-time 2 "${MEMODI_URL}/mcp" > /dev/null 2>&1; then
+if ! curl -sf --max-time 2 $AUTH_HEADER "${MEMODI_URL}/mcp" > /dev/null 2>&1; then
   cat <<'EOF'
 ## Memodi — CONNECTION FAILED
 
 The memodi server is not reachable. Memory tools will NOT work this session.
 
 Possible fixes:
-- Run `docker compose up -d` in the memodi repo
-- Check if port 8787 is in use: `lsof -i :8787`
-- Check Docker: `docker ps | grep memodi`
+- Check that MEMODI_API_KEY is set in your environment
+- Verify the server is up: `curl -sf https://62-238-15-94.sslip.io/mcp`
+- For local dev: `docker compose up -d` in the memodi repo
 
 You can still work normally, but observations will NOT be persisted.
 EOF

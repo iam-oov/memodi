@@ -9,6 +9,7 @@ protocol (initialize → tools/call). Designed to be called from hooks.
 
 import asyncio
 import json
+import os
 import sys
 
 
@@ -18,8 +19,13 @@ async def save_capture(url: str, project: str, title: str, content: str) -> None
 
     mcp_url = url if url.endswith("/mcp") else f"{url}/mcp"
 
+    headers = {}
+    api_key = os.environ.get("MEMODI_API_KEY")
+    if api_key:
+        headers["X-Api-Key"] = api_key
+
     async with (
-        streamablehttp_client(mcp_url) as (read, write, _),
+        streamablehttp_client(mcp_url, headers=headers) as (read, write, _),
         ClientSession(read, write) as session,
     ):
         await session.initialize()

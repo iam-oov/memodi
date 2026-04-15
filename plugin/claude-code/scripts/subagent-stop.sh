@@ -66,8 +66,12 @@ print(url.rsplit('/mcp',1)[0] if url.endswith('/mcp') else url)
 fi
 MEMODI_URL="${MEMODI_URL:-http://localhost:8787}"
 
+# --- Build auth header ---
+AUTH_HEADER=""
+[ -n "$MEMODI_API_KEY" ] && AUTH_HEADER="-H X-Api-Key:${MEMODI_API_KEY}"
+
 # --- Check connectivity before attempting save ---
-if ! curl -sf --max-time 2 "${MEMODI_URL}/mcp" > /dev/null 2>&1; then
+if ! curl -sf --max-time 2 $AUTH_HEADER "${MEMODI_URL}/mcp" > /dev/null 2>&1; then
   exit 0  # Server not reachable, skip silently
 fi
 
