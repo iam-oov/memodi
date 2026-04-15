@@ -550,7 +550,6 @@ wheels = [
 
 [[package]]
 name = "memodi"
-version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "mcp", extra = ["cli"] },

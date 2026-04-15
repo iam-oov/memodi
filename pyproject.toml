@@ -1,6 +1,6 @@
 [project]
 name = "memodi"
-version = "0.3.0"
+dynamic = ["version"]
 description = "Persistent distributed memory for AI coding agents via MCP"
 readme = "README.md"
 authors = [{ name = "osvaldo hinojosa", email = "osvaldo.javier14@gmail.com" }]
@@ -18,6 +18,9 @@ memodi = "memodi.server:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/memodi/__about__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/memodi"]
