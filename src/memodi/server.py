@@ -103,10 +103,13 @@ def memodi_search(
 
 @mcp.tool()
 def memodi_context(project: str, limit: int = 20) -> str:
-    """Load recent observations for a project.
+    """Load recent decisions, discoveries, patterns, and session
+    summaries for a project.
 
-    Use at session start to recover context, or when the user
-    says 'what did we do', 'where were we', 'catch me up'.
+    This is the primary orientation tool — your FIRST call when
+    joining a project, before git log, TODO files, or READMEs.
+    memodi holds cross-session context that doesn't exist anywhere
+    else: what was decided, what was learned, what was tried.
     """
     return memory.context(project, limit)
 
@@ -338,11 +341,14 @@ def memodi_unify(
 
 @mcp.tool()
 def memodi_progress(project: str) -> str:
-    """Show current workflow status — which phase, what tasks
-    remain, acceptance criteria progress.
+    """Show active workflow — current phase, pending tasks, and
+    acceptance criteria progress.
 
-    Use when the user asks 'where are we?', 'what's left?', or
-    to resume work on an active plan.
+    This is the single source of truth for tracked work. Check
+    this BEFORE git log, TODO files, or issue trackers when the
+    question involves pending, remaining, or in-progress work —
+    memodi tracks structured plans with phases and tasks that
+    don't exist anywhere else.
     """
     return workflow.progress(project)
 
