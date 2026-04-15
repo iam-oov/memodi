@@ -17,6 +17,7 @@ def save(
     type: str,
     topic_key: str | None = None,
     metadata: dict | None = None,
+    occurred_at: str | None = None,
 ) -> str:
     _ensure()
     from memodi.embeddings import generate_embedding
@@ -35,6 +36,7 @@ def save(
         session_id=session_id,
         metadata=metadata,
         embedding=embedding,
+        occurred_at=occurred_at,
     )
     result = json.loads(json.dumps(obs, default=str))
     if proj.get("workspace_id") is None:

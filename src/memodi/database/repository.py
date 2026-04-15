@@ -118,6 +118,7 @@ def save_observation(
     session_id: str | None = None,
     metadata: dict | None = None,
     embedding: list[float] | None = None,
+    occurred_at: str | None = None,
 ) -> dict:
     if type not in ALLOWED_TYPES:
         raise ValueError(f"type must be one of: {', '.join(sorted(ALLOWED_TYPES))}")
@@ -147,6 +148,7 @@ def save_observation(
                         metadata = %s,
                         embedding = %s,
                         content_hash = %s,
+                        occurred_at = COALESCE(%s, occurred_at),
                         revision_count = revision_count + 1,
                         updated_at = now()
                     WHERE id = %s
@@ -160,6 +162,7 @@ def save_observation(
                         meta,
                         str(embedding),
                         chash,
+                        occurred_at,
                         existing["id"],
                     ),
                 ).fetchone()
@@ -173,12 +176,22 @@ def save_observation(
                         session_id = %s,
                         metadata = %s,
                         content_hash = %s,
+                        occurred_at = COALESCE(%s, occurred_at),
                         revision_count = revision_count + 1,
                         updated_at = now()
                     WHERE id = %s
                     RETURNING *
                     """,
-                    (title, content, type, session_id, meta, chash, existing["id"]),
+                    (
+                        title,
+                        content,
+                        type,
+                        session_id,
+                        meta,
+                        chash,
+                        occurred_at,
+                        existing["id"],
+                    ),
                 ).fetchone()
             conn.commit()
             return dict(row)
@@ -216,8 +229,8 @@ def save_observation(
             """
             INSERT INTO observations
                 (project_id, session_id, type, title, content,
-                 topic_key, metadata, embedding, content_hash)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 topic_key, metadata, embedding, content_hash, occurred_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING *
             """,
             (
@@ -230,6 +243,7 @@ def save_observation(
                 meta,
                 str(embedding),
                 chash,
+                occurred_at,
             ),
         ).fetchone()
     else:
@@ -237,11 +251,21 @@ def save_observation(
             """
             INSERT INTO observations
                 (project_id, session_id, type, title, content,
-                 topic_key, metadata, content_hash)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                 topic_key, metadata, content_hash, occurred_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING *
             """,
-            (project_id, session_id, type, title, content, topic_key, meta, chash),
+            (
+                project_id,
+                session_id,
+                type,
+                title,
+                content,
+                topic_key,
+                meta,
+                chash,
+                occurred_at,
+            ),
         ).fetchone()
     conn.commit()
     return dict(row)
@@ -329,7 +353,7 @@ def get_recent_observations(
             WHERE o.project_id = %s
               AND p.workspace_id = %s
               AND o.deleted_at IS NULL
-            ORDER BY o.created_at DESC
+            ORDER BY COALESCE(o.occurred_at, o.created_at) DESC
             LIMIT %s
             """,
             (project_id, workspace_id, limit),
@@ -339,7 +363,7 @@ def get_recent_observations(
             """
             SELECT * FROM observations
             WHERE project_id = %s AND deleted_at IS NULL
-            ORDER BY created_at DESC
+            ORDER BY COALESCE(occurred_at, created_at) DESC
             LIMIT %s
             """,
             (project_id, limit),

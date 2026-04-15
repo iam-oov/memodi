@@ -73,6 +73,7 @@ def memodi_save(
     type: str,
     topic_key: str | None = None,
     metadata: dict | None = None,
+    occurred_at: str | None = None,
 ) -> str:
     """Persist a decision, discovery, bugfix, pattern, config,
     preference, architecture, or session summary.
@@ -80,9 +81,15 @@ def memodi_save(
     Call PROACTIVELY after any significant event — don't wait
     to be asked. Use topic_key to update evolving topics
     (same key = upsert).
+
+    Pass occurred_at (ISO 8601, e.g. '2025-08-12T14:00:00Z') ONLY
+    when importing historical content that happened in the past —
+    e.g. migrating notes from legacy .md files. Ordering by
+    recency uses COALESCE(occurred_at, created_at), so omitting
+    it means "this happened now".
     """
     return memory.save(
-        project, title, content, type, topic_key, metadata
+        project, title, content, type, topic_key, metadata, occurred_at
     )
 
 

@@ -316,3 +316,109 @@ def test_save_invalid_type_rejected(project_name):
         )
     )
     assert "error" in result
+
+
+def test_occurred_at_preserves_historical_order(project_name):
+    # Simulates a bulk import: insert a historical note AFTER a recent one,
+    # but the historical one should surface older in chronological listing.
+    save(
+        project=project_name,
+        title="Recent note",
+        content="Happened today",
+        type="discovery",
+    )
+    save(
+        project=project_name,
+        title="Historical note",
+        content="Happened last year",
+        type="discovery",
+        occurred_at="2024-01-15T10:00:00Z",
+    )
+
+    results = json.loads(context(project=project_name, limit=10))
+    titles = [r["title"] for r in results["observations"]]
+
+    assert "Recent note" in titles
+    assert "Historical note" in titles
+    # Recent (occurred_at NULL → falls back to now()) ranks before historical.
+    assert titles.index("Recent note") < titles.index("Historical note")
+
+
+def test_occurred_at_orders_within_historical_batch(project_name):
+    # Bulk import order ≠ real chronological order. Verify occurred_at wins.
+    save(
+        project=project_name,
+        title="March event",
+        content="Third in real time",
+        type="discovery",
+        occurred_at="2025-03-01T00:00:00Z",
+    )
+    save(
+        project=project_name,
+        title="January event",
+        content="First in real time",
+        type="discovery",
+        occurred_at="2025-01-01T00:00:00Z",
+    )
+    save(
+        project=project_name,
+        title="February event",
+        content="Second in real time",
+        type="discovery",
+        occurred_at="2025-02-01T00:00:00Z",
+    )
+
+    results = json.loads(context(project=project_name, limit=10))
+    titles = [r["title"] for r in results["observations"]]
+
+    assert titles.index("March event") < titles.index("February event")
+    assert titles.index("February event") < titles.index("January event")
+
+
+def test_save_without_occurred_at_stays_backward_compatible(project_name):
+    # Existing callers that omit occurred_at should behave exactly as before:
+    # ordering falls back to created_at.
+    for title in ["Alpha", "Beta", "Gamma"]:
+        save(
+            project=project_name,
+            title=title,
+            content=f"Content for {title}",
+            type="discovery",
+        )
+
+    results = json.loads(context(project=project_name, limit=10))
+    titles = [r["title"] for r in results["observations"]]
+
+    assert titles.index("Gamma") < titles.index("Beta")
+    assert titles.index("Beta") < titles.index("Alpha")
+
+
+def test_occurred_at_persisted_on_upsert(project_name):
+    topic = "architecture/legacy-import"
+
+    save(
+        project=project_name,
+        title="Imported v1",
+        content="From legacy .md file",
+        type="architecture",
+        topic_key=topic,
+        occurred_at="2024-06-01T12:00:00Z",
+    )
+    # Upsert without passing occurred_at → should preserve the historical date.
+    save(
+        project=project_name,
+        title="Imported v2",
+        content="Corrected content",
+        type="architecture",
+        topic_key=topic,
+    )
+
+    proj = repository.get_or_create_project(project_name)
+    observations = repository.get_recent_observations(proj["id"])
+    topic_obs = [o for o in observations if o["topic_key"] == topic]
+
+    assert len(topic_obs) == 1
+    assert topic_obs[0]["title"] == "Imported v2"
+    assert topic_obs[0]["occurred_at"] is not None
+    assert topic_obs[0]["occurred_at"].year == 2024
+    assert topic_obs[0]["occurred_at"].month == 6
