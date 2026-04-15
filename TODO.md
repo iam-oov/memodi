@@ -2,9 +2,8 @@
 
 ## Bugs
 
-- [ ] `memodi_save` returns `_warning: "Project has no workspace"` even when the project IS linked — the save response doesn't check the project-workspace link
-- [ ] `memodi_resolve_path` tool not exposed via MCP (listed as core in server.py but not available as deferred tool)
-- [ ] `memodi_session_start` and `memodi_session_end` not available as tools — hooks reference them but ToolSearch can't find them
+- [x] `memodi_save` returns `_warning: "Project has no workspace"` even when the project IS linked — fixed in 4db365c
+- [ ] Claude Code silently drops some MCP tools — `memodi_resolve_path`, `memodi_register_path`, `memodi_session_start`, `memodi_session_end` are registered in server.py but invisible to the agent. Not a memodi bug — server reports them correctly. Workaround: hooks call these indirectly
 
 ## High Impact
 
