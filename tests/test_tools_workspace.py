@@ -11,7 +11,6 @@ from memodi.tools.memory import (
     register_path,
     rename_workspace,
     resolve_path,
-    save,
 )
 
 
@@ -36,13 +35,25 @@ def cleanup(ws_name, project_name):
     conn = get_connection()
     if conn.info.transaction_status != 0:
         conn.rollback()
-    conn.execute("DELETE FROM workspace_paths WHERE workspace_id IN (SELECT id FROM workspaces WHERE name = %s)", (ws_name,))
     conn.execute(
-        "DELETE FROM observations WHERE project_id IN (SELECT id FROM projects WHERE name = %s)",
+        """
+        DELETE FROM workspace_paths
+        WHERE workspace_id IN (SELECT id FROM workspaces WHERE name = %s)
+        """,
+        (ws_name,),
+    )
+    conn.execute(
+        """
+        DELETE FROM observations
+        WHERE project_id IN (SELECT id FROM projects WHERE name = %s)
+        """,
         (project_name,),
     )
     conn.execute(
-        "DELETE FROM workflows WHERE project_id IN (SELECT id FROM projects WHERE name = %s)",
+        """
+        DELETE FROM workflows
+        WHERE project_id IN (SELECT id FROM projects WHERE name = %s)
+        """,
         (project_name,),
     )
     conn.execute("DELETE FROM projects WHERE name = %s", (project_name,))
@@ -129,12 +140,20 @@ def test_rename_workspace_changes_name(ws_name, project_name):
 
     # Cleanup the renamed workspace too
     conn = get_connection()
-    conn.execute("DELETE FROM workspace_paths WHERE workspace_id IN (SELECT id FROM workspaces WHERE name = %s)", (new_name,))
+    conn.execute(
+        """
+        DELETE FROM workspace_paths
+        WHERE workspace_id IN (SELECT id FROM workspaces WHERE name = %s)
+        """,
+        (new_name,),
+    )
     conn.execute("DELETE FROM projects WHERE name = %s", (project_name,))
     conn.execute("DELETE FROM workspaces WHERE name = %s", (new_name,))
     conn.commit()
 
 
 def test_rename_workspace_not_found():
-    result = json.loads(rename_workspace(old_name="nonexistent-ws-12345", new_name="anything"))
+    result = json.loads(
+        rename_workspace(old_name="nonexistent-ws-12345", new_name="anything")
+    )
     assert "error" in result

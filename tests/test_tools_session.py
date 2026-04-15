@@ -25,11 +25,17 @@ def cleanup(project_name):
     if conn.info.transaction_status != 0:
         conn.rollback()
     conn.execute(
-        "DELETE FROM sessions WHERE project_id IN (SELECT id FROM projects WHERE name = %s)",
+        """
+        DELETE FROM sessions
+        WHERE project_id IN (SELECT id FROM projects WHERE name = %s)
+        """,
         (project_name,),
     )
     conn.execute(
-        "DELETE FROM observations WHERE project_id IN (SELECT id FROM projects WHERE name = %s)",
+        """
+        DELETE FROM observations
+        WHERE project_id IN (SELECT id FROM projects WHERE name = %s)
+        """,
         (project_name,),
     )
     conn.execute("DELETE FROM projects WHERE name = %s", (project_name,))

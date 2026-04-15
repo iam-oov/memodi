@@ -48,19 +48,31 @@ def cleanup(ws_name, project_name):
         (project_name,),
     )
     conn.execute(
-        "DELETE FROM workflows WHERE project_id IN (SELECT id FROM projects WHERE name = %s)",
+        """
+        DELETE FROM workflows
+        WHERE project_id IN (SELECT id FROM projects WHERE name = %s)
+        """,
         (project_name,),
     )
     conn.execute(
-        "DELETE FROM observations WHERE project_id IN (SELECT id FROM projects WHERE name = %s)",
+        """
+        DELETE FROM observations
+        WHERE project_id IN (SELECT id FROM projects WHERE name = %s)
+        """,
         (project_name,),
     )
     conn.execute(
-        "DELETE FROM sessions WHERE project_id IN (SELECT id FROM projects WHERE name = %s)",
+        """
+        DELETE FROM sessions
+        WHERE project_id IN (SELECT id FROM projects WHERE name = %s)
+        """,
         (project_name,),
     )
     conn.execute(
-        "DELETE FROM workspace_paths WHERE workspace_id IN (SELECT id FROM workspaces WHERE name = %s)",
+        """
+        DELETE FROM workspace_paths
+        WHERE workspace_id IN (SELECT id FROM workspaces WHERE name = %s)
+        """,
         (ws_name,),
     )
     conn.execute("DELETE FROM projects WHERE name = %s", (project_name,))
@@ -130,7 +142,10 @@ def test_dry_run_reports_counts_without_deleting(ws_name, project_name):
     # Nothing actually deleted.
     conn = get_connection()
     obs_count = conn.execute(
-        "SELECT COUNT(*) AS c FROM observations WHERE project_id IN (SELECT id FROM projects WHERE name = %s)",
+        """
+        SELECT COUNT(*) AS c FROM observations
+        WHERE project_id IN (SELECT id FROM projects WHERE name = %s)
+        """,
         (project_name,),
     ).fetchone()["c"]
     assert obs_count >= 2
@@ -174,14 +189,20 @@ def test_medium_deletes_observations_preserves_workspace(
     # Observations gone.
     conn = get_connection()
     obs_count = conn.execute(
-        "SELECT COUNT(*) AS c FROM observations WHERE project_id IN (SELECT id FROM projects WHERE name = %s)",
+        """
+        SELECT COUNT(*) AS c FROM observations
+        WHERE project_id IN (SELECT id FROM projects WHERE name = %s)
+        """,
         (project_name,),
     ).fetchone()["c"]
     assert obs_count == 0
 
     # Workflows gone too.
     wf_count = conn.execute(
-        "SELECT COUNT(*) AS c FROM workflows WHERE project_id IN (SELECT id FROM projects WHERE name = %s)",
+        """
+        SELECT COUNT(*) AS c FROM workflows
+        WHERE project_id IN (SELECT id FROM projects WHERE name = %s)
+        """,
         (project_name,),
     ).fetchone()["c"]
     assert wf_count == 0
