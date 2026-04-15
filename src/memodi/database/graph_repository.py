@@ -180,3 +180,42 @@ def get_graph_overview() -> dict:
         "rel agtype, from_name agtype, to_name agtype, valid_at agtype",
     )
     return {"nodes": nodes, "edges": edges}
+
+
+def count_all_graph_resources() -> dict:
+    """Count every node and edge in the graph, including invalidated edges.
+
+    Used by purge dry-run to report what would be wiped. The graph is
+    global (not workspace-scoped), so this returns totals across the
+    whole memodi graph.
+    """
+    ensure_graph()
+    node_rows = cypher_query(
+        "MATCH (n) RETURN count(n) AS c",
+        "c agtype",
+    )
+    edge_rows = cypher_query(
+        "MATCH ()-[r]->() RETURN count(r) AS c",
+        "c agtype",
+    )
+    nodes = int(node_rows[0]["c"]) if node_rows else 0
+    edges = int(edge_rows[0]["c"]) if edge_rows else 0
+    return {"nodes": nodes, "edges": edges}
+
+
+def purge_all_graph() -> dict:
+    """Hard-delete every node and edge in the graph.
+
+    Global operation — the graph has no workspace scoping, so this wipes
+    the entire memodi graph. Use only when you know the graph only
+    contains data tied to the workspace being purged, or when performing
+    a total reset.
+    """
+    ensure_graph()
+    before = count_all_graph_resources()
+    # DETACH DELETE removes the node and all its relationships in one go.
+    cypher_write("MATCH (n) DETACH DELETE n", "n agtype")
+    return {
+        "nodes_deleted": before["nodes"],
+        "edges_deleted": before["edges"],
+    }

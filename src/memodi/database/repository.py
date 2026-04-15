@@ -638,3 +638,174 @@ def update_observation_embedding(observation_id: str, embedding: list[float]) ->
         (str(embedding), observation_id),
     )
     conn.commit()
+
+
+def count_workspace_resources(workspace_name: str) -> dict | None:
+    """Count deletable resources for a workspace. Returns None if workspace
+    does not exist, so callers can distinguish 'empty' from 'missing'."""
+    conn = get_connection()
+    ws_row = conn.execute(
+        "SELECT id FROM workspaces WHERE name = %s",
+        (workspace_name,),
+    ).fetchone()
+    if not ws_row:
+        return None
+    ws_id = ws_row["id"]
+
+    observations = conn.execute(
+        """
+        SELECT COUNT(*) AS c FROM observations
+        WHERE project_id IN (SELECT id FROM projects WHERE workspace_id = %s)
+        """,
+        (ws_id,),
+    ).fetchone()["c"]
+
+    workflows = conn.execute(
+        """
+        SELECT COUNT(*) AS c FROM workflows
+        WHERE project_id IN (SELECT id FROM projects WHERE workspace_id = %s)
+        """,
+        (ws_id,),
+    ).fetchone()["c"]
+
+    workflow_transitions = conn.execute(
+        """
+        SELECT COUNT(*) AS c FROM workflow_transitions
+        WHERE workflow_id IN (
+            SELECT id FROM workflows
+            WHERE project_id IN (SELECT id FROM projects WHERE workspace_id = %s)
+        )
+        """,
+        (ws_id,),
+    ).fetchone()["c"]
+
+    sessions = conn.execute(
+        """
+        SELECT COUNT(*) AS c FROM sessions
+        WHERE project_id IN (SELECT id FROM projects WHERE workspace_id = %s)
+        """,
+        (ws_id,),
+    ).fetchone()["c"]
+
+    projects = conn.execute(
+        "SELECT COUNT(*) AS c FROM projects WHERE workspace_id = %s",
+        (ws_id,),
+    ).fetchone()["c"]
+
+    paths = conn.execute(
+        "SELECT COUNT(*) AS c FROM workspace_paths WHERE workspace_id = %s",
+        (ws_id,),
+    ).fetchone()["c"]
+
+    project_names = [
+        r["name"]
+        for r in conn.execute(
+            "SELECT name FROM projects WHERE workspace_id = %s ORDER BY name",
+            (ws_id,),
+        ).fetchall()
+    ]
+
+    return {
+        "workspace": workspace_name,
+        "observations": observations,
+        "workflows": workflows,
+        "workflow_transitions": workflow_transitions,
+        "sessions": sessions,
+        "projects": projects,
+        "workspace_paths": paths,
+        "project_names": project_names,
+    }
+
+
+def purge_workspace_data(workspace_name: str, mode: str = "medium") -> dict:
+    """Hard-delete workspace data. Returns actual deletion counts.
+
+    mode='medium': observations, workflow_transitions, workflows, sessions.
+    mode='hard': medium + workspace_paths, projects, workspace.
+
+    Does NOT touch the knowledge graph — graph has no workspace scoping.
+    Callers that want graph purge must call graph_repository.purge_all_graph()
+    explicitly (opt-in).
+    """
+    if mode not in ("medium", "hard"):
+        raise ValueError("mode must be 'medium' or 'hard'")
+
+    conn = get_connection()
+    ws_row = conn.execute(
+        "SELECT id FROM workspaces WHERE name = %s",
+        (workspace_name,),
+    ).fetchone()
+    if not ws_row:
+        raise ValueError(f"Workspace '{workspace_name}' not found")
+    ws_id = ws_row["id"]
+
+    # Delete children before parents to respect FKs.
+    transitions_deleted = conn.execute(
+        """
+        DELETE FROM workflow_transitions
+        WHERE workflow_id IN (
+            SELECT id FROM workflows
+            WHERE project_id IN (SELECT id FROM projects WHERE workspace_id = %s)
+        )
+        """,
+        (ws_id,),
+    ).rowcount
+
+    workflows_deleted = conn.execute(
+        """
+        DELETE FROM workflows
+        WHERE project_id IN (SELECT id FROM projects WHERE workspace_id = %s)
+        """,
+        (ws_id,),
+    ).rowcount
+
+    # Delete observations first — sessions have no other references, so
+    # they can be dropped cleanly once observations are gone.
+    observations_deleted = conn.execute(
+        """
+        DELETE FROM observations
+        WHERE project_id IN (SELECT id FROM projects WHERE workspace_id = %s)
+        """,
+        (ws_id,),
+    ).rowcount
+
+    sessions_deleted = conn.execute(
+        """
+        DELETE FROM sessions
+        WHERE project_id IN (SELECT id FROM projects WHERE workspace_id = %s)
+        """,
+        (ws_id,),
+    ).rowcount
+
+    paths_deleted = 0
+    projects_deleted = 0
+    workspace_deleted = False
+
+    if mode == "hard":
+        paths_deleted = conn.execute(
+            "DELETE FROM workspace_paths WHERE workspace_id = %s",
+            (ws_id,),
+        ).rowcount
+        projects_deleted = conn.execute(
+            "DELETE FROM projects WHERE workspace_id = %s",
+            (ws_id,),
+        ).rowcount
+        conn.execute(
+            "DELETE FROM workspaces WHERE id = %s",
+            (ws_id,),
+        )
+        workspace_deleted = True
+
+    conn.commit()
+
+    return {
+        "mode": mode,
+        "workspace": workspace_name,
+        "observations": observations_deleted,
+        "workflow_transitions": transitions_deleted,
+        "workflows": workflows_deleted,
+        "sessions": sessions_deleted,
+        "workspace_paths": paths_deleted,
+        "projects": projects_deleted,
+        "workspace_deleted": workspace_deleted,
+    }

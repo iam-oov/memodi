@@ -1,6 +1,6 @@
 import json
 
-from memodi.database import repository
+from memodi.database import graph_repository, repository
 from memodi.database.connection import ensure_schema
 from memodi.tools.errors import handle_errors
 
@@ -189,6 +189,90 @@ def search_hybrid(project: str, query: str, limit: int = 10) -> str:
         workspace_id=proj.get("workspace_id"),
     )
     return json.dumps(results, default=str)
+
+
+@handle_errors
+def purge_workspace(
+    workspace: str,
+    mode: str = "medium",
+    purge_graph: bool = False,
+    dry_run: bool = True,
+) -> str:
+    """Wipe workspace data for dev loops (e.g. re-importing .md files).
+
+    mode='medium': observations, workflows, workflow_transitions, sessions.
+        Projects, workspace, and workspace_paths are preserved — you can
+        re-import into the same structure.
+    mode='hard': medium + projects + workspace + workspace_paths. The
+        workspace ceases to exist.
+
+    purge_graph: if True, ALSO wipes the ENTIRE knowledge graph (global,
+        not scoped to this workspace). Only enable if you know the graph
+        only holds data for this workspace, or if you are performing a
+        total reset.
+
+    dry_run (default True): returns counts of what WOULD be deleted
+        without touching anything. Set False to execute.
+    """
+    _ensure()
+
+    if mode not in ("medium", "hard"):
+        return json.dumps(
+            {"error": "mode must be 'medium' or 'hard'"},
+        )
+
+    counts = repository.count_workspace_resources(workspace)
+    if counts is None:
+        return json.dumps(
+            {"error": f"Workspace '{workspace}' not found"},
+        )
+
+    graph_counts = None
+    if purge_graph:
+        from memodi.database.graph import ensure_graph
+
+        ensure_graph()
+        graph_counts = graph_repository.count_all_graph_resources()
+
+    if dry_run:
+        would_delete = {
+            "observations": counts["observations"],
+            "workflows": counts["workflows"],
+            "workflow_transitions": counts["workflow_transitions"],
+            "sessions": counts["sessions"],
+        }
+        would_preserve = {
+            "workspace": workspace,
+            "projects": counts["project_names"],
+            "workspace_paths": counts["workspace_paths"],
+        }
+        if mode == "hard":
+            would_delete["projects"] = counts["projects"]
+            would_delete["workspace_paths"] = counts["workspace_paths"]
+            would_delete["workspace"] = True
+            would_preserve = {}
+        if graph_counts is not None:
+            would_delete["graph_nodes"] = graph_counts["nodes"]
+            would_delete["graph_edges"] = graph_counts["edges"]
+        return json.dumps(
+            {
+                "dry_run": True,
+                "mode": mode,
+                "purge_graph": purge_graph,
+                "workspace": workspace,
+                "would_delete": would_delete,
+                "would_preserve": would_preserve,
+            }
+        )
+
+    result = repository.purge_workspace_data(workspace, mode=mode)
+
+    if purge_graph:
+        graph_result = graph_repository.purge_all_graph()
+        result["graph_nodes_deleted"] = graph_result["nodes_deleted"]
+        result["graph_edges_deleted"] = graph_result["edges_deleted"]
+    result["dry_run"] = False
+    return json.dumps(result, default=str)
 
 
 @handle_errors

@@ -208,6 +208,34 @@ def memodi_delete_workspace(workspace: str) -> str:
 
 
 @mcp.tool()
+def memodi_purge_workspace(
+    workspace: str,
+    mode: str = "medium",
+    purge_graph: bool = False,
+    dry_run: bool = True,
+) -> str:
+    """Wipe workspace data for dev loops (e.g. re-importing .md files).
+
+    HIGHLY destructive — defaults to dry_run=True. Inspect the output
+    first, then pass dry_run=False to execute.
+
+    mode='medium': deletes observations, workflows, workflow_transitions,
+    sessions. Preserves projects, workspace, and workspace_paths so you
+    can re-import into the same structure.
+    mode='hard': also deletes projects, workspace, and workspace_paths.
+
+    purge_graph=True ALSO wipes the entire knowledge graph (global, not
+    scoped to this workspace). Only enable if the graph exclusively
+    contains data for this workspace.
+
+    ALWAYS confirm with the user before passing dry_run=False.
+    """
+    return memory.purge_workspace(
+        workspace, mode, purge_graph, dry_run
+    )
+
+
+@mcp.tool()
 def memodi_rename_workspace(
     old_name: str, new_name: str
 ) -> str:
