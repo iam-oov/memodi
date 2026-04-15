@@ -23,7 +23,7 @@ mcp = FastMCP(
     port=8787,
     instructions=(
         "memodi provides 8 core tools (always available) and "
-        "26 deferred tools (load via ToolSearch). Core: "
+        "27 deferred tools (load via ToolSearch). Core: "
         "memodi_save, memodi_search_hybrid, memodi_context, "
         "memodi_check_workspace, memodi_resolve_path, "
         "memodi_link_project, memodi_ping, memodi_relate."

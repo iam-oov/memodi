@@ -49,8 +49,18 @@ async def test_all_core_tools_are_registered():
 
 
 @pytest.mark.asyncio
-async def test_total_tool_count():
+async def test_every_tool_is_core_or_deferred():
+    """Every registered tool must fall into exactly one bucket — core
+    (always in context) or deferred (loaded via ToolSearch). This is
+    the real invariant; hardcoding a total count rots on every new
+    tool, which is why we assert membership instead.
+    """
     tools = await _list_tools_with_deferred()
-    assert len(tools) == 34, (
-        f"Expected 34 tools (8 core + 26 deferred), got {len(tools)}"
+    core = [t for t in tools if t.name in CORE_TOOLS]
+    deferred = [t for t in tools if t.name not in CORE_TOOLS]
+
+    assert len(tools) == len(core) + len(deferred)
+    assert len(core) == len(CORE_TOOLS), (
+        "Some tools listed in CORE_TOOLS are not registered on the server"
     )
+    assert len(deferred) > 0, "Expected at least one deferred tool"

@@ -10,7 +10,7 @@ This protocol is MANDATORY and ALWAYS ACTIVE — not something you activate on d
 
 ## TOOL LOADING
 
-Memodi has **8 core tools** always in your context and **26 deferred tools** available via ToolSearch.
+Memodi has **8 core tools** always in your context and **27 deferred tools** available via ToolSearch.
 
 - **Core tools** — ready to use immediately, no extra steps needed
 - **Deferred tools** — call `ToolSearch("select:memodi_toolname")` to load them first
@@ -43,6 +43,7 @@ Memodi has **8 core tools** always in your context and **26 deferred tools** ava
 - `memodi_list_projects` — list all known projects
 - `memodi_delete_workspace` — delete a workspace
 - `memodi_rename_workspace` — rename a workspace
+- `memodi_purge_workspace` — wipe workspace data for dev-loop resets (destructive, dry_run default)
 
 **Graph queries** — `ToolSearch("select:memodi_dependencies,memodi_impact,memodi_graph_overview,memodi_remove_relation,memodi_delete_relation")`
 - `memodi_dependencies` — show what depends on what (current relationships only)
