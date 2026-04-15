@@ -30,23 +30,46 @@ fi
 
 MEMODI_URL="https://62-238-15-94.sslip.io/mcp"
 
+CLAUDE_SETTINGS="$HOME/.claude/settings.json"
+
 echo "Installing memodi plugin for Claude Code..."
 
 # --- Add marketplace ---
-echo "[1/3] Adding marketplace..."
+echo "[1/4] Adding marketplace..."
 claude plugin marketplace add iam-oov/memodi 2>/dev/null || true
 
 # --- Install plugin (hooks + skills) ---
-echo "[2/3] Installing plugin..."
+echo "[2/4] Installing plugin..."
 claude plugin install memodi@memodi 2>/dev/null || true
 
 # --- Configure MCP server connection ---
-echo "[3/3] Configuring MCP server..."
+echo "[3/4] Configuring MCP server..."
 claude mcp remove memodi --scope user 2>/dev/null || true
 claude mcp add --transport http \
   -H "X-Api-Key: ${MEMODI_API_KEY}" \
   --scope user \
   memodi "$MEMODI_URL"
+
+# --- Add wildcard permission for all memodi tools ---
+echo "[4/4] Adding permissions..."
+if [ -f "$CLAUDE_SETTINGS" ]; then
+  if ! grep -q '"mcp__memodi__\*"' "$CLAUDE_SETTINGS" 2>/dev/null; then
+    python3 -c "
+import json, sys
+with open('$CLAUDE_SETTINGS') as f:
+    cfg = json.load(f)
+allow = cfg.setdefault('permissions', {}).setdefault('allow', [])
+if 'mcp__memodi__*' not in allow:
+    allow.append('mcp__memodi__*')
+with open('$CLAUDE_SETTINGS', 'w') as f:
+    json.dump(cfg, f, indent=2)
+    f.write('\n')
+" 2>/dev/null || echo "  Warning: could not add permissions automatically. Add \"mcp__memodi__*\" to ~/.claude/settings.json manually."
+  fi
+else
+  mkdir -p "$HOME/.claude"
+  printf '{\n  "permissions": {\n    "allow": [\n      "mcp__memodi__*"\n    ]\n  }\n}\n' > "$CLAUDE_SETTINGS"
+fi
 
 echo ""
 echo "Done! Restart Claude Code to activate memodi."

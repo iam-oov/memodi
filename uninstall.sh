@@ -24,8 +24,25 @@ echo "[2/3] Uninstalling plugin..."
 claude plugin uninstall memodi@memodi --scope user 2>/dev/null || true
 
 # --- Remove marketplace ---
-echo "[3/3] Removing marketplace..."
+echo "[3/4] Removing marketplace..."
 claude plugin marketplace remove memodi 2>/dev/null || true
+
+# --- Remove wildcard permission ---
+echo "[4/4] Removing permissions..."
+CLAUDE_SETTINGS="$HOME/.claude/settings.json"
+if [ -f "$CLAUDE_SETTINGS" ] && grep -q '"mcp__memodi__\*"' "$CLAUDE_SETTINGS" 2>/dev/null; then
+  python3 -c "
+import json
+with open('$CLAUDE_SETTINGS') as f:
+    cfg = json.load(f)
+allow = cfg.get('permissions', {}).get('allow', [])
+if 'mcp__memodi__*' in allow:
+    allow.remove('mcp__memodi__*')
+with open('$CLAUDE_SETTINGS', 'w') as f:
+    json.dump(cfg, f, indent=2)
+    f.write('\n')
+" 2>/dev/null || true
+fi
 
 echo ""
 echo "Done! Restart Claude Code to apply changes."

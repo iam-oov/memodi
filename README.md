@@ -71,7 +71,11 @@ claude mcp add --transport http \
   memodi https://62-238-15-94.sslip.io/mcp
 ```
 
-**5. Reiniciar Claude Code.**
+**5. Permitir todas las tools de memodi** (evita aprobar una por una):
+
+Agregar `"mcp__memodi__*"` al array `permissions.allow` en `~/.claude/settings.json`.
+
+**6. Reiniciar Claude Code.**
 
 ### Verificar
 
