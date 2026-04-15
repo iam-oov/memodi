@@ -80,6 +80,20 @@ Abri Claude Code en cualquier proyecto. El agente va a:
 2. Listar workspaces existentes y preguntarte a cual linkarlo
 3. Empezar a guardar decisiones automaticamente
 
+### Desinstalar
+
+```bash
+curl -sf https://raw.githubusercontent.com/iam-oov/memodi/main/uninstall.sh | sh
+```
+
+O manualmente:
+
+```bash
+claude mcp remove memodi --scope user
+claude plugin uninstall memodi@memodi --scope user
+claude plugin marketplace remove memodi
+```
+
 ## Tools MCP (31 tools)
 
 ### Sistema
