@@ -16,3 +16,8 @@
 - [ ] Monitor Claude Code for plugin HTTP MCP fix — could simplify install back to plugin-only
 - [x] `memodi_save` type validation: add `session` as a valid type — fixed
 - [x] Plugin scripts now default to production URL instead of localhost:8787 — fixed
+
+<!-- -   El plan está en fase plan en memodi. Cuando quieras arrancarlo, hacemos
+   memodi_approve_plan y empezamos con las tareas de diseño. La próxima
+  sesión podés decir "qué hay pendiente del migration tool" y memodi te
+  lo trae. -->
