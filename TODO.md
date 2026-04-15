@@ -6,6 +6,10 @@
 - [ ] `memodi_resolve_path` tool not exposed via MCP (listed as core in server.py but not available as deferred tool)
 - [ ] `memodi_session_start` and `memodi_session_end` not available as tools — hooks reference them but ToolSearch can't find them
 
+## High Impact
+
+- [ ] Rewrite MCP tool descriptions — current ones say WHAT but not WHEN/WHY. Agents don't connect user intent to the right tool. Add "When to use", context triggers, and examples to each description. Discovered via dogfooding: agent didn't suggest `memodi_plan` for a testing checklist because the description ("Start a new workflow plan") has no contextual signals.
+
 ## Improvements
 
 - [ ] Test `install.sh` on a fresh machine / teammate's environment
