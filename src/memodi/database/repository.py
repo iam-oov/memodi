@@ -40,7 +40,7 @@ def get_or_create_project(name: str, workspace_id: str | None = None) -> dict:
         ).fetchone()
     else:
         row = conn.execute(
-            "SELECT * FROM projects WHERE name = %s AND workspace_id IS NULL",
+            "SELECT * FROM projects WHERE name = %s ORDER BY workspace_id ASC NULLS LAST LIMIT 1",
             (name,),
         ).fetchone()
     if row:

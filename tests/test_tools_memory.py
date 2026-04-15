@@ -273,3 +273,21 @@ def test_check_workspace_linked(project_name):
         assert result["workspace"]["name"] == ws_name
     finally:
         _cleanup_workspace(ws_name)
+
+
+def test_save_no_warning_when_workspace_linked():
+    ws_name = f"test-ws-{uuid.uuid4()}"
+    proj_name = f"test-proj-{uuid.uuid4()}"
+    try:
+        link_project(proj_name, ws_name)
+        result = json.loads(
+            save(
+                project=proj_name,
+                title="Should not warn",
+                content="Project is linked to a workspace",
+                type="decision",
+            )
+        )
+        assert "_warning" not in result
+    finally:
+        _cleanup_workspace(ws_name)
