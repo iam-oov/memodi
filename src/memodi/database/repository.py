@@ -16,6 +16,7 @@ ALLOWED_TYPES = {
     "config",
     "preference",
     "architecture",
+    "session",
 }
 
 

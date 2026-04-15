@@ -291,3 +291,28 @@ def test_save_no_warning_when_workspace_linked():
         assert "_warning" not in result
     finally:
         _cleanup_workspace(ws_name)
+
+
+def test_save_session_type_accepted(project_name):
+    result = json.loads(
+        save(
+            project=project_name,
+            title="Session summary: testing",
+            content="Goal: test coverage. Accomplished: P0 gaps filled.",
+            type="session",
+        )
+    )
+    assert result["type"] == "session"
+    assert "error" not in result
+
+
+def test_save_invalid_type_rejected(project_name):
+    result = json.loads(
+        save(
+            project=project_name,
+            title="Should fail",
+            content="Invalid type",
+            type="banana",
+        )
+    )
+    assert "error" in result
