@@ -56,7 +56,7 @@ export MEMODI_API_KEY="tu-api-key"
 claude plugin marketplace add iam-oov/memodi
 ```
 
-**3. Instalar el plugin** (hooks de sesion + skill de memoria):
+**3. Instalar el plugin** (hooks de sesion + skills de memoria e import):
 
 ```bash
 claude plugin install memodi@memodi
