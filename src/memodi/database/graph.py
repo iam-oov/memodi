@@ -9,8 +9,24 @@ _graph_ensured = False
 
 
 def _prepare_connection(conn: psycopg.Connection) -> None:
-    """Load AGE and set search path. Must be called per-transaction."""
-    conn.execute("LOAD 'age';")
+    """Load AGE and set search path. Must be called per-transaction.
+
+    LOAD 'age' requires superuser privileges unless the library is listed in
+    session_preload_libraries. In production (Hetzner) the memodi user is not
+    a superuser, but AGE is preloaded at connect time via
+    `ALTER DATABASE memodi SET session_preload_libraries = 'age'`. In that
+    case the explicit LOAD fails with 'access to library "age" is not
+    allowed' even though AGE is already available — we swallow that specific
+    error and continue. In local Docker dev the memodi user IS superuser, so
+    LOAD succeeds normally.
+    """
+    try:
+        conn.execute("LOAD 'age';")
+    except psycopg.errors.InsufficientPrivilege:
+        # AGE is preloaded via session_preload_libraries; the explicit LOAD
+        # is redundant and denied. Rollback the aborted transaction so
+        # subsequent statements can execute.
+        conn.rollback()
     conn.execute('SET search_path = ag_catalog, "$user", public;')
 
 
