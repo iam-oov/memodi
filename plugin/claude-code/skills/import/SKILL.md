@@ -94,7 +94,7 @@ For each file, silently:
 2. Extract observations semantically (see extraction guide below).
 3. For each observation, build the full payload: `type`, `title`, `topic_key`, `occurred_at`, `content` (What/Why/Where/Learned).
 4. Call `memodi_save`. **Do NOT call `memodi_search_similar` beforehand** — `memodi_save` already deduplicates internally via `content_hash` and upserts by `topic_key`. Trust the server. Track the response: if `duplicate_count > 0` → count as skipped in the final report.
-5. For `Supersedes:` fields → call `memodi_relate("Decision", <current>, "Decision", <superseded>, "SUPERSEDES")` after the save.
+5. For `Supersedes:` fields → call `memodi_relate(from_type="Decision", from_name=<current_topic_key>, to_type="Decision", to_name=<superseded_topic_key>, relation="SUPERSEDES")` after the save.
 6. For `Publisher:` / `Consumer:` in CONTRACTS.md → call `memodi_relate` for queue edges after the save.
 
 **Progress line** — emit ONE compact line per file (not per observation):
@@ -141,7 +141,7 @@ Read back all observations saved in this session. For each pair, reason over tit
 Create an edge only when the relationship is **CLEAR and stated** (or strongly implied) in the text. Do not hallucinate from vague thematic similarity.
 
 ```
-memodi_relate("Decision", "<topic_key_A>", "Decision", "<topic_key_B>", "<EDGE_TYPE>")
+memodi_relate(from_type="Decision", from_name="<topic_key_A>", to_type="Decision", to_name="<topic_key_B>", relation="<EDGE_TYPE>")
 ```
 
 Progress: `✔ Relationships: N edges created (M SUPERSEDES, P ENABLES, ...)` — or `0 edges` if none found.
