@@ -10,12 +10,12 @@ import os
 os.environ.setdefault("MEMODI_DB_USER", "test_user")
 os.environ.setdefault("MEMODI_DB_PASSWORD", "test_password")
 
-from unittest.mock import MagicMock  # noqa: E402
+from unittest.mock import MagicMock
 
-import psycopg  # noqa: E402
-import pytest  # noqa: E402
+import psycopg
+import pytest
 
-from memodi.database.graph import _prepare_connection  # noqa: E402
+from memodi.database.graph import _prepare_connection
 
 
 class TestPrepareConnection:
