@@ -1,12 +1,11 @@
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS age;
 
--- Preload AGE for every new connection to this database.
--- Required in production where the application user is not a superuser
--- (LOAD 'age' without this setting requires superuser privileges).
--- In local Docker dev the POSTGRES_USER is superuser, so this is just
--- a convenience that lets the app skip the explicit LOAD.
-ALTER DATABASE memodi SET session_preload_libraries = 'age';
+-- Production-only (Hetzner): preload AGE for non-superuser connections.
+-- Run manually on the server, NOT here — it can crash Docker Postgres:
+--   ALTER DATABASE memodi SET session_preload_libraries = 'age';
+-- In Docker dev the POSTGRES_USER is superuser, so LOAD 'age' works
+-- directly and session_preload_libraries is unnecessary.
 
 -- Grant AGE catalog access to the application user.
 -- Without these grants, non-superuser connections can't see ag_catalog
