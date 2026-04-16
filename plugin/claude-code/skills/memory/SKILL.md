@@ -84,13 +84,17 @@ At the START of every session, before any save or search:
 
 ## WORKSPACE ONBOARDING (only for new/unregistered paths)
 
+**⚠️ CRITICAL: You MUST ask the user for the workspace name. NEVER choose it yourself. NEVER assume a name based on the directory, repo, or project. The user decides — you wait.**
+
 1. Load workspace tools: `ToolSearch("select:memodi_list_workspaces,memodi_register_path")`
 2. Call `memodi_list_workspaces` to get existing workspaces
 3. Show the user the available workspaces with their project count
-4. Ask: "Este directorio no esta registrado. ¿A que workspace pertenece?"
-5. WAIT for the user's answer — do NOT assume or continue
-6. Call `memodi_register_path` with the full pwd path and the workspace name
-7. Call `memodi_link_project` with the project name (last dir component) and workspace
+4. Ask the user: *"Este directorio no está registrado en memodi. ¿A qué workspace lo linkeo?"*
+   - If workspaces exist, list them as options
+   - Always offer "o un nombre nuevo" as an option
+5. **STOP. Do NOT continue until the user responds with a workspace name.** Do NOT invent a name. Do NOT pick the "obvious" choice. Do NOT say "voy a crear workspace X" without being told. WAIT.
+6. Only after the user explicitly names the workspace: call `memodi_register_path` with the full pwd path and the workspace name the user gave you
+7. Call `memodi_link_project` with the project name (last dir component) and the workspace
 
 ### Workspace naming rules
 - Use SHORT DESCRIPTIVE names: "trabajo", "personal", "tesis", "escuela"
