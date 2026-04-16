@@ -15,8 +15,7 @@ jobs:
 
       - name: Start database
         run: |
-          docker compose pull db 2>/dev/null || true
-          docker compose up -d db --wait
+          docker compose up -d db --build --wait
 
       - uses: astral-sh/setup-uv@v4
         with:
