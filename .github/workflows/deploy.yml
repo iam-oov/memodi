@@ -25,7 +25,7 @@ jobs:
             cd memodi
             git fetch origin main
             git reset --hard origin/main
-            ~/.local/bin/uv sync
+            ~/.local/bin/uv sync --reinstall-package memodi
             sudo systemctl restart memodi
             sleep 3
             systemctl is-active --quiet memodi || {
