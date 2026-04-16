@@ -54,7 +54,7 @@ target/  .venv/  __pycache__/  .next/  coverage/
 
 If the user explicitly asks to include a non-allowlist file, honor it silently.
 
-## WORKFLOW (3 phases, not 4)
+## WORKFLOW (6 phases)
 
 ### Phase 1 — Discovery + workspace onboarding (silent unless onboarding needed)
 
@@ -107,7 +107,46 @@ For each file, silently:
 
 Do NOT emit preview lists, per-observation details, or extraction summaries. Those go in the final report if relevant.
 
-### Phase 4 — Final report
+### Phase 4 — Cross-file synthesis (directory imports only)
+
+> Runs automatically after Phase 3 completes. Skip entirely for single-file imports.
+
+**Trigger**: only when the import source was a **directory** (Phase 1 detected multiple files).
+
+1. Call `memodi_context <project>` to read back the observations just saved in Phase 3. Do not re-read source files.
+2. Scan silently for cross-cutting knowledge:
+   - A decision that **constrains or explains** a choice in another file
+   - A rule or convention that **multiple files reference independently**
+   - An architectural pattern that **emerges only when files are read together**
+   - A **contradiction or tension** between documents worth surfacing
+3. Generate 3–5 synthesis observations that capture knowledge **no single source file contains on its own**:
+   - `type`: `architecture` or `pattern`
+   - `topic_key`: `synthesis/<theme-slug>`
+   - `content`: standalone insight — readable without the source files
+   - Save with `memodi_save`
+4. For detected relationships between any two observations, call `memodi_relate` with `SUPERSEDES`, `CAUSED_BY`, or `ENABLES`.
+5. Progress: `✔ Synthesis: N meta-observations + M graph edges created` (or `skipped` if no cross-file patterns detected)
+
+### Phase 5 — Relationship inference
+
+Run after Phase 4 (directory) or after Phase 3 (single file). Skip if fewer than 2 observations were saved.
+
+Read back all observations saved in this session. For each pair, reason over titles and content — NO regex, NO parsing. Look for:
+
+- **SUPERSEDES**: "retired X", "replaced X", "migrated from X to Y"
+- **CAUSED_BY**: observation A states that B motivated it
+- **ENABLES**: "this allows X", "unblocks X", downstream dependencies
+- **DEPENDS_ON**: "requires X", "builds on X"
+
+Create an edge only when the relationship is **CLEAR and stated** (or strongly implied) in the text. Do not hallucinate from vague thematic similarity.
+
+```
+memodi_relate("Decision", "<topic_key_A>", "Decision", "<topic_key_B>", "<EDGE_TYPE>")
+```
+
+Progress: `✔ Relationships: N edges created (M SUPERSEDES, P ENABLES, ...)` — or `0 edges` if none found.
+
+### Phase 6 — Final report
 
 ONE report at the end, compact:
 
@@ -118,6 +157,7 @@ Project: <project> (workspace: <workspace>)
 Files processed: N
 ✔  142 saved
 ⊘   17 duplicates (memodi_save internal dedup)
+🔗   5 synthesis observations + 7 graph edges
 ⚠    3 warnings:
      - CLAUDE.md: no dated content, used file mtime as occurred_at
      - notes.md: generic .md, content extracted but review recommended
@@ -128,8 +168,25 @@ Next: memodi_context <project> | memodi_search_hybrid "<topic>"
 
 ## EXTRACTION GUIDE BY FILE TYPE
 
+### Extraction modes
+
+Two modes govern how you split a file into observations:
+
+**Structured** — file has clear, discrete entries with their own dates or identifiers.
+Read entry-by-entry. One observation per entry. Preserve dates from headers.
+Use when: DECISIONS.md, MILESTONES.md.
+
+**Synthesized** — file has no clear entry boundaries, or entries are too small to be useful alone.
+Read the WHOLE file first, then extract 3–7 thematic observations that capture the file's knowledge
+as a human expert would summarize it for a colleague. Group by concept, not by heading.
+Use when: README.md, CLAUDE.md, STATE.md, ARCHITECTURE.md, CONTRACTS.md, ROADMAP.md, generic .md.
+
+Rule of thumb: if you find yourself producing more than 8 observations from a single file,
+or any observation is under 3 meaningful sentences, switch to synthesized mode.
+
 ### DECISIONS.md (MVP — highest value)
 
+- **Mode**: structured
 - **Granularity**: one observation per `## YYYY-MM-DD — title` entry
 - `type`: `decision`
 - `occurred_at`: date parsed from the header (ISO 8601, `T00:00:00Z`)
@@ -139,6 +196,7 @@ Next: memodi_context <project> | memodi_search_hybrid "<topic>"
 
 ### CONTRACTS.md
 
+- **Mode**: synthesized — one obs per contract/queue is already a concept-level grouping
 - **Granularity**: one observation per contract/queue
 - `type`: `architecture`
 - `occurred_at`: file mtime
@@ -147,6 +205,7 @@ Next: memodi_context <project> | memodi_search_hybrid "<topic>"
 
 ### ARCHITECTURE.md
 
+- **Mode**: synthesized
 - **Granularity**: by major section
 - `type`: `architecture`
 - `occurred_at`: file mtime
@@ -154,6 +213,7 @@ Next: memodi_context <project> | memodi_search_hybrid "<topic>"
 
 ### STATE.md (rolling — current state only)
 
+- **Mode**: synthesized
 - **Granularity**: the current "Current Status" section as ONE observation
 - `type`: `architecture`
 - `occurred_at`: file mtime
@@ -162,6 +222,7 @@ Next: memodi_context <project> | memodi_search_hybrid "<topic>"
 
 ### ROADMAP.md (rolling)
 
+- **Mode**: synthesized
 - **Granularity**: committed milestones only (ignore past/done ones)
 - `type`: `decision` for committed items, `pattern` for long-term intent
 - `occurred_at`: file mtime
@@ -169,6 +230,7 @@ Next: memodi_context <project> | memodi_search_hybrid "<topic>"
 
 ### CLAUDE.md
 
+- **Mode**: synthesized — never one obs per bullet; group rules by theme (auth, style, workflow, etc.)
 - **Granularity**: by rule or convention (usually bullet or section)
 - `type`: `pattern` for conventions, `preference` for user preferences, `config` for tool setup
 - `occurred_at`: file mtime
@@ -176,6 +238,7 @@ Next: memodi_context <project> | memodi_search_hybrid "<topic>"
 
 ### README.md
 
+- **Mode**: synthesized — never one obs per heading; group by knowledge concept
 - **Granularity**: by section (Setup, Stack, Architecture, Usage)
 - `type`: `architecture` for design; `config` for setup
 - `occurred_at`: file mtime
@@ -183,6 +246,7 @@ Next: memodi_context <project> | memodi_search_hybrid "<topic>"
 
 ### MILESTONES.md
 
+- **Mode**: structured
 - **Granularity**: one observation per milestone
 - `type`: `decision`
 - `occurred_at`: milestone date if present, else file mtime
@@ -190,6 +254,7 @@ Next: memodi_context <project> | memodi_search_hybrid "<topic>"
 
 ### Generic `.md` (fallback)
 
+- **Mode**: synthesized
 - Best-effort semantic extraction, one observation per major section
 - `type`: `discovery`
 - `occurred_at`: file mtime
@@ -198,10 +263,15 @@ Next: memodi_context <project> | memodi_search_hybrid "<topic>"
 ## occurred_at RESOLUTION (in order)
 
 1. Date in the entry header (`## 2024-10-15 — Title`) → `2024-10-15T00:00:00Z`
-2. Partial date (`## 2026-03 — Title`, month only) → first of month, flag in report
+2. Partial date (`## 2026-03 — Title`, month only) → first of month; flag in report
 3. Date in the filename (`2024-10-15-note.md`) → use it
-4. File mtime from the filesystem → use it
-5. Nothing available → omit (memodi defaults to now); flag in report
+4. YAML frontmatter field — check for `date:`, `updated:`, or `last_modified:` at top of file; use first match found
+5. File mtime from the filesystem → use it
+6. Last git commit that touched the file (requires git repo) — run via Bash: `git log --follow -1 --format="%aI" -- <file_path>`; prefer over mtime when available (mtime changes on clone/checkout; commit date reflects real authorship)
+7. Per-entry git blame (requires git repo, structured mode only) — when a structured entry has no header date, run `git blame -L <first_line>,<first_line> --porcelain <file_path>` and extract `author-time`; expensive, use only when steps 1–6 produced nothing for that entry
+8. Nothing available → omit (memodi defaults to `now()`); flag in report
+
+**Note on steps 6–7**: call both via the Bash tool. Step 6 runs once per file; step 7 per entry when header date is absent. Both require a git repo — skip silently if not in one.
 
 ## DEDUPLICATION — trust the server
 
