@@ -7,12 +7,18 @@ description: "ON DEMAND — Bulk-import knowledge from .md files into memodi as 
 
 This skill is **ON DEMAND**. Run it only when the user explicitly asks to import `.md` files into memodi. Never activate on your own — the `memodi-memory` skill handles routine saves.
 
+## CORE PRINCIPLE — minimal friction
+
+The user gave you a clear intent ("import this"). Do NOT interrupt the flow with multiple confirmations. The rule: **one pre-flight briefing, then silent execute, then a final report**. Every extra prompt is friction that breaks flow on bulk imports of 50+ files.
+
 ## TRIGGER
 
 Activate ONLY when the user explicitly says something like:
 - "importá `/path`", "migrá este repo a memodi", "ingestá esta carpeta"
 - "import this folder into memodi", "migrate this file to memodi", "ingest this path"
 - Passes a filesystem path or `.md` file with clear intent to load it in bulk
+
+If the user adds phrases like "sin preguntar", "no preguntes", "sin confirmación", "go ahead", skip the briefing confirmation in Phase 2 as well (onboarding still requires confirmation — it's a permanent side-effect).
 
 Do NOT trigger for regular save flows — those belong to `memodi-memory`.
 
@@ -22,13 +28,10 @@ One-shot migration of human-written `.md` knowledge (DECISIONS, STATE, ROADMAP, 
 
 ## INPUT RESOLUTION
 
-The user provides either:
 - A **file** → process that single file
 - A **directory** → recurse and find all `.md` files matching the allowlist below
 
 ## FILE ALLOWLIST (default)
-
-Process these patterns by default:
 
 ```
 .memory/**/*.md
@@ -49,82 +52,78 @@ node_modules/  .git/  dist/  build/  vendor/
 target/  .venv/  __pycache__/  .next/  coverage/
 ```
 
-If the user explicitly asks to include `docs/**/*.md` or passes a file outside the allowlist, honor it. Confirm once.
+If the user explicitly asks to include a non-allowlist file, honor it silently.
 
-## WORKFLOW (4 phases)
+## WORKFLOW (3 phases, not 4)
 
-### Phase 1 — Discovery and plan
+### Phase 1 — Discovery + workspace onboarding (silent unless onboarding needed)
 
-1. Load required deferred tools:
-   `ToolSearch("select:memodi_search_similar,memodi_list_projects,memodi_list_workspaces,memodi_register_path")`
-2. Call `memodi_ping`. If it fails, stop and report — don't proceed.
-3. Resolve target project + workspace via `memodi_resolve_path` (core tool). If the path is unregistered, run the workspace onboarding from `memodi-memory` first.
+1. Load required deferred tools (once per session):
+   `ToolSearch("select:memodi_list_workspaces,memodi_register_path")`
+2. Call `memodi_ping`. If it fails, stop and report.
+3. Call `memodi_resolve_path` with the target repo path.
+   - If `resolved: true` → continue silently to Phase 2.
+   - If `resolved: false` → **MANDATORY onboarding** (workspace creation is a permanent side-effect; needs user consent):
+     - Call `memodi_list_workspaces` to show existing options.
+     - Ask the user: *"Este path no está registrado. ¿A qué workspace lo linkeo? (opciones: ..., o nombre nuevo)"*
+     - WAIT for answer.
+     - Call `memodi_link_project` + `memodi_register_path` with the user's choice.
 4. `Glob` the input. Apply allowlist + exclusions.
-5. For each file, collect: path, size, mtime, first 3 headers (to estimate observation count).
+5. For each file, collect: path, size, first 3 headers (to estimate observation count).
 
-### Phase 2 — Plan confirmation (MANDATORY STOP)
+### Phase 2 — One-line pre-flight briefing
 
-Present the plan to the user in this shape:
+Present a **single terse summary** and ask ONE question:
 
 ```
-Importing to project: <project>  (workspace: <workspace>)
-
-Files found (N):
-- .memory/DECISIONS.md      12 KB  last modified 2025-10-14
-- .memory/STATE.md           8 KB  last modified 2025-11-02
-- README.md                  4 KB  last modified 2025-10-01
-- ...
-
-Estimated observations: ~M  (rough count from header scan)
-
-Mode: preview-per-file — you'll see extractions from the first file before saving,
-then I'll continue for the rest unless you stop me.
-
-Proceed?
+Import plan: N file(s) from <path>, ~M observations estimated.
+Target: project "<project>" in workspace "<workspace>". Proceed?
 ```
 
-**STOP. Wait for the user's confirmation.** Do not touch memodi (beyond ping/resolve) until they say go.
+If the user already said "sin preguntar"/"go ahead", skip this briefing entirely.
 
-### Phase 3 — Process files (one at a time, knowledge-dense first)
+Otherwise STOP and wait for a yes. No further confirmations after this.
 
-Process order: `DECISIONS.md` → `CONTRACTS.md` → `ARCHITECTURE.md` → `STATE.md` → `ROADMAP.md` → `CLAUDE.md` → `README.md` → `MILESTONES.md` → rest.
+### Phase 3 — Silent execute + progress
 
-For each file:
+Process files in knowledge-dense order: `DECISIONS.md` → `CONTRACTS.md` → `ARCHITECTURE.md` → `STATE.md` → `ROADMAP.md` → `CLAUDE.md` → `README.md` → `MILESTONES.md` → rest.
 
-1. **Read** with the `Read` tool.
-2. **Extract** observations semantically (see extraction guide below).
-3. **For each candidate observation**, build the full payload: `type`, `title`, `topic_key`, `occurred_at`, `content` (What/Why/Where/Learned).
-4. **Dedup**: call `memodi_search_similar` with the observation title. If top result has similarity > 0.85 AND same `topic_key` → skip, note it for the final report.
-5. **Show extraction summary** for this file:
+For each file, silently:
 
-   ```
-   File: .memory/DECISIONS.md
-   Extracted 12 observations:
-     - [decision] 2024-08-15: Chose LiveKit over Twilio → topic: decisions/webrtc-livekit
-     - [decision] 2024-09-02: SAM for speaker isolation → topic: decisions/speaker-isolation
-     - ... (10 more)
-   Skipped 2 by dedup.
-   Saving now.
-   ```
+1. `Read` the file.
+2. Extract observations semantically (see extraction guide below).
+3. For each observation, build the full payload: `type`, `title`, `topic_key`, `occurred_at`, `content` (What/Why/Where/Learned).
+4. Call `memodi_save`. **Do NOT call `memodi_search_similar` beforehand** — `memodi_save` already deduplicates internally via `content_hash` and upserts by `topic_key`. Trust the server. Track the response: if `duplicate_count > 0` → count as skipped in the final report.
+5. For `Supersedes:` fields → call `memodi_relate("Decision", <current>, "Decision", <superseded>, "SUPERSEDES")` after the save.
+6. For `Publisher:` / `Consumer:` in CONTRACTS.md → call `memodi_relate` for queue edges after the save.
 
-6. **Save** each observation with `memodi_save`.
-7. **First file only**: after saving, ask once: *"¿Sigo igual con el resto o querés revisar cada archivo?"* Cache the answer for the rest of the session.
+**Progress line** — emit ONE compact line per file (not per observation):
+
+```
+✔ DECISIONS.md — 20 saved, 0 duplicates
+✔ STATE.md — 1 saved
+⚠ CLAUDE.md — 4 saved, 1 warning (unclear section)
+```
+
+Do NOT emit preview lists, per-observation details, or extraction summaries. Those go in the final report if relevant.
 
 ### Phase 4 — Final report
 
+ONE report at the end, compact:
+
 ```
-Import complete.
+Import complete ✔
 
-✔ 142 observations saved
-⊘  17 skipped (dedup, similarity > 0.85)
-⚠   3 files with warnings:
-    - CLAUDE.md: no dated content, used file mtime as occurred_at
-    - README.md: mixed content, extracted 4 architecture + 2 config
-    - docs/notes.md: generic .md, review recommended
+Project: <project> (workspace: <workspace>)
+Files processed: N
+✔  142 saved
+⊘   17 duplicates (memodi_save internal dedup)
+⚠    3 warnings:
+     - CLAUDE.md: no dated content, used file mtime as occurred_at
+     - notes.md: generic .md, content extracted but review recommended
+     - 2026-03 entry in DECISIONS.md: month-only date, resolved to 2026-03-01
 
-Suggested next steps:
-- memodi_context <project>           — verify
-- memodi_search_hybrid "<tema>"      — test a query
+Next: memodi_context <project> | memodi_search_hybrid "<topic>"
 ```
 
 ## EXTRACTION GUIDE BY FILE TYPE
@@ -134,9 +133,9 @@ Suggested next steps:
 - **Granularity**: one observation per `## YYYY-MM-DD — title` entry
 - `type`: `decision`
 - `occurred_at`: date parsed from the header (ISO 8601, `T00:00:00Z`)
-- `topic_key`: `decisions/<slug-of-title>`
-- `content`: preserve the structured fields (Context, Decision, Consequences, Supersedes, Files, Affected) into What/Why/Where/Learned
-- **If `Supersedes:` is present**: after saving, also call `memodi_relate("Decision", "<current>", "Decision", "<superseded>", "SUPERSEDES")`
+- `topic_key`: `decisions/<slug-of-title>` (cap slug at ~40 chars)
+- `content`: map Context → Why, Decision → What, Files/Affected → Where, Validation/Trade-offs/Follow-up/Lesson → Learned. Preserve key technical details verbatim.
+- **If `Supersedes:` field present**: call `memodi_relate(..., "SUPERSEDES")` after `memodi_save`
 
 ### CONTRACTS.md
 
@@ -144,7 +143,7 @@ Suggested next steps:
 - `type`: `architecture`
 - `occurred_at`: file mtime
 - `topic_key`: `contracts/<queue-name>`
-- **Also** create graph edges: for each `### queue_name` block with `Publisher:` and `Consumer:` fields, call `memodi_relate` with `PUBLISHES_TO` / `CONSUMES_FROM`
+- **Also** create graph edges: for each `### queue_name` block with `Publisher:` and `Consumer:`, call `memodi_relate` with `PUBLISHES_TO` / `CONSUMES_FROM`
 
 ### ARCHITECTURE.md
 
@@ -189,7 +188,7 @@ Suggested next steps:
 - `occurred_at`: milestone date if present, else file mtime
 - `topic_key`: `milestones/<milestone-slug>`
 
-### Generic `.md` (fallback, only if user explicitly included it)
+### Generic `.md` (fallback)
 
 - Best-effort semantic extraction, one observation per major section
 - `type`: `discovery`
@@ -198,29 +197,28 @@ Suggested next steps:
 
 ## occurred_at RESOLUTION (in order)
 
-1. Date in the entry header (`## 2024-10-15 — Title`) → use it (`T00:00:00Z`)
-2. Date in the filename (`2024-10-15-note.md`) → use it
-3. File mtime from the filesystem → use it
-4. Nothing available → omit (memodi defaults to now; flag in report)
+1. Date in the entry header (`## 2024-10-15 — Title`) → `2024-10-15T00:00:00Z`
+2. Partial date (`## 2026-03 — Title`, month only) → first of month, flag in report
+3. Date in the filename (`2024-10-15-note.md`) → use it
+4. File mtime from the filesystem → use it
+5. Nothing available → omit (memodi defaults to now); flag in report
 
-Always ISO 8601: `2024-10-15T00:00:00Z`.
+## DEDUPLICATION — trust the server
 
-## DEDUPLICATION
+`memodi_save` handles dedup internally:
+- **`content_hash` check**: identical content → `duplicate_count` increments, nothing new is created
+- **`topic_key` upsert**: same `topic_key` with different content → upserts (new revision), preserves history
 
-Before every `memodi_save`:
-1. Call `memodi_search_similar` with the observation title
-2. If top result has similarity > 0.85 **AND** same `topic_key` → skip (idempotent re-run)
-3. If similarity > 0.85 but different `topic_key` → save, note the overlap in the final report
-
-This makes the import **safe to re-run**. If the user interrupts mid-flow, running again picks up where it left off without duplicates.
+Therefore the skill must NOT call `memodi_search_similar` pre-save. It's redundant, slow, and adds friction for zero dedup gain. Just `memodi_save` everything and read the `duplicate_count` in the response.
 
 ## SAFETY RULES (MANDATORY)
 
-- **Never** start Phase 3 without explicit user confirmation in Phase 2
-- **Always** dedup before `memodi_save`
+- **Workspace onboarding is the only mandatory confirmation** — it's a permanent side-effect
+- After onboarding confirmed (or path already registered) and the Phase 2 briefing accepted, proceed silently through Phase 3
 - **Never** skip the final report — the user needs to see the outcome
-- **Stop and ask** if more than 20% of a file's content is unclear or contradictory
-- Before starting, tell the user: *"If you interrupt, re-running is safe — dedup skips what was already saved."*
+- If `memodi_ping` fails → stop and report, do not proceed
+- If more than 30% of a file's content is unclear or contradictory → note in warnings but keep processing (don't stop the whole import for one bad file)
+- If the user interrupts, re-running is safe — `content_hash` dedup skips what was already saved
 
 ## POST-IMPORT
 
