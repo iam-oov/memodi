@@ -21,8 +21,10 @@ jobs:
           username: memodi
           key: ${{ secrets.HETZNER_SSH_KEY }}
           script: |
+            set -e
             cd memodi
-            git pull origin main
+            git fetch origin main
+            git reset --hard origin/main
             ~/.local/bin/uv sync
             sudo systemctl restart memodi
             sleep 3
@@ -31,6 +33,14 @@ jobs:
               journalctl -u memodi -n 30 --no-pager
               exit 1
             }
+            EXPECTED=$(.venv/bin/python -c "from memodi.__about__ import __version__; print(__version__)")
+            INSTALLED=$(.venv/bin/python -c "from importlib.metadata import version; print(version('memodi'))")
+            if [ "$EXPECTED" != "$INSTALLED" ]; then
+              echo "DEPLOY FAILED: version mismatch. source=$EXPECTED, installed=$INSTALLED"
+              journalctl -u memodi -n 30 --no-pager
+              exit 1
+            fi
+            echo "Deploy verified: memodi $INSTALLED running"
             cd docker/prod
             docker compose -f docker-compose.prod.yml down
             docker compose -f docker-compose.prod.yml up -d
