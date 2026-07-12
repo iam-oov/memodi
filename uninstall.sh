@@ -16,11 +16,11 @@ fi
 echo "Uninstalling memodi from Claude Code..."
 
 # --- Remove MCP server ---
-echo "[1/3] Removing MCP server..."
+echo "[1/4] Removing MCP server..."
 claude mcp remove memodi --scope user 2>/dev/null || true
 
 # --- Uninstall plugin ---
-echo "[2/3] Uninstalling plugin..."
+echo "[2/4] Uninstalling plugin..."
 claude plugin uninstall memodi@memodi --scope user 2>/dev/null || true
 
 # --- Remove marketplace ---
@@ -47,5 +47,6 @@ fi
 echo ""
 echo "Done! Restart Claude Code to apply changes."
 echo ""
-echo "Note: MEMODI_API_KEY in your shell profile (~/.zshrc or ~/.bashrc)"
-echo "was not removed. Delete it manually if you no longer need it."
+echo "Note: MEMODI_API_KEY and MEMODI_MACHINE in your shell profile"
+echo "(~/.zshrc or ~/.bashrc) were not removed. Delete them manually"
+echo "if you no longer need them."

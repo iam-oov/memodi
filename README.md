@@ -29,14 +29,35 @@ Claude decide que vale la pena recordar. memodi persiste y consulta. Sin llamada
 
 El agente usa memodi de forma PROACTIVA — guarda decisiones, bugs y descubrimientos automaticamente sin que el usuario lo pida. Las instrucciones viajan con el skill del plugin.
 
+## Modelo de autenticacion
+
+memodi usa cuentas reales por usuario, no una key compartida entre todos:
+
+- Alta en `/signup` (ruta publica del server, sin auth de MCP por diseno — es el unico punto de entrada sin key)
+- La api key (`mmd_...`) se muestra UNA SOLA VEZ al registrarte; el server solo guarda su hash, nunca puede volver a mostrartela
+- `X-Memodi-Api-Key` identifica al usuario y es el UNICO control de acceso a nivel app frente a `/mcp` — no hay otra capa delante
+- `X-Memodi-Machine` identifica la maquina; los paths se registran por `(usuario, maquina, path)`, asi la misma carpeta puede resolver a workspaces distintos en maquinas distintas
+- `path` (el cwd del caller) es un parametro explicito en cada llamada a una tool de proyecto — memodi es INERTE para paths no registrados: devuelve `{"type": "not_started"}`, sin auto-creacion de proyectos ni workspaces
+- Key ausente o invalida -> `{"type": "not_authenticated"}`
+
 ## Quick Start
 
-Necesitas: [Claude Code](https://docs.anthropic.com/en/docs/claude-code) instalado y una API key de memodi.
+Necesitas: [Claude Code](https://docs.anthropic.com/en/docs/claude-code) instalado y una API key propia de memodi (una por usuario, no se comparte).
+
+### 0. Conseguir tu API key
+
+Registrate en la pagina de signup del server (reemplaza la URL por la de tu instancia):
+
+```
+https://62-238-15-94.sslip.io/signup
+```
+
+Copia la api key (`mmd_...`) apenas la veas — se muestra una sola vez.
 
 ### Instalacion rapida
 
 ```bash
-export MEMODI_API_KEY="tu-api-key"
+export MEMODI_API_KEY="mmd_..."
 curl -sf https://raw.githubusercontent.com/iam-oov/memodi/main/install.sh | sh
 ```
 
@@ -47,7 +68,7 @@ curl -sf https://raw.githubusercontent.com/iam-oov/memodi/main/install.sh | sh
 **1. Configurar la API key** — agregalo a tu shell profile (`~/.zshrc` o `~/.bashrc`):
 
 ```bash
-export MEMODI_API_KEY="tu-api-key"
+export MEMODI_API_KEY="mmd_..."
 ```
 
 **2. Agregar el marketplace de memodi:**
@@ -62,11 +83,12 @@ claude plugin marketplace add iam-oov/memodi
 claude plugin install memodi@memodi
 ```
 
-**4. Configurar la conexion al server:**
+**4. Configurar la conexion al server** (dos headers: tu identidad de usuario y la de esta maquina):
 
 ```bash
 claude mcp add --transport http \
-  -H "X-Api-Key: $MEMODI_API_KEY" \
+  -H "X-Memodi-Api-Key: $MEMODI_API_KEY" \
+  -H "X-Memodi-Machine: $(hostname)" \
   --scope user \
   memodi https://62-238-15-94.sslip.io/mcp
 ```
@@ -80,8 +102,8 @@ Agregar `"mcp__memodi__*"` al array `permissions.allow` en `~/.claude/settings.j
 ### Verificar
 
 Abri Claude Code en cualquier proyecto. El agente va a:
-1. Detectar que es un proyecto nuevo
-2. Listar workspaces existentes y preguntarte a cual linkarlo
+1. Chequear si el path ya esta registrado (llamando `memodi_context`)
+2. Si no lo esta, te va a pedir que corras `memodi_workspace_start` sobre la carpeta padre que agrupa tus repos (o que elijas un workspace existente si ya tenes uno en otra maquina)
 3. Empezar a guardar decisiones automaticamente
 
 ### Desinstalar
@@ -98,7 +120,10 @@ claude plugin uninstall memodi@memodi --scope user
 claude plugin marketplace remove memodi
 ```
 
-## Tools MCP (31 tools)
+## Tools MCP (33 tools)
+
+Todas las tools de proyecto (memoria, workflow, sesiones) reciben `path` (el cwd del
+caller) y lo resuelven contra un workspace registrado — ver Modelo de autenticacion.
 
 ### Sistema
 | Tool | Descripcion |
@@ -115,9 +140,9 @@ claude plugin marketplace remove memodi
 | `memodi_search_similar` | Buscar por significado (semantica) |
 | `memodi_search_hybrid` | Mejor de ambos: keyword + semantica con RRF |
 | `memodi_context` | Cargar contexto reciente de un proyecto |
-| `memodi_search_global` | Buscar keywords en TODOS los workspaces |
+| `memodi_search_global` | Buscar keywords en TODOS tus propios proyectos (scoped al usuario, no cruza cuentas) |
 | `memodi_backfill` | Generar embeddings para observaciones viejas |
-| `memodi_list_projects` | Listar proyectos conocidos |
+| `memodi_list_projects` | Listar tus proyectos conocidos y su workspace |
 
 ### Grafo de conocimiento (proactivo — el agente crea relaciones al descubrirlas)
 | Tool | Descripcion |
@@ -126,16 +151,18 @@ claude plugin marketplace remove memodi
 | `memodi_dependencies` | Que depende de que |
 | `memodi_impact` | Analisis de impacto transitivo: "que se rompe si cambio X?" |
 | `memodi_graph_overview` | Resumen de todos los nodos y relaciones |
-| `memodi_remove_relation` | Eliminar una relacion |
+| `memodi_remove_relation` | Invalidar una relacion (soft delete, conserva historial) |
+| `memodi_delete_relation` | Eliminar una relacion permanentemente (hard delete) |
 
-### Workspaces
+### Workspaces (inerte para paths no registrados — sin auto-creacion)
 | Tool | Descripcion |
 |------|-------------|
-| `memodi_check_workspace` | Verificar si un proyecto tiene workspace |
-| `memodi_link_project` | Linkar proyecto a un workspace |
-| `memodi_list_workspaces` | Listar workspaces disponibles |
+| `memodi_workspace_start` | Registrar una carpeta padre como workspace en esta maquina — el UNICO gate de onboarding |
+| `memodi_list_workspaces` | Listar tus workspaces con su cantidad de proyectos |
+| `memodi_merge_projects` | Fusionar un proyecto en otro (repara duplicados, dry_run por defecto) |
 | `memodi_delete_workspace` | Eliminar un workspace |
 | `memodi_rename_workspace` | Renombrar un workspace |
+| `memodi_purge_workspace` | Vaciar datos de un workspace para reimportar (destructivo, dry_run por defecto) |
 
 ### Workflow (solo cuando el usuario pide planificacion)
 | Tool | Descripcion |
@@ -148,6 +175,12 @@ claude plugin marketplace remove memodi
 | `memodi_unify` | Cerrar el loop |
 | `memodi_progress` | Ver estado del workflow activo |
 | `memodi_task_update` | Actualizar estado de una tarea |
+
+### Sesiones
+| Tool | Descripcion |
+|------|-------------|
+| `memodi_session_start` | Iniciar una sesion (las observaciones se auto-adjuntan) |
+| `memodi_session_end` | Cerrar sesion con un resumen estructurado |
 
 ## Modelo del grafo
 

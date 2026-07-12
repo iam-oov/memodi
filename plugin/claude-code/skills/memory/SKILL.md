@@ -10,7 +10,7 @@ This protocol is MANDATORY and ALWAYS ACTIVE — not something you activate on d
 
 ## TOOL LOADING
 
-Memodi has **8 core tools** always in your context and **27 deferred tools** available via ToolSearch.
+Memodi has **6 core tools** always in your context and **27 deferred tools** available via ToolSearch.
 
 - **Core tools** — ready to use immediately, no extra steps needed
 - **Deferred tools** — call `ToolSearch("select:memodi_toolname")` to load them first
@@ -24,9 +24,7 @@ Memodi has **8 core tools** always in your context and **27 deferred tools** ava
 | `memodi_save` | Save observations (auto-generates semantic embedding) |
 | `memodi_search_hybrid` | Best search: keyword + semantic with RRF scoring |
 | `memodi_context` | Load recent observations for a project |
-| `memodi_check_workspace` | Check if a project has a workspace |
-| `memodi_resolve_path` | Resolve a filesystem path to its workspace |
-| `memodi_link_project` | Link a project to a workspace |
+| `memodi_workspace_start` | Register a parent folder as a workspace — the ONLY onboarding gate |
 | `memodi_ping` | Check if server is alive |
 | `memodi_relate` | Create a relationship in the knowledge graph |
 
@@ -35,12 +33,12 @@ Memodi has **8 core tools** always in your context and **27 deferred tools** ava
 **Alternative search** — `ToolSearch("select:memodi_search,memodi_search_similar,memodi_search_global")`
 - `memodi_search` — keyword search (exact words)
 - `memodi_search_similar` — semantic search (finds by meaning, not words)
-- `memodi_search_global` — keyword search across ALL workspaces
+- `memodi_search_global` — keyword search across ALL of the caller's OWN projects (owner-scoped, not cross-user)
 
-**Workspace admin** — `ToolSearch("select:memodi_list_workspaces,memodi_register_path,memodi_list_projects")`
-- `memodi_list_workspaces` — list all workspaces with project count
-- `memodi_register_path` — register a filesystem path to a workspace
-- `memodi_list_projects` — list all known projects
+**Workspace admin** — `ToolSearch("select:memodi_list_workspaces,memodi_list_projects,memodi_merge_projects,memodi_delete_workspace,memodi_rename_workspace,memodi_purge_workspace")`
+- `memodi_list_workspaces` — list the caller's own workspaces with project count
+- `memodi_list_projects` — list the caller's own known projects and workspace assignments
+- `memodi_merge_projects` — repair tool: merge one project into another, moving observations/sessions/workflows (destructive, dry_run default)
 - `memodi_delete_workspace` — delete a workspace
 - `memodi_rename_workspace` — rename a workspace
 - `memodi_purge_workspace` — wipe workspace data for dev-loop resets (destructive, dry_run default)
@@ -73,37 +71,72 @@ Memodi has **8 core tools** always in your context and **27 deferred tools** ava
 **Maintenance** — `ToolSearch("select:memodi_backfill")`
 - `memodi_backfill` — generate embeddings for old observations without them
 
-## WORKSPACE AUTO-DETECTION (mandatory at session start)
+## WORKSPACE GATE (mandatory before any project-scoped call)
 
-At the START of every session, before any save or search:
+memodi is **INERT for unregistered paths** — there is no auto-creation of projects or
+workspaces. Every project-scoped tool takes `path` (the caller's cwd), and it must
+resolve to a workspace registered via `memodi_workspace_start` on this exact machine.
+There is no separate "check" or "resolve" tool — you find out by trying an operation:
 
-1. Get the current working directory (pwd)
-2. Call `memodi_resolve_path` with the full path (core — always available)
-3. If `resolved: true` → workspace is known, use it for all operations. Derive project name from the last directory component of pwd.
-4. If `resolved: false` → this is a new path, run ONBOARDING below
+1. Call a core project-scoped tool (e.g. `memodi_context`) with `path: "<cwd>"`.
+2. If it returns `{"type": "not_started"}` → this path has no registered workspace on
+   this machine. Follow WORKSPACE ONBOARDING below.
+3. If it returns `{"type": "not_authenticated"}` → the configured api key is missing or
+   invalid. Tell the user once; memodi cannot function until the plugin is reconfigured
+   with a valid key (see README.md / install.sh). Do not retry this on every save.
+4. Otherwise → the workspace is resolved. Resolve **once per session** — do not
+   repeat this check before every subsequent call.
 
-## WORKSPACE ONBOARDING (only for new/unregistered paths)
+### CRITICAL — pass `path`, never invent a `project` name
 
-**⚠️ CRITICAL: You MUST ask the user for the workspace name. NEVER choose it yourself. NEVER assume a name based on the directory, repo, or project. The user decides — you wait.**
+Every project-scoped tool takes `path`. Pass it ALWAYS. Do not pass `project` unless
+you have a deliberate, one-time reason to split a single repo into multiple logical
+projects — and if you do, use that SAME explicit name on every future call for that
+repo. When `project` is omitted, the server derives it as `basename(path)`. Mixing an
+explicit project name with omitted-project calls for the SAME repo silently splits its
+memories across two projects inside the same workspace. **When in doubt, omit
+`project` and let `path` drive it.**
 
-1. Load workspace tools: `ToolSearch("select:memodi_list_workspaces,memodi_register_path")`
-2. Call `memodi_list_workspaces` to get existing workspaces
-3. Show the user the available workspaces with their project count
-4. Ask the user: *"Este directorio no está registrado en memodi. ¿A qué workspace lo linkeo?"*
-   - If workspaces exist, list them as options
-   - Always offer "o un nombre nuevo" as an option
-5. **STOP. Do NOT continue until the user responds with a workspace name.** Do NOT invent a name. Do NOT pick the "obvious" choice. Do NOT say "voy a crear workspace X" without being told. WAIT.
-6. Only after the user explicitly names the workspace: call `memodi_register_path` with the full pwd path and the workspace name the user gave you
-7. Call `memodi_link_project` with the project name (last dir component) and the workspace
+## WORKSPACE ONBOARDING (only for `not_started` paths)
+
+**⚠️ CRITICAL: Never invent or guess a workspace name. The user decides — you wait.**
+
+memodi models workspaces like VS Code's multi-root workspace: you register the
+**parent folder** that holds multiple related repos (not each repo individually), and a
+path resolves to the workspace whose registered path is the longest matching prefix.
+A repo at `/home/user/work/repo-a` resolves through a workspace registered at
+`/home/user/work` — each repo then becomes its own project inside that workspace.
+
+1. Load `ToolSearch("select:memodi_list_workspaces")` and call `memodi_list_workspaces`
+   — this lists the workspaces already registered for the caller (owner-scoped: only
+   the user's own, across all of their machines).
+2. **Machine #2 flow** — if this is a new machine and the listing already returns
+   workspaces (the user set memodi up elsewhere first): show the list and ask the user
+   to pick ONE. Pass the workspace name to `memodi_workspace_start` **EXACTLY as
+   returned by the listing** — never retype, translate, or "clean up" it. Any drift
+   (typo, casing, extra whitespace) silently creates a brand-new workspace instead of
+   attaching to the existing one. **You never invent the name — the user always picks
+   from what the listing returned, or explicitly asks for a new one.**
+3. **First machine / no fit** — if no existing workspace fits, ask the user for a short
+   descriptive name for the parent folder (e.g. "trabajo", "personal", "tesis") —
+   never a path, never a project name.
+4. **STOP and WAIT** for the user's answer. Do not proceed, do not assume, do not say
+   "voy a crear el workspace X" before they've responded.
+5. Call `memodi_workspace_start(path=<parent folder>, workspace=<name the user gave or
+   picked>)`. Use the parent folder that contains the caller's repos, not the current
+   repo's own path — unless the user genuinely works out of a single repo.
+6. From then on, every path under that parent resolves automatically on this machine —
+   no per-repo registration needed.
 
 ### Workspace naming rules
 - Use SHORT DESCRIPTIVE names: "trabajo", "personal", "tesis", "escuela"
 - NEVER use file paths as workspace names
 - NEVER use project names as workspace names
-- A workspace groups MULTIPLE related projects
-- Examples: "phone-call-memodi" contains repo-a, repo-b, repo-c, repo-d
+- A workspace groups MULTIPLE related projects (parent-folder model)
+- Examples: "trabajo" contains repo-a, repo-b, repo-c, repo-d
 
-This registration happens ONCE per path. After that, memodi auto-detects the workspace from the directory.
+This registration happens ONCE per (machine, path). After that, memodi auto-detects
+the workspace from the path on that machine.
 
 ## PROACTIVE SAVE TRIGGERS (mandatory — do NOT wait for user to ask)
 
@@ -148,7 +181,8 @@ Re-creating the same relationship invalidates the old version and creates a new 
 
 ## Format for memodi_save
 
-- **project**: derive from current working directory or git remote name
+- **path**: the caller's cwd — ALWAYS pass this, on every call. See the CRITICAL note
+  above about `project` — do not derive or invent one.
 - **title**: Verb + what — short, searchable (e.g. "Chose LiveKit over Twilio for WebRTC")
 - **type**: decision | bugfix | discovery | pattern | config | preference | architecture
 - **topic_key** (recommended for evolving topics): stable key like "architecture/auth-model". Same topic_key = upsert (updates existing, tracks revisions)
@@ -166,21 +200,21 @@ Re-creating the same relationship invalidates the old version and creates a new 
 ## WHEN TO SEARCH MEMORY
 
 When the user asks to recall something — any variation of "remember", "recall", "what did we do", "acordate", "que hicimos", or references to past work:
-1. Call `memodi_context` with the project name — gets recent observations (core — always available)
-2. If not found, call `memodi_search_hybrid` — combines keyword + semantic (core — always available)
+1. Call `memodi_context` with `path` — gets recent observations (core — always available)
+2. If not found, call `memodi_search_hybrid` with `path` — combines keyword + semantic (core — always available)
 3. For project discovery, load `ToolSearch("select:memodi_list_projects")` then call it
 
 Also search memory PROACTIVELY when:
 - Starting work on a project — call `memodi_context` first to load recent observations
 - Starting something that might have been done before
 - User mentions a topic you have no context on
-- User references another project — search that project's observations
+- User references another project — search that project's observations (pass that project's own `path`)
 
 ### Which search tool to use
 - `memodi_search_hybrid` — default choice, always available, best results
 - `memodi_search` — when you know exact words (load via ToolSearch first)
 - `memodi_search_similar` — when searching by concept (load via ToolSearch first)
-- `memodi_search_global` — cross-workspace results (load via ToolSearch first)
+- `memodi_search_global` — cross-project results across the caller's OWN projects (load via ToolSearch first)
 
 ## WORKFLOW PROTOCOL (only when user requests it)
 
@@ -204,14 +238,14 @@ Workflow (memodi_plan/approve/verify/unify) is ON DEMAND.
 Sessions group observations within a work period. Observations are auto-attached to the active session.
 
 ### Starting a session
-After workspace detection and context loading, load session tools and start a session:
+After the workspace gate resolves and context loading, load session tools and start a session:
 1. `ToolSearch("select:memodi_session_start")`
-2. Call `memodi_session_start` with the project name
+2. Call `memodi_session_start` with `path`
 
 ### Ending a session
 Before the user ends the conversation or says "done"/"listo"/"that's it":
 1. `ToolSearch("select:memodi_session_end")`
-2. Call `memodi_session_end` with a structured summary:
+2. Call `memodi_session_end` with `path` and a structured summary:
 
 ```
 ## Goal

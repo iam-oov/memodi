@@ -2,7 +2,9 @@
 # Memodi — SubagentStop hook
 #
 # Captures key learnings from subagent output and saves them to memodi.
-# Runs async — does not block Claude.
+# Runs async — does not block Claude. Opt-in inert: if the caller's path
+# has no registered workspace (not_started), mcp-capture.py exits
+# silently — no spam, no error surfaced to the user.
 #
 # stdin JSON fields:
 #   last_assistant_message — the subagent's final reply text
@@ -24,7 +26,6 @@ AGENT_TYPE=$(printf '%s' "$INPUT" | python3 -c "import sys,json; print(json.load
 [ -z "$MESSAGE" ] && exit 0
 
 CWD="${CWD:-$PWD}"
-PROJECT=$(basename "$CWD")
 
 # --- Extract key sections ---
 EXTRACTED=$(printf '%s' "$MESSAGE" | python3 -c "
@@ -56,19 +57,20 @@ if sections:
 # Nothing meaningful extracted
 [ -z "$EXTRACTED" ] && exit 0
 
-
-# --- Build auth header ---
-AUTH_HEADER=""
-[ -n "$MEMODI_API_KEY" ] && AUTH_HEADER="-H X-Api-Key:${MEMODI_API_KEY}"
+# --- Build auth headers (per-user api key + machine identity) ---
+MACHINE="${MEMODI_MACHINE:-$(hostname 2>/dev/null)}"
+AUTH_HEADERS=""
+[ -n "$MEMODI_API_KEY" ] && AUTH_HEADERS="-H X-Memodi-Api-Key:${MEMODI_API_KEY}"
+[ -n "$MACHINE" ] && AUTH_HEADERS="$AUTH_HEADERS -H X-Memodi-Machine:${MACHINE}"
 
 # --- Check connectivity before attempting save ---
-if ! curl -sf --max-time 2 $AUTH_HEADER "${MEMODI_URL}/mcp" > /dev/null 2>&1; then
+if ! curl -s -o /dev/null --max-time 2 $AUTH_HEADERS "${MEMODI_URL}/mcp" 2>/dev/null; then
   exit 0  # Server not reachable, skip silently
 fi
 
-# --- Save via MCP protocol ---
+# --- Save via MCP protocol (opt-in inert: not_started exits silently) ---
 TITLE="Subagent (${AGENT_TYPE}) findings"
 python3 "${PLUGIN_ROOT}/scripts/mcp-capture.py" \
-  "$MEMODI_URL" "$PROJECT" "$TITLE" "$EXTRACTED" 2>/dev/null
+  "$MEMODI_URL" "$CWD" "$TITLE" "$EXTRACTED" 2>/dev/null
 
 exit 0

@@ -59,15 +59,17 @@ If the user explicitly asks to include a non-allowlist file, honor it silently.
 ### Phase 1 — Discovery + workspace onboarding (silent unless onboarding needed)
 
 1. Load required deferred tools (once per session):
-   `ToolSearch("select:memodi_list_workspaces,memodi_register_path")`
+   `ToolSearch("select:memodi_list_workspaces")`
 2. Call `memodi_ping`. If it fails, stop and report.
-3. Call `memodi_resolve_path` with the target repo path.
-   - If `resolved: true` → continue silently to Phase 2.
-   - If `resolved: false` → **MANDATORY onboarding** (workspace creation is a permanent side-effect; needs user consent):
-     - Call `memodi_list_workspaces` to show existing options.
+3. memodi is inert for unregistered paths — there is no dedicated "resolve" tool.
+   Call `memodi_context` with `path: <target repo path>` to find out:
+   - If it returns observations (no error) → the path is already registered, continue silently to Phase 2.
+   - If it returns `{"type": "not_authenticated"}` → the configured api key is missing or invalid. Tell the user once and stop the import; memodi cannot function until the plugin is reconfigured with a valid key (see README.md / install.sh).
+   - If it returns `{"type": "not_started"}` → **MANDATORY onboarding** (workspace registration is a permanent side-effect; needs user consent):
+     - Call `memodi_list_workspaces` to show existing options (owner-scoped: only the user's own).
      - Ask the user: *"Este path no está registrado. ¿A qué workspace lo linkeo? (opciones: ..., o nombre nuevo)"*
-     - WAIT for answer.
-     - Call `memodi_link_project` + `memodi_register_path` with the user's choice.
+     - WAIT for answer. If the user picks an existing workspace, pass its name EXACTLY as returned by the listing — never retype or invent it.
+     - Call `memodi_workspace_start(path=<target repo path or its parent folder>, workspace=<the user's choice>)`.
 4. `Glob` the input. Apply allowlist + exclusions.
 5. For each file, collect: path, size, first 3 headers (to estimate observation count).
 
@@ -92,7 +94,7 @@ For each file, silently:
 
 1. `Read` the file.
 2. Extract observations semantically (see extraction guide below).
-3. For each observation, build the full payload: `type`, `title`, `topic_key`, `occurred_at`, `content` (What/Why/Where/Learned).
+3. For each observation, build the full payload: `path` (the target repo path — ALWAYS pass this, never invent or derive a `project` name instead), `type`, `title`, `topic_key`, `occurred_at`, `content` (What/Why/Where/Learned).
 4. Call `memodi_save`. **Do NOT call `memodi_search_similar` beforehand** — `memodi_save` already deduplicates internally via `content_hash` and upserts by `topic_key`. Trust the server. Track the response: if `duplicate_count > 0` → count as skipped in the final report.
 5. For `Supersedes:` fields → call `memodi_relate(from_type="Decision", from_name=<current_topic_key>, to_type="Decision", to_name=<superseded_topic_key>, relation="SUPERSEDES")` after the save.
 6. For `Publisher:` / `Consumer:` in CONTRACTS.md → call `memodi_relate` for queue edges after the save.
@@ -113,7 +115,7 @@ Do NOT emit preview lists, per-observation details, or extraction summaries. Tho
 
 **Trigger**: only when the import source was a **directory** (Phase 1 detected multiple files).
 
-1. Call `memodi_context <project>` to read back the observations just saved in Phase 3. Do not re-read source files.
+1. Call `memodi_context` with the target repo's `path` to read back the observations just saved in Phase 3. Do not re-read source files.
 2. Scan silently for cross-cutting knowledge:
    - A decision that **constrains or explains** a choice in another file
    - A rule or convention that **multiple files reference independently**
@@ -163,7 +165,7 @@ Files processed: N
      - notes.md: generic .md, content extracted but review recommended
      - 2026-03 entry in DECISIONS.md: month-only date, resolved to 2026-03-01
 
-Next: memodi_context <project> | memodi_search_hybrid "<topic>"
+Next: memodi_context (path=<repo path>) | memodi_search_hybrid "<topic>" (path=<repo path>)
 ```
 
 ## EXTRACTION GUIDE BY FILE TYPE
@@ -293,6 +295,6 @@ Therefore the skill must NOT call `memodi_search_similar` pre-save. It's redunda
 ## POST-IMPORT
 
 Suggest (don't auto-run):
-- `memodi_context <project>` — verify recent observations
-- `memodi_search_hybrid "<tema>"` — test a query
+- `memodi_context` (path=<repo path>) — verify recent observations
+- `memodi_search_hybrid "<tema>"` (path=<repo path>) — test a query
 - Review the warnings list in the final report

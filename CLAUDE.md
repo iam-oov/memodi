@@ -32,6 +32,16 @@ Production: Claude Code ──HTTPS──► Caddy ──► memodi-server (uv +
 - **Production infra**: uv + systemd (server), native PostgreSQL, Caddy in Docker (TLS + API key)
 - **Config**: System env vars with MEMODI_ prefix
 
+## Auth Model
+
+Real per-user accounts, not a single shared key:
+
+- Sign up at `/signup` (public route, no MCP auth by design) — creates a user and shows the `mmd_…` api key ONCE; only its hash is stored server-side
+- `X-Memodi-Api-Key` header — the caller's identity. This IS the app-level access control; there is no other gate in front of `/mcp`
+- `X-Memodi-Machine` header — per-machine identity, used to scope path registration (`memodi_workspace_start`) so the same filesystem path can resolve to different workspaces on different machines
+- `path` (the caller's cwd) is an explicit per-call parameter on every project-scoped tool — never inferred from the api key or machine
+- Unregistered path → `{"type": "not_started"}`; missing or invalid key → `{"type": "not_authenticated"}` — both self-describing errors, no silent auto-creation of projects or workspaces
+
 ## CI/CD Pipeline
 
 4 GitHub Actions workflows, single responsibility each:
