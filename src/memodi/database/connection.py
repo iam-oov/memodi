@@ -40,8 +40,12 @@ def close_connection() -> None:
 def run_migration(path: str) -> None:
     sql = Path(path).read_text()
     conn = get_connection()
-    conn.execute(sql)
-    conn.commit()
+    try:
+        conn.execute(sql)
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise RuntimeError(f"Migration '{Path(path).name}' failed: {e}") from e
 
 
 def ensure_schema() -> None:

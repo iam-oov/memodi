@@ -4,7 +4,7 @@ import uuid
 import pytest
 
 from memodi.database import repository
-from memodi.database.connection import ensure_schema, get_connection
+from memodi.database.connection import ensure_schema
 from memodi.tools.workflow import (
     apply_done,
     approve_plan,
@@ -15,6 +15,7 @@ from memodi.tools.workflow import (
     update_plan,
     verify,
 )
+from tests.conftest import _path
 
 
 @pytest.fixture(autouse=True)
@@ -27,36 +28,16 @@ def project_name():
     return f"test-wf-{uuid.uuid4()}"
 
 
-@pytest.fixture(autouse=True)
-def cleanup(project_name):
-    yield
-    conn = get_connection()
-    if conn.info.transaction_status != 0:
-        conn.rollback()
-    conn.execute(
-        """
-        DELETE FROM workflow_transitions
-        WHERE workflow_id IN (
-            SELECT w.id FROM workflows w
-            JOIN projects p ON p.id = w.project_id
-            WHERE p.name = %s
+def test_full_workflow_cycle(registered_workspace, project_name):
+    wf = json.loads(
+        plan(
+            path=_path(registered_workspace, project_name),
+            user_id=registered_workspace["user_id"],
+            machine=registered_workspace["machine"],
+            name="Add login feature",
+            objective="Implement JWT auth",
         )
-        """,
-        (project_name,),
     )
-    conn.execute(
-        """
-        DELETE FROM workflows
-        WHERE project_id IN (SELECT id FROM projects WHERE name = %s)
-        """,
-        (project_name,),
-    )
-    conn.execute("DELETE FROM projects WHERE name = %s", (project_name,))
-    conn.commit()
-
-
-def test_full_workflow_cycle(project_name):
-    wf = json.loads(plan(project_name, "Add login feature", "Implement JWT auth"))
     wf_id = wf["id"]
     assert wf["phase"] == "plan"
 
@@ -89,9 +70,15 @@ def test_full_workflow_cycle(project_name):
     assert wf["completed_at"] is not None
 
 
-def test_verify_failure_returns_to_apply(project_name):
+def test_verify_failure_returns_to_apply(registered_workspace, project_name):
     wf = json.loads(
-        plan(project_name, "Fix null pointer", "Handle null user gracefully")
+        plan(
+            path=_path(registered_workspace, project_name),
+            user_id=registered_workspace["user_id"],
+            machine=registered_workspace["machine"],
+            name="Fix null pointer",
+            objective="Handle null user gracefully",
+        )
     )
     wf_id = wf["id"]
 
@@ -104,9 +91,15 @@ def test_verify_failure_returns_to_apply(project_name):
     assert wf["phase"] == "apply"
 
 
-def test_invalid_transition_raises(project_name):
+def test_invalid_transition_raises(registered_workspace, project_name):
     wf = json.loads(
-        plan(project_name, "Refactor DB layer", "Extract repository pattern")
+        plan(
+            path=_path(registered_workspace, project_name),
+            user_id=registered_workspace["user_id"],
+            machine=registered_workspace["machine"],
+            name="Refactor DB layer",
+            objective="Extract repository pattern",
+        )
     )
     wf_id = wf["id"]
 
@@ -116,8 +109,16 @@ def test_invalid_transition_raises(project_name):
         transition_phase(wf_id, "verify")
 
 
-def test_task_update(project_name):
-    wf = json.loads(plan(project_name, "Upgrade deps", "Bump all dependencies"))
+def test_task_update(registered_workspace, project_name):
+    wf = json.loads(
+        plan(
+            path=_path(registered_workspace, project_name),
+            user_id=registered_workspace["user_id"],
+            machine=registered_workspace["machine"],
+            name="Upgrade deps",
+            objective="Bump all dependencies",
+        )
+    )
     wf_id = wf["id"]
 
     update_plan(
@@ -138,20 +139,42 @@ def test_task_update(project_name):
     assert wf["tasks"][1]["status"] == "in_progress"
 
 
-def test_progress_shows_active_workflow(project_name):
+def test_progress_shows_active_workflow(registered_workspace, project_name):
+    path = _path(registered_workspace, project_name)
     wf_created = json.loads(
-        plan(project_name, "Add caching", "Cache DB queries with Redis")
+        plan(
+            path=path,
+            user_id=registered_workspace["user_id"],
+            machine=registered_workspace["machine"],
+            name="Add caching",
+            objective="Cache DB queries with Redis",
+        )
     )
 
-    result = json.loads(progress(project_name))
+    result = json.loads(
+        progress(
+            path=path,
+            user_id=registered_workspace["user_id"],
+            machine=registered_workspace["machine"],
+        )
+    )
     assert result["id"] == wf_created["id"]
     assert result["phase"] == "plan"
 
 
-def test_progress_no_active_workflow(project_name):
-    proj = repository.get_or_create_project(project_name)
+def test_progress_no_active_workflow(registered_workspace, project_name):
+    path = _path(registered_workspace, project_name)
+    proj = repository.get_or_create_project(
+        project_name, workspace_id=registered_workspace["workspace"]["id"]
+    )
     assert proj is not None
 
-    result = json.loads(progress(project_name))
+    result = json.loads(
+        progress(
+            path=path,
+            user_id=registered_workspace["user_id"],
+            machine=registered_workspace["machine"],
+        )
+    )
     assert result["status"] == "no active workflow"
     assert result["project"] == project_name

@@ -15,3 +15,5 @@ build/
 .mypy_cache/
 
 .claude/
+
+.atl/

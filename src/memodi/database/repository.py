@@ -1,12 +1,19 @@
 import hashlib
 import json
 
+from psycopg.errors import UniqueViolation
+
 from memodi.database.connection import get_connection
 
 
 def _content_hash(title: str, content: str) -> str:
     """SHA-256 hash of title+content for deduplication."""
     return hashlib.sha256(f"{title}\n{content}".encode()).hexdigest()
+
+
+def _normalize_path(path: str) -> str:
+    return path.rstrip("/")
+
 
 ALLOWED_TYPES = {
     "decision",
@@ -20,35 +27,28 @@ ALLOWED_TYPES = {
 }
 
 
-def get_or_create_workspace(name: str) -> dict:
+def get_or_create_workspace(name: str, owner_user_id: str) -> dict:
     conn = get_connection()
-    row = conn.execute("SELECT * FROM workspaces WHERE name = %s", (name,)).fetchone()
+    row = conn.execute(
+        "SELECT * FROM workspaces WHERE name = %s AND owner_user_id = %s",
+        (name, owner_user_id),
+    ).fetchone()
     if row:
         return dict(row)
     row = conn.execute(
-        "INSERT INTO workspaces (name) VALUES (%s) RETURNING *", (name,)
+        "INSERT INTO workspaces (name, owner_user_id) VALUES (%s, %s) RETURNING *",
+        (name, owner_user_id),
     ).fetchone()
     conn.commit()
     return dict(row)
 
 
-def get_or_create_project(name: str, workspace_id: str | None = None) -> dict:
+def get_or_create_project(name: str, workspace_id: str) -> dict:
     conn = get_connection()
-    if workspace_id:
-        row = conn.execute(
-            "SELECT * FROM projects WHERE name = %s AND workspace_id = %s",
-            (name, workspace_id),
-        ).fetchone()
-    else:
-        row = conn.execute(
-            """
-            SELECT * FROM projects
-            WHERE name = %s
-            ORDER BY workspace_id ASC NULLS LAST
-            LIMIT 1
-            """,
-            (name,),
-        ).fetchone()
+    row = conn.execute(
+        "SELECT * FROM projects WHERE name = %s AND workspace_id = %s",
+        (name, workspace_id),
+    ).fetchone()
     if row:
         return dict(row)
     row = conn.execute(
@@ -57,6 +57,190 @@ def get_or_create_project(name: str, workspace_id: str | None = None) -> dict:
     ).fetchone()
     conn.commit()
     return dict(row)
+
+
+def get_project_owner(project_id: str) -> str | None:
+    conn = get_connection()
+    row = conn.execute(
+        """
+        SELECT w.owner_user_id FROM projects p
+        JOIN workspaces w ON w.id = p.workspace_id
+        WHERE p.id = %s
+        """,
+        (project_id,),
+    ).fetchone()
+    return row["owner_user_id"] if row else None
+
+
+def count_project_resources(project_id: str) -> dict | None:
+    conn = get_connection()
+    proj_row = conn.execute(
+        "SELECT id, name FROM projects WHERE id = %s", (project_id,)
+    ).fetchone()
+    if not proj_row:
+        return None
+    observations = conn.execute(
+        "SELECT COUNT(*) AS c FROM observations WHERE project_id = %s",
+        (project_id,),
+    ).fetchone()["c"]
+    sessions = conn.execute(
+        "SELECT COUNT(*) AS c FROM sessions WHERE project_id = %s",
+        (project_id,),
+    ).fetchone()["c"]
+    workflows = conn.execute(
+        "SELECT COUNT(*) AS c FROM workflows WHERE project_id = %s",
+        (project_id,),
+    ).fetchone()["c"]
+    return {
+        "project": proj_row["name"],
+        "observations": observations,
+        "sessions": sessions,
+        "workflows": workflows,
+    }
+
+
+def resolve_workspace(user_id: str, machine: str, path: str) -> dict | None:
+    if machine == "legacy":
+        raise ValueError("machine 'legacy' is reserved and cannot be used")
+    conn = get_connection()
+    normalized_path = _normalize_path(path)
+    row = conn.execute(
+        """
+        SELECT w.* FROM workspaces w
+        JOIN workspace_paths wp ON wp.workspace_id = w.id
+        WHERE w.owner_user_id = %s
+          AND wp.machine = %s
+          AND (%s = wp.path OR left(%s, length(wp.path) + 1) = wp.path || '/')
+        ORDER BY length(wp.path) DESC
+        LIMIT 1
+        """,
+        (user_id, machine, normalized_path, normalized_path),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def workspace_start(user_id: str, machine: str, path: str, workspace_name: str) -> dict:
+    if machine == "legacy":
+        raise ValueError("machine 'legacy' is reserved and cannot be used")
+    conn = get_connection()
+    normalized_path = _normalize_path(path)
+
+    existing_path = conn.execute(
+        """
+        SELECT w.id AS workspace_id, w.name AS workspace_name,
+               w.owner_user_id AS owner_user_id
+        FROM workspace_paths wp
+        JOIN workspaces w ON w.id = wp.workspace_id
+        WHERE wp.machine = %s AND wp.path = %s
+        """,
+        (machine, normalized_path),
+    ).fetchone()
+
+    if existing_path:
+        owned = conn.execute(
+            "SELECT id FROM workspaces WHERE owner_user_id = %s AND name = %s",
+            (user_id, workspace_name),
+        ).fetchone()
+        if owned and existing_path["workspace_id"] == owned["id"]:
+            return get_or_create_workspace(workspace_name, owner_user_id=user_id)
+        conn.rollback()
+        if existing_path["owner_user_id"] == user_id:
+            raise ValueError(
+                f"Path already registered to workspace "
+                f"'{existing_path['workspace_name']}'"
+            )
+        raise ValueError("Path already registered on this machine")
+
+    workspace = get_or_create_workspace(workspace_name, owner_user_id=user_id)
+    try:
+        conn.execute(
+            "INSERT INTO workspace_paths (workspace_id, machine, path) "
+            "VALUES (%s, %s, %s)",
+            (workspace["id"], machine, normalized_path),
+        )
+        conn.commit()
+    except UniqueViolation as e:
+        conn.rollback()
+        raise ValueError("Path already registered on this machine") from e
+    return workspace
+
+
+def merge_projects(source_project_id: str, target_project_id: str) -> dict:
+    if source_project_id == target_project_id:
+        raise ValueError("Cannot merge a project into itself")
+
+    conn = get_connection()
+
+    found = conn.execute(
+        "SELECT id FROM projects WHERE id = ANY(%s::uuid[])",
+        ([str(source_project_id), str(target_project_id)],),
+    ).fetchall()
+    found_ids = {str(r["id"]) for r in found}
+    if str(source_project_id) not in found_ids:
+        conn.rollback()
+        raise ValueError(f"Source project '{source_project_id}' not found")
+    if str(target_project_id) not in found_ids:
+        conn.rollback()
+        raise ValueError(f"Target project '{target_project_id}' not found")
+
+    collisions = conn.execute(
+        """
+        SELECT DISTINCT s.topic_key
+        FROM observations s
+        JOIN observations t ON t.topic_key = s.topic_key
+        WHERE s.project_id = %s
+          AND t.project_id = %s
+          AND s.topic_key IS NOT NULL
+          AND s.deleted_at IS NULL
+          AND t.deleted_at IS NULL
+        """,
+        (source_project_id, target_project_id),
+    ).fetchall()
+    topic_key_collisions = sorted(r["topic_key"] for r in collisions)
+
+    superseded_observation_ids: list[str] = []
+    if topic_key_collisions:
+        superseded_rows = conn.execute(
+            """
+            UPDATE observations
+            SET project_id = %s, deleted_at = now()
+            WHERE project_id = %s
+              AND deleted_at IS NULL
+              AND topic_key = ANY(%s)
+            RETURNING id
+            """,
+            (target_project_id, source_project_id, topic_key_collisions),
+        ).fetchall()
+        superseded_observation_ids = [str(r["id"]) for r in superseded_rows]
+
+    remaining_moved = conn.execute(
+        "UPDATE observations SET project_id = %s WHERE project_id = %s",
+        (target_project_id, source_project_id),
+    ).rowcount
+    observations_moved = len(superseded_observation_ids) + remaining_moved
+
+    sessions_moved = conn.execute(
+        "UPDATE sessions SET project_id = %s WHERE project_id = %s",
+        (target_project_id, source_project_id),
+    ).rowcount
+
+    workflows_moved = conn.execute(
+        "UPDATE workflows SET project_id = %s WHERE project_id = %s",
+        (target_project_id, source_project_id),
+    ).rowcount
+
+    conn.execute("DELETE FROM projects WHERE id = %s", (source_project_id,))
+    conn.commit()
+
+    return {
+        "source_project_id": source_project_id,
+        "target_project_id": target_project_id,
+        "observations_moved": observations_moved,
+        "sessions_moved": sessions_moved,
+        "workflows_moved": workflows_moved,
+        "topic_key_collisions": topic_key_collisions,
+        "superseded_observation_ids": superseded_observation_ids,
+    }
 
 
 def create_session(project_id: str) -> dict:
@@ -319,6 +503,7 @@ def search_observations(
 
 def search_observations_global(
     query: str,
+    owner_user_id: str,
     type: str | None = None,
     limit: int = 10,
 ) -> list[dict]:
@@ -326,12 +511,14 @@ def search_observations_global(
     base = """
         SELECT o.*, p.name AS project_name, ts_rank(o.search_vector, q) AS rank
         FROM observations o
-        JOIN projects p ON p.id = o.project_id,
+        JOIN projects p ON p.id = o.project_id
+        JOIN workspaces w ON w.id = p.workspace_id,
         plainto_tsquery('simple', %s) q
         WHERE o.deleted_at IS NULL
           AND o.search_vector @@ q
+          AND w.owner_user_id = %s
     """
-    params: list = [query]
+    params: list = [query, owner_user_id]
 
     if type:
         base += " AND o.type = %s"
@@ -385,142 +572,68 @@ def get_observation(observation_id: str) -> dict | None:
     return dict(row) if row else None
 
 
-def list_projects(workspace_id: str | None = None) -> list[dict]:
+def list_projects(
+    workspace_id: str | None = None, owner_user_id: str | None = None
+) -> list[dict]:
     conn = get_connection()
     if workspace_id:
         rows = conn.execute(
             "SELECT * FROM projects WHERE workspace_id = %s ORDER BY created_at DESC",
             (workspace_id,),
         ).fetchall()
-    else:
+    elif owner_user_id:
         rows = conn.execute(
-            "SELECT * FROM projects ORDER BY created_at DESC"
+            """
+            SELECT p.* FROM projects p
+            JOIN workspaces w ON w.id = p.workspace_id
+            WHERE w.owner_user_id = %s
+            ORDER BY p.created_at DESC
+            """,
+            (owner_user_id,),
         ).fetchall()
+    else:
+        raise ValueError("list_projects requires workspace_id or owner_user_id")
     return [dict(r) for r in rows]
 
 
-def list_workspaces() -> list[dict]:
+def list_workspaces(owner_user_id: str | None = None) -> list[dict]:
     conn = get_connection()
-    rows = conn.execute("""
+    base = """
         SELECT w.*, COUNT(p.id) AS project_count
         FROM workspaces w
         LEFT JOIN projects p ON p.workspace_id = w.id
-        GROUP BY w.id
-        ORDER BY w.created_at DESC
-    """).fetchall()
+    """
+    params: list = []
+    if owner_user_id is not None:
+        base += " WHERE w.owner_user_id = %s"
+        params.append(owner_user_id)
+    base += " GROUP BY w.id ORDER BY w.created_at DESC"
+    rows = conn.execute(base, params).fetchall()
     return [dict(r) for r in rows]
 
 
-def link_project_to_workspace(
-    project_name: str,
-    workspace_name: str,
-) -> dict:
-    conn = get_connection()
-    ws = get_or_create_workspace(workspace_name)
-    row = conn.execute(
-        "SELECT * FROM projects WHERE name = %s AND workspace_id IS NULL",
-        (project_name,),
-    ).fetchone()
-    if row:
-        row = conn.execute(
-            """
-            UPDATE projects SET workspace_id = %s, updated_at = now()
-            WHERE id = %s RETURNING *
-            """,
-            (ws["id"], row["id"]),
-        ).fetchone()
-        conn.commit()
-        return dict(row)
-    return get_or_create_project(project_name, workspace_id=ws["id"])
-
-
-def register_path(path: str, workspace_name: str) -> dict:
-    conn = get_connection()
-    ws = get_or_create_workspace(workspace_name)
-    existing = conn.execute(
-        "SELECT * FROM workspace_paths WHERE path = %s",
-        (path,),
-    ).fetchone()
-    if existing:
-        conn.execute(
-            """
-            UPDATE workspace_paths
-            SET workspace_id = %s WHERE path = %s
-            RETURNING *
-            """,
-            (ws["id"], path),
-        )
-        conn.commit()
-    else:
-        conn.execute(
-            """
-            INSERT INTO workspace_paths (workspace_id, path)
-            VALUES (%s, %s)
-            """,
-            (ws["id"], path),
-        )
-        conn.commit()
-    return {"path": path, "workspace": workspace_name}
-
-
-def resolve_path(path: str) -> dict | None:
+def delete_workspace(workspace_name: str, owner_user_id: str) -> bool:
     conn = get_connection()
     row = conn.execute(
-        """
-        SELECT w.* FROM workspaces w
-        JOIN workspace_paths wp ON wp.workspace_id = w.id
-        WHERE wp.path = %s
-        """,
-        (path,),
-    ).fetchone()
-    return dict(row) if row else None
-
-
-def delete_workspace(workspace_name: str) -> bool:
-    conn = get_connection()
-    row = conn.execute(
-        "SELECT id FROM workspaces WHERE name = %s",
-        (workspace_name,),
+        "SELECT id FROM workspaces WHERE name = %s AND owner_user_id = %s",
+        (workspace_name, owner_user_id),
     ).fetchone()
     if not row:
         return False
-    ws_id = row["id"]
-    conn.execute(
-        "DELETE FROM workspace_paths WHERE workspace_id = %s",
-        (ws_id,),
-    )
-    conn.execute(
-        "UPDATE projects SET workspace_id = NULL WHERE workspace_id = %s",
-        (ws_id,),
-    )
-    conn.execute("DELETE FROM workspaces WHERE id = %s", (ws_id,))
-    conn.commit()
+    purge_workspace_data(workspace_name, owner_user_id, mode="hard")
     return True
 
 
-def rename_workspace(old_name: str, new_name: str) -> dict | None:
+def rename_workspace(old_name: str, new_name: str, owner_user_id: str) -> dict | None:
     conn = get_connection()
     row = conn.execute(
         """
         UPDATE workspaces SET name = %s, updated_at = now()
-        WHERE name = %s RETURNING *
+        WHERE name = %s AND owner_user_id = %s RETURNING *
         """,
-        (new_name, old_name),
+        (new_name, old_name, owner_user_id),
     ).fetchone()
     conn.commit()
-    return dict(row) if row else None
-
-
-def get_project_workspace(project_name: str) -> dict | None:
-    conn = get_connection()
-    row = conn.execute(
-        """
-        SELECT w.* FROM workspaces w
-        JOIN projects p ON p.workspace_id = w.id
-        WHERE p.name = %s
-        """,
-        (project_name,),
-    ).fetchone()
     return dict(row) if row else None
 
 
@@ -574,7 +687,7 @@ def search_hybrid(
     query_embedding = str(embedding)
     k = 60  # RRF constant
 
-    sql = """
+    cte = """
         WITH keyword AS (
             SELECT id,
                    ROW_NUMBER() OVER (
@@ -594,30 +707,61 @@ def search_hybrid(
               AND deleted_at IS NULL
               AND embedding IS NOT NULL
         )
-        SELECT o.*,
-               COALESCE(1.0 / (%s + k.rank), 0)
-                   + COALESCE(1.0 / (%s + s.rank), 0) AS rrf_score
-        FROM observations o
-        LEFT JOIN keyword k ON o.id = k.id
-        LEFT JOIN semantic s ON o.id = s.id
-        WHERE o.project_id = %s
-          AND o.deleted_at IS NULL
-          AND (k.id IS NOT NULL OR s.id IS NOT NULL)
-        ORDER BY rrf_score DESC
-        LIMIT %s
     """
-    params = [
-        query,
-        project_id,
-        query,
-        query_embedding,
-        project_id,
-        k,
-        k,
-        project_id,
-        limit,
-    ]
-    rows = conn.execute(sql, params).fetchall()
+    if workspace_id:
+        tail = """
+            SELECT o.*,
+                   COALESCE(1.0 / (%s + k.rank), 0)
+                       + COALESCE(1.0 / (%s + s.rank), 0) AS rrf_score
+            FROM observations o
+            JOIN projects p ON p.id = o.project_id
+            LEFT JOIN keyword k ON o.id = k.id
+            LEFT JOIN semantic s ON o.id = s.id
+            WHERE o.project_id = %s
+              AND p.workspace_id = %s
+              AND o.deleted_at IS NULL
+              AND (k.id IS NOT NULL OR s.id IS NOT NULL)
+            ORDER BY rrf_score DESC
+            LIMIT %s
+        """
+        params = [
+            query,
+            project_id,
+            query,
+            query_embedding,
+            project_id,
+            k,
+            k,
+            project_id,
+            workspace_id,
+            limit,
+        ]
+    else:
+        tail = """
+            SELECT o.*,
+                   COALESCE(1.0 / (%s + k.rank), 0)
+                       + COALESCE(1.0 / (%s + s.rank), 0) AS rrf_score
+            FROM observations o
+            LEFT JOIN keyword k ON o.id = k.id
+            LEFT JOIN semantic s ON o.id = s.id
+            WHERE o.project_id = %s
+              AND o.deleted_at IS NULL
+              AND (k.id IS NOT NULL OR s.id IS NOT NULL)
+            ORDER BY rrf_score DESC
+            LIMIT %s
+        """
+        params = [
+            query,
+            project_id,
+            query,
+            query_embedding,
+            project_id,
+            k,
+            k,
+            project_id,
+            limit,
+        ]
+    rows = conn.execute(cte + tail, params).fetchall()
     return [dict(r) for r in rows]
 
 
@@ -645,13 +789,14 @@ def update_observation_embedding(observation_id: str, embedding: list[float]) ->
     conn.commit()
 
 
-def count_workspace_resources(workspace_name: str) -> dict | None:
+def count_workspace_resources(workspace_name: str, owner_user_id: str) -> dict | None:
     """Count deletable resources for a workspace. Returns None if workspace
-    does not exist, so callers can distinguish 'empty' from 'missing'."""
+    does not exist (or is not owned by owner_user_id), so callers can
+    distinguish 'empty' from 'missing'."""
     conn = get_connection()
     ws_row = conn.execute(
-        "SELECT id FROM workspaces WHERE name = %s",
-        (workspace_name,),
+        "SELECT id FROM workspaces WHERE name = %s AND owner_user_id = %s",
+        (workspace_name, owner_user_id),
     ).fetchone()
     if not ws_row:
         return None
@@ -722,7 +867,9 @@ def count_workspace_resources(workspace_name: str) -> dict | None:
     }
 
 
-def purge_workspace_data(workspace_name: str, mode: str = "medium") -> dict:
+def purge_workspace_data(
+    workspace_name: str, owner_user_id: str, mode: str = "medium"
+) -> dict:
     """Hard-delete workspace data. Returns actual deletion counts.
 
     mode='medium': observations, workflow_transitions, workflows, sessions.
@@ -737,8 +884,8 @@ def purge_workspace_data(workspace_name: str, mode: str = "medium") -> dict:
 
     conn = get_connection()
     ws_row = conn.execute(
-        "SELECT id FROM workspaces WHERE name = %s",
-        (workspace_name,),
+        "SELECT id FROM workspaces WHERE name = %s AND owner_user_id = %s",
+        (workspace_name, owner_user_id),
     ).fetchone()
     if not ws_row:
         raise ValueError(f"Workspace '{workspace_name}' not found")

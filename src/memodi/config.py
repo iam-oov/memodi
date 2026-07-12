@@ -10,6 +10,10 @@ class Settings(BaseSettings):
     db_password: str
     db_name: str = "memodi"
 
+    user_api_key: str | None = None
+    machine: str | None = None
+    signup_code: str | None = None
+
     @property
     def db_url(self) -> str:
         return (

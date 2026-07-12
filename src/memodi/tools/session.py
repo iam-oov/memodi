@@ -3,6 +3,7 @@ import json
 from memodi.database import repository
 from memodi.database.connection import ensure_schema
 from memodi.tools.errors import handle_errors
+from memodi.tools.scope import resolve_project
 
 
 def _ensure() -> None:
@@ -10,10 +11,12 @@ def _ensure() -> None:
 
 
 @handle_errors
-def session_start(project: str) -> str:
+def session_start(
+    path: str, user_id: str, machine: str, project: str | None = None
+) -> str:
     """Start a new session for a project. Closes any existing active session."""
     _ensure()
-    proj = repository.get_or_create_project(project)
+    proj = resolve_project(user_id, machine, path, project)
 
     # Close any existing active session first
     active = repository.get_active_session(proj["id"])
@@ -22,16 +25,22 @@ def session_start(project: str) -> str:
 
     session = repository.create_session(proj["id"])
     return json.dumps(
-        {"session_id": str(session["id"]), "project": project, "started": True},
+        {"session_id": str(session["id"]), "project": proj["name"], "started": True},
         default=str,
     )
 
 
 @handle_errors
-def session_end(project: str, summary: str) -> str:
+def session_end(
+    path: str,
+    user_id: str,
+    machine: str,
+    summary: str,
+    project: str | None = None,
+) -> str:
     """Close the active session for a project with a summary."""
     _ensure()
-    proj = repository.get_or_create_project(project)
+    proj = resolve_project(user_id, machine, path, project)
     active = repository.get_active_session(proj["id"])
 
     if not active:
@@ -42,7 +51,7 @@ def session_end(project: str, summary: str) -> str:
         {
             "ended": True,
             "session_id": str(session["id"]),
-            "project": project,
+            "project": proj["name"],
             "summary": summary,
         },
         default=str,

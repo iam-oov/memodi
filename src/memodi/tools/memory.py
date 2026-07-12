@@ -3,6 +3,7 @@ import json
 from memodi.database import graph_repository, repository
 from memodi.database.connection import ensure_schema
 from memodi.tools.errors import handle_errors
+from memodi.tools.scope import resolve_project
 
 
 def _ensure() -> None:
@@ -11,10 +12,13 @@ def _ensure() -> None:
 
 @handle_errors
 def save(
-    project: str,
+    path: str,
+    user_id: str,
+    machine: str,
     title: str,
     content: str,
     type: str,
+    project: str | None = None,
     topic_key: str | None = None,
     metadata: dict | None = None,
     occurred_at: str | None = None,
@@ -22,7 +26,7 @@ def save(
     _ensure()
     from memodi.embeddings import generate_embedding
 
-    proj = repository.get_or_create_project(project)
+    proj = resolve_project(user_id, machine, path, project)
     embedding = generate_embedding(f"{title} {content}")
     # Auto-attach active session if one exists
     active_session = repository.get_active_session(proj["id"])
@@ -38,42 +42,46 @@ def save(
         embedding=embedding,
         occurred_at=occurred_at,
     )
-    result = json.loads(json.dumps(obs, default=str))
-    if proj.get("workspace_id") is None:
-        result["_warning"] = (
-            "Project has no workspace. Use memodi_link_project to link it."
-        )
-    return json.dumps(result, default=str)
+    return json.dumps(obs, default=str)
 
 
 @handle_errors
 def search(
-    project: str,
+    path: str,
+    user_id: str,
+    machine: str,
     query: str,
+    project: str | None = None,
     type: str | None = None,
     limit: int = 10,
 ) -> str:
     _ensure()
-    proj = repository.get_or_create_project(project)
+    proj = resolve_project(user_id, machine, path, project)
     results = repository.search_observations(
         project_id=proj["id"],
         query=query,
         type=type,
         limit=limit,
-        workspace_id=proj.get("workspace_id"),
+        workspace_id=proj["workspace_id"],
     )
     return json.dumps(results, default=str)
 
 
 @handle_errors
-def context(project: str, limit: int = 20) -> str:
+def context(
+    path: str,
+    user_id: str,
+    machine: str,
+    project: str | None = None,
+    limit: int = 20,
+) -> str:
     _ensure()
-    proj = repository.get_or_create_project(project)
+    proj = resolve_project(user_id, machine, path, project)
     last_session = repository.get_latest_session_summary(proj["id"])
     observations = repository.get_recent_observations(
         project_id=proj["id"],
         limit=limit,
-        workspace_id=proj.get("workspace_id"),
+        workspace_id=proj["workspace_id"],
     )
     return json.dumps(
         {"last_session": last_session, "observations": observations},
@@ -82,111 +90,135 @@ def context(project: str, limit: int = 20) -> str:
 
 
 @handle_errors
-def list_projects() -> str:
+def list_projects(user_id: str) -> str:
     _ensure()
-    results = repository.list_projects()
+    results = repository.list_projects(owner_user_id=user_id)
     return json.dumps(results, default=str)
 
 
 @handle_errors
-def search_global(query: str, type: str | None = None, limit: int = 10) -> str:
+def search_global(
+    user_id: str, query: str, type: str | None = None, limit: int = 10
+) -> str:
     _ensure()
-    results = repository.search_observations_global(query=query, type=type, limit=limit)
+    results = repository.search_observations_global(
+        query=query, owner_user_id=user_id, type=type, limit=limit
+    )
     return json.dumps(results, default=str)
 
 
 @handle_errors
-def list_workspaces() -> str:
+def list_workspaces(user_id: str) -> str:
     _ensure()
-    results = repository.list_workspaces()
+    results = repository.list_workspaces(owner_user_id=user_id)
     return json.dumps(results, default=str)
 
 
 @handle_errors
-def link_project(project: str, workspace: str) -> str:
+def workspace_start(path: str, workspace: str, user_id: str, machine: str) -> str:
     _ensure()
-    result = repository.link_project_to_workspace(project, workspace)
+    result = repository.workspace_start(user_id, machine, path, workspace)
     return json.dumps(result, default=str)
 
 
 @handle_errors
-def register_path(path: str, workspace: str) -> str:
+def merge_projects(
+    source_project_id: str,
+    target_project_id: str,
+    user_id: str,
+    dry_run: bool = True,
+) -> str:
     _ensure()
-    result = repository.register_path(path, workspace)
-    return json.dumps(result, default=str)
 
-
-@handle_errors
-def resolve_path(path: str) -> str:
-    _ensure()
-    ws = repository.resolve_path(path)
-    if ws:
-        return json.dumps(
-            {"resolved": True, "workspace": ws}, default=str
+    source_owner = repository.get_project_owner(source_project_id)
+    if source_owner is None or str(source_owner) != str(user_id):
+        raise ValueError(
+            f"Source project '{source_project_id}' not found or not owned by caller"
         )
-    return json.dumps({"resolved": False, "path": path})
+    target_owner = repository.get_project_owner(target_project_id)
+    if target_owner is None or str(target_owner) != str(user_id):
+        raise ValueError(
+            f"Target project '{target_project_id}' not found or not owned by caller"
+        )
+
+    if dry_run:
+        would_move = repository.count_project_resources(source_project_id)
+        return json.dumps(
+            {
+                "dry_run": True,
+                "source_project_id": source_project_id,
+                "target_project_id": target_project_id,
+                "would_move": would_move,
+            },
+            default=str,
+        )
+
+    result = repository.merge_projects(source_project_id, target_project_id)
+    result["dry_run"] = False
+    return json.dumps(result, default=str)
 
 
 @handle_errors
-def delete_workspace(workspace: str) -> str:
+def delete_workspace(workspace: str, user_id: str) -> str:
     _ensure()
-    deleted = repository.delete_workspace(workspace)
+    deleted = repository.delete_workspace(workspace, user_id)
     if deleted:
         return json.dumps({"deleted": True, "workspace": workspace})
     return json.dumps({"deleted": False, "error": f"Workspace '{workspace}' not found"})
 
 
 @handle_errors
-def rename_workspace(old_name: str, new_name: str) -> str:
+def rename_workspace(old_name: str, new_name: str, user_id: str) -> str:
     _ensure()
-    result = repository.rename_workspace(old_name, new_name)
+    result = repository.rename_workspace(old_name, new_name, user_id)
     if result:
         return json.dumps(result, default=str)
     return json.dumps({"error": f"Workspace '{old_name}' not found"})
 
 
 @handle_errors
-def check_workspace(project: str) -> str:
-    _ensure()
-    ws = repository.get_project_workspace(project)
-    if ws:
-        return json.dumps({"linked": True, "workspace": ws}, default=str)
-    workspaces = repository.list_workspaces()
-    return json.dumps(
-        {"linked": False, "available_workspaces": workspaces},
-        default=str,
-    )
-
-
-@handle_errors
-def search_similar(project: str, query: str, limit: int = 10) -> str:
+def search_similar(
+    path: str,
+    user_id: str,
+    machine: str,
+    query: str,
+    project: str | None = None,
+    limit: int = 10,
+) -> str:
     _ensure()
     from memodi.embeddings import generate_embedding
 
-    proj = repository.get_or_create_project(project)
+    proj = resolve_project(user_id, machine, path, project)
     embedding = generate_embedding(query)
     results = repository.search_similar(
         project_id=proj["id"],
         embedding=embedding,
         limit=limit,
-        workspace_id=proj.get("workspace_id"),
+        workspace_id=proj["workspace_id"],
     )
     return json.dumps(results, default=str)
 
 
 @handle_errors
-def search_hybrid(project: str, query: str, limit: int = 10) -> str:
+def search_hybrid(
+    path: str,
+    user_id: str,
+    machine: str,
+    query: str,
+    project: str | None = None,
+    limit: int = 10,
+) -> str:
     _ensure()
     from memodi.embeddings import generate_embedding
 
-    proj = repository.get_or_create_project(project)
+    proj = resolve_project(user_id, machine, path, project)
     embedding = generate_embedding(query)
     results = repository.search_hybrid(
         project_id=proj["id"],
         query=query,
         embedding=embedding,
         limit=limit,
-        workspace_id=proj.get("workspace_id"),
+        workspace_id=proj["workspace_id"],
     )
     return json.dumps(results, default=str)
 
@@ -194,6 +226,7 @@ def search_hybrid(project: str, query: str, limit: int = 10) -> str:
 @handle_errors
 def purge_workspace(
     workspace: str,
+    user_id: str,
     mode: str = "medium",
     purge_graph: bool = False,
     dry_run: bool = True,
@@ -221,7 +254,7 @@ def purge_workspace(
             {"error": "mode must be 'medium' or 'hard'"},
         )
 
-    counts = repository.count_workspace_resources(workspace)
+    counts = repository.count_workspace_resources(workspace, user_id)
     if counts is None:
         return json.dumps(
             {"error": f"Workspace '{workspace}' not found"},
@@ -265,7 +298,7 @@ def purge_workspace(
             }
         )
 
-    result = repository.purge_workspace_data(workspace, mode=mode)
+    result = repository.purge_workspace_data(workspace, user_id, mode=mode)
 
     if purge_graph:
         graph_result = graph_repository.purge_all_graph()
@@ -276,15 +309,17 @@ def purge_workspace(
 
 
 @handle_errors
-def backfill_embeddings(project: str) -> str:
+def backfill_embeddings(
+    path: str, user_id: str, machine: str, project: str | None = None
+) -> str:
     _ensure()
     from memodi.embeddings import generate_embedding
 
-    proj = repository.get_or_create_project(project)
+    proj = resolve_project(user_id, machine, path, project)
     observations = repository.get_observations_without_embedding(proj["id"])
     count = 0
     for obs in observations:
         embedding = generate_embedding(f"{obs['title']} {obs['content']}")
         repository.update_observation_embedding(obs["id"], embedding)
         count += 1
-    return json.dumps({"backfilled": count, "project": project})
+    return json.dumps({"backfilled": count, "project": proj["name"]})

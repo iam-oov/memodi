@@ -555,6 +555,7 @@ dependencies = [
     { name = "mcp", extra = ["cli"] },
     { name = "psycopg", extra = ["binary"] },
     { name = "pydantic-settings" },
+    { name = "python-multipart" },
     { name = "sentence-transformers" },
 ]
 
@@ -570,6 +571,7 @@ requires-dist = [
     { name = "mcp", extras = ["cli"], specifier = ">=1.0.0" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2.0" },
     { name = "pydantic-settings", specifier = ">=2.0.0" },
+    { name = "python-multipart", specifier = ">=0.0.26" },
     { name = "sentence-transformers", specifier = ">=3.0.0" },
 ]
 

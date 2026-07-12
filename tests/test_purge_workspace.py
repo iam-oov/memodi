@@ -3,17 +3,13 @@ import uuid
 
 import pytest
 
+from memodi.database import auth_repository
 from memodi.database.connection import ensure_schema, get_connection
 from memodi.database.graph import _prepare_connection, ensure_graph
 from memodi.tools.graph import relate
-from memodi.tools.memory import (
-    link_project,
-    list_workspaces,
-    purge_workspace,
-    register_path,
-    save,
-)
+from memodi.tools.memory import list_workspaces, purge_workspace, save
 from memodi.tools.workflow import plan as workflow_plan
+from tests.conftest import _path, cleanup_rows
 
 
 @pytest.fixture(autouse=True)
@@ -22,82 +18,36 @@ def setup():
 
 
 @pytest.fixture
-def ws_name():
-    return f"test-purge-ws-{uuid.uuid4()}"
-
-
-@pytest.fixture
 def project_name():
     return f"test-purge-proj-{uuid.uuid4()}"
 
 
-@pytest.fixture(autouse=True)
-def cleanup(ws_name, project_name):
-    yield
-    conn = get_connection()
-    if conn.info.transaction_status != 0:
-        conn.rollback()
-    conn.execute(
-        """
-        DELETE FROM workflow_transitions
-        WHERE workflow_id IN (
-            SELECT id FROM workflows
-            WHERE project_id IN (SELECT id FROM projects WHERE name = %s)
-        )
-        """,
-        (project_name,),
-    )
-    conn.execute(
-        """
-        DELETE FROM workflows
-        WHERE project_id IN (SELECT id FROM projects WHERE name = %s)
-        """,
-        (project_name,),
-    )
-    conn.execute(
-        """
-        DELETE FROM observations
-        WHERE project_id IN (SELECT id FROM projects WHERE name = %s)
-        """,
-        (project_name,),
-    )
-    conn.execute(
-        """
-        DELETE FROM sessions
-        WHERE project_id IN (SELECT id FROM projects WHERE name = %s)
-        """,
-        (project_name,),
-    )
-    conn.execute(
-        """
-        DELETE FROM workspace_paths
-        WHERE workspace_id IN (SELECT id FROM workspaces WHERE name = %s)
-        """,
-        (ws_name,),
-    )
-    conn.execute("DELETE FROM projects WHERE name = %s", (project_name,))
-    conn.execute("DELETE FROM workspaces WHERE name = %s", (ws_name,))
-    conn.commit()
+def _seed_workspace(registered_workspace, project_name) -> None:
+    """Create observations and a workflow inside the registered workspace."""
+    path = _path(registered_workspace, project_name)
+    user_id = registered_workspace["user_id"]
+    machine = registered_workspace["machine"]
 
-
-def _seed_workspace(ws_name: str, project_name: str) -> None:
-    """Create workspace with some observations, a workflow, and a path."""
-    link_project(project=project_name, workspace=ws_name)
-    register_path(path=f"/tmp/fake-path-{uuid.uuid4()}", workspace=ws_name)
     save(
-        project=project_name,
+        path=path,
+        user_id=user_id,
+        machine=machine,
         title="Seed decision",
         content="A decision that should be wiped",
         type="decision",
     )
     save(
-        project=project_name,
+        path=path,
+        user_id=user_id,
+        machine=machine,
         title="Seed discovery",
         content="Something I found that should be wiped",
         type="discovery",
     )
     workflow_plan(
-        project=project_name,
+        path=path,
+        user_id=user_id,
+        machine=machine,
         name="seed-workflow",
         objective="Seed for purge tests",
     )
@@ -106,10 +56,11 @@ def _seed_workspace(ws_name: str, project_name: str) -> None:
 # --- Validation ---
 
 
-def test_purge_unknown_workspace_returns_error():
+def test_purge_unknown_workspace_returns_error(registered_workspace):
     result = json.loads(
         purge_workspace(
             workspace=f"does-not-exist-{uuid.uuid4()}",
+            user_id=registered_workspace["user_id"],
             dry_run=True,
         )
     )
@@ -117,21 +68,83 @@ def test_purge_unknown_workspace_returns_error():
     assert "not found" in result["error"].lower()
 
 
-def test_purge_invalid_mode_returns_error(ws_name, project_name):
-    _seed_workspace(ws_name, project_name)
+def test_purge_invalid_mode_returns_error(registered_workspace, project_name):
+    _seed_workspace(registered_workspace, project_name)
+    ws_name = registered_workspace["workspace"]["name"]
     result = json.loads(
-        purge_workspace(workspace=ws_name, mode="soft", dry_run=True)
+        purge_workspace(
+            workspace=ws_name,
+            user_id=registered_workspace["user_id"],
+            mode="soft",
+            dry_run=True,
+        )
     )
     assert "error" in result
+
+
+def test_purge_rejects_other_owner(registered_workspace, project_name):
+    _seed_workspace(registered_workspace, project_name)
+    ws_name = registered_workspace["workspace"]["name"]
+    other_email = f"test-purge-owner-{uuid.uuid4()}@example.com"
+    other = auth_repository.create_user(other_email)
+    try:
+        result = json.loads(
+            purge_workspace(workspace=ws_name, user_id=other["id"], dry_run=True)
+        )
+        assert "error" in result
+        assert "not found" in result["error"].lower()
+    finally:
+        cleanup_rows("DELETE FROM users WHERE id = %s", (other["id"],))
+
+
+def test_purge_rejects_other_owner_execute_and_preserves_data(
+    registered_workspace, project_name
+):
+    _seed_workspace(registered_workspace, project_name)
+    ws_name = registered_workspace["workspace"]["name"]
+    other_email = f"test-purge-owner-{uuid.uuid4()}@example.com"
+    other = auth_repository.create_user(other_email)
+    try:
+        result = json.loads(
+            purge_workspace(workspace=ws_name, user_id=other["id"], dry_run=False)
+        )
+        assert "error" in result
+        assert "not found" in result["error"].lower()
+
+        # A non-owner execute must not touch the real owner's data.
+        conn = get_connection()
+        obs_count = conn.execute(
+            """
+            SELECT COUNT(*) AS c FROM observations
+            WHERE project_id IN (SELECT id FROM projects WHERE name = %s)
+            """,
+            (project_name,),
+        ).fetchone()["c"]
+        assert obs_count >= 2
+        wf_count = conn.execute(
+            """
+            SELECT COUNT(*) AS c FROM workflows
+            WHERE project_id IN (SELECT id FROM projects WHERE name = %s)
+            """,
+            (project_name,),
+        ).fetchone()["c"]
+        assert wf_count >= 1
+    finally:
+        cleanup_rows("DELETE FROM users WHERE id = %s", (other["id"],))
 
 
 # --- Dry run ---
 
 
-def test_dry_run_reports_counts_without_deleting(ws_name, project_name):
-    _seed_workspace(ws_name, project_name)
+def test_dry_run_reports_counts_without_deleting(registered_workspace, project_name):
+    _seed_workspace(registered_workspace, project_name)
+    ws_name = registered_workspace["workspace"]["name"]
 
-    result = json.loads(purge_workspace(workspace=ws_name, dry_run=True))
+    result = json.loads(
+        purge_workspace(
+            workspace=ws_name, user_id=registered_workspace["user_id"], dry_run=True
+        )
+    )
 
     assert result["dry_run"] is True
     assert result["mode"] == "medium"
@@ -152,12 +165,18 @@ def test_dry_run_reports_counts_without_deleting(ws_name, project_name):
 
 
 def test_dry_run_hard_mode_shows_workspace_in_would_delete(
-    ws_name, project_name
+    registered_workspace, project_name
 ):
-    _seed_workspace(ws_name, project_name)
+    _seed_workspace(registered_workspace, project_name)
+    ws_name = registered_workspace["workspace"]["name"]
 
     result = json.loads(
-        purge_workspace(workspace=ws_name, mode="hard", dry_run=True)
+        purge_workspace(
+            workspace=ws_name,
+            user_id=registered_workspace["user_id"],
+            mode="hard",
+            dry_run=True,
+        )
     )
 
     assert result["would_delete"]["workspace"] is True
@@ -169,12 +188,16 @@ def test_dry_run_hard_mode_shows_workspace_in_would_delete(
 
 
 def test_medium_deletes_observations_preserves_workspace(
-    ws_name, project_name
+    registered_workspace, project_name
 ):
-    _seed_workspace(ws_name, project_name)
+    _seed_workspace(registered_workspace, project_name)
+    ws_name = registered_workspace["workspace"]["name"]
+    user_id = registered_workspace["user_id"]
 
     result = json.loads(
-        purge_workspace(workspace=ws_name, mode="medium", dry_run=False)
+        purge_workspace(
+            workspace=ws_name, user_id=user_id, mode="medium", dry_run=False
+        )
     )
 
     assert result["dry_run"] is False
@@ -183,7 +206,7 @@ def test_medium_deletes_observations_preserves_workspace(
     assert result["workspace_deleted"] is False
 
     # Workspace still exists.
-    workspaces = json.loads(list_workspaces())
+    workspaces = json.loads(list_workspaces(user_id))
     assert any(w["name"] == ws_name for w in workspaces)
 
     # Observations gone.
@@ -218,18 +241,22 @@ def test_medium_deletes_observations_preserves_workspace(
 # --- Hard mode ---
 
 
-def test_hard_deletes_everything_including_workspace(ws_name, project_name):
-    _seed_workspace(ws_name, project_name)
+def test_hard_deletes_everything_including_workspace(
+    registered_workspace, project_name
+):
+    _seed_workspace(registered_workspace, project_name)
+    ws_name = registered_workspace["workspace"]["name"]
+    user_id = registered_workspace["user_id"]
 
     result = json.loads(
-        purge_workspace(workspace=ws_name, mode="hard", dry_run=False)
+        purge_workspace(workspace=ws_name, user_id=user_id, mode="hard", dry_run=False)
     )
 
     assert result["workspace_deleted"] is True
     assert result["projects"] >= 1
 
     # Workspace gone.
-    workspaces = json.loads(list_workspaces())
+    workspaces = json.loads(list_workspaces(user_id))
     assert not any(w["name"] == ws_name for w in workspaces)
 
     # Project gone (hard mode removes it).
@@ -244,16 +271,20 @@ def test_hard_deletes_everything_including_workspace(ws_name, project_name):
 # --- Graph opt-in ---
 
 
-def test_graph_preserved_by_default(ws_name, project_name):
+def test_graph_preserved_by_default(registered_workspace, project_name):
     """purge_graph defaults to False — the graph is global and should
     not be touched unless explicitly opted in."""
-    _seed_workspace(ws_name, project_name)
+    _seed_workspace(registered_workspace, project_name)
+    ws_name = registered_workspace["workspace"]["name"]
+    user_id = registered_workspace["user_id"]
     ensure_graph()
     # Seed the global graph with something unrelated to this workspace.
     relate("Repo", f"sentinel-{ws_name}", "Repo", "sentinel-target", "DEPENDS_ON")
 
     try:
-        purge_workspace(workspace=ws_name, mode="medium", dry_run=False)
+        purge_workspace(
+            workspace=ws_name, user_id=user_id, mode="medium", dry_run=False
+        )
 
         # Sentinel node survives because we did NOT opt into graph purge.
         conn = get_connection()
@@ -283,14 +314,17 @@ def test_graph_preserved_by_default(ws_name, project_name):
         conn.commit()
 
 
-def test_graph_wiped_when_opt_in(ws_name, project_name):
-    _seed_workspace(ws_name, project_name)
+def test_graph_wiped_when_opt_in(registered_workspace, project_name):
+    _seed_workspace(registered_workspace, project_name)
+    ws_name = registered_workspace["workspace"]["name"]
+    user_id = registered_workspace["user_id"]
     ensure_graph()
     relate("Repo", f"purge-me-{ws_name}", "Repo", "purge-target", "DEPENDS_ON")
 
     result = json.loads(
         purge_workspace(
             workspace=ws_name,
+            user_id=user_id,
             mode="medium",
             purge_graph=True,
             dry_run=False,
@@ -312,8 +346,10 @@ def test_graph_wiped_when_opt_in(ws_name, project_name):
     assert int(str(row["c"])) == 0
 
 
-def test_dry_run_with_graph_reports_graph_counts(ws_name, project_name):
-    _seed_workspace(ws_name, project_name)
+def test_dry_run_with_graph_reports_graph_counts(registered_workspace, project_name):
+    _seed_workspace(registered_workspace, project_name)
+    ws_name = registered_workspace["workspace"]["name"]
+    user_id = registered_workspace["user_id"]
     ensure_graph()
     relate("Repo", f"preview-{ws_name}", "Repo", "preview-target", "DEPENDS_ON")
 
@@ -321,6 +357,7 @@ def test_dry_run_with_graph_reports_graph_counts(ws_name, project_name):
         result = json.loads(
             purge_workspace(
                 workspace=ws_name,
+                user_id=user_id,
                 mode="medium",
                 purge_graph=True,
                 dry_run=True,

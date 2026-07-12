@@ -1,8 +1,9 @@
 import json
 
-from memodi.database import repository, workflow_repository
+from memodi.database import workflow_repository
 from memodi.database.connection import ensure_schema
 from memodi.tools.errors import handle_errors
+from memodi.tools.scope import resolve_project
 
 
 def _ensure() -> None:
@@ -10,9 +11,16 @@ def _ensure() -> None:
 
 
 @handle_errors
-def plan(project: str, name: str, objective: str) -> str:
+def plan(
+    path: str,
+    user_id: str,
+    machine: str,
+    name: str,
+    objective: str,
+    project: str | None = None,
+) -> str:
     _ensure()
-    proj = repository.get_or_create_project(project)
+    proj = resolve_project(user_id, machine, path, project)
     active = workflow_repository.get_active_workflow(proj["id"])
     if active:
         return json.dumps(active, default=str)
@@ -70,14 +78,10 @@ def verify(
         result_ids = {r["id"] for r in ac_results if "id" in r}
         missing = stored_ids - result_ids
         if missing:
-            warnings.append(
-                f"ACs not evaluated: {sorted(missing)}"
-            )
+            warnings.append(f"ACs not evaluated: {sorted(missing)}")
         unknown = result_ids - stored_ids
         if unknown:
-            warnings.append(
-                f"Unknown AC IDs in results: {sorted(unknown)}"
-            )
+            warnings.append(f"Unknown AC IDs in results: {sorted(unknown)}")
 
     workflow_repository.update_result(workflow_id, result)
     to_phase = "unify" if passed else "apply"
@@ -107,12 +111,14 @@ def unify(workflow_id: str, summary: str, notes: str | None = None) -> str:
         for ac in stored_acs:
             ac_id = ac.get("id", "?")
             evaluated = results_by_id.get(ac_id, {})
-            ac_summary.append({
-                "id": ac_id,
-                "description": ac.get("description", ""),
-                "status": evaluated.get("status", "not_evaluated"),
-                "evidence": evaluated.get("evidence", ""),
-            })
+            ac_summary.append(
+                {
+                    "id": ac_id,
+                    "description": ac.get("description", ""),
+                    "status": evaluated.get("status", "not_evaluated"),
+                    "evidence": evaluated.get("evidence", ""),
+                }
+            )
         existing_result["ac_summary"] = ac_summary
 
     workflow_repository.update_result(workflow_id, existing_result)
@@ -121,12 +127,12 @@ def unify(workflow_id: str, summary: str, notes: str | None = None) -> str:
 
 
 @handle_errors
-def progress(project: str) -> str:
+def progress(path: str, user_id: str, machine: str, project: str | None = None) -> str:
     _ensure()
-    proj = repository.get_or_create_project(project)
+    proj = resolve_project(user_id, machine, path, project)
     active = workflow_repository.get_active_workflow(proj["id"])
     if active is None:
-        return json.dumps({"status": "no active workflow", "project": project})
+        return json.dumps({"status": "no active workflow", "project": proj["name"]})
     return json.dumps(active, default=str)
 
 
