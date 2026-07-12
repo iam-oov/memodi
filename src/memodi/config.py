@@ -4,6 +4,8 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     model_config = {"env_prefix": "MEMODI_"}
 
+    host: str = "0.0.0.0"
+
     db_host: str = "localhost"
     db_port: int = 5432
     db_user: str

@@ -3,6 +3,8 @@ import json
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import Tool as MCPTool
 
+from memodi.config import settings
+from memodi.database.connection import ensure_schema
 from memodi.tools import graph, memory, session, workflow
 from memodi.tools.context import client_context
 from memodi.tools.errors import NotAuthenticatedError
@@ -23,7 +25,7 @@ CORE_TOOLS: set[str] = {
 
 mcp = FastMCP(
     "memodi",
-    host="0.0.0.0",
+    host=settings.host,
     port=8787,
     instructions=(
         "memodi provides 6 core tools (always available) and "
@@ -642,6 +644,11 @@ mcp._mcp_server.list_tools()(_list_tools_with_deferred)
 
 def main():
     import sys
+
+    # Fail fast at startup: verify the DB is reachable and migrations apply
+    # before serving. Otherwise ensure_schema() would run lazily on the first
+    # tool call and a broken deploy would still pass the health check.
+    ensure_schema()
 
     if "--http" in sys.argv:
         mcp.run(transport="streamable-http")

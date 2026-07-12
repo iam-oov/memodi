@@ -1,12 +1,28 @@
 import psycopg
 import pytest
 
+from memodi import server
 from memodi.database.connection import ensure_schema, get_connection, run_migration
 
 
 @pytest.fixture(autouse=True)
 def setup_schema():
     ensure_schema()
+
+
+def test_main_ensures_schema_before_running_server(monkeypatch):
+    calls: list[str] = []
+    monkeypatch.setattr(
+        server, "ensure_schema", lambda: calls.append("ensure_schema")
+    )
+    monkeypatch.setattr(server.mcp, "run", lambda **kwargs: calls.append("run"))
+
+    server.main()
+
+    assert calls == ["ensure_schema", "run"], (
+        "main() must call ensure_schema() before mcp.run() so a deploy with a "
+        "down DB or a failing migration fails fast at startup"
+    )
 
 
 def test_run_migration_failure_reports_filename_and_rolls_back(tmp_path):
