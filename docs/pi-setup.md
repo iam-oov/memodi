@@ -5,6 +5,58 @@ Docker is dev-only — production runs everything natively. cloudflared is out
 of scope here: it's the user's existing native systemd service, independent
 of this repo.
 
+## Automated provisioning
+
+`scripts/pi-provision.sh` automates steps 1-9 below on a fresh Raspberry Pi
+OS Lite 64-bit install (idempotent, re-runnable), plus an OPTIONAL restore of
+cloudflared from a credentials backup on a fresh box. Step 10 (cloudflared
+tunnel bring-up) otherwise remains manual and out of repo scope. On its first
+run the script seeds `docker/prod/.env` from `.env.prod.example` and stops so
+you can fill in the secrets; re-run it to validate that file and finish. Run
+it as root on the Pi:
+
+```bash
+sudo bash scripts/pi-provision.sh
+```
+
+The manual steps below remain as the reference contract and as a fallback
+if the script needs to be adapted or debugged.
+
+## 1GB-hardware tuning (zram + PostgreSQL drop-in)
+
+On a 1GB Pi 3B, `scripts/pi-provision.sh` also applies two tuning steps the
+numbered steps below leave out. Reproduce them by hand only if you are not
+running the script — the script is the source of truth.
+
+**zram swap** (script phase 2) — compressed RAM-backed swap so the AGE build
+and the first model download don't OOM. Raspberry Pi OS 13 (trixie) already
+ships zram swap by default via `rpi-swap`; if `grep zram /proc/swaps` shows an
+active device, skip this step entirely — installing `zram-tools` on top of it
+fails with `mkswap: /dev/zram0 is mounted`. Manual setup for older images only:
+
+```bash
+sudo apt install -y zram-tools
+printf 'ALGO=lz4\nPERCENT=50\nPRIORITY=100\n' | sudo tee /etc/default/zramswap
+sudo systemctl restart zramswap
+sudo systemctl enable zramswap
+```
+
+**PostgreSQL tuning drop-in** (script phase 5) — small buffers sized for 1GB,
+loaded through `conf.d`:
+
+```bash
+sudo tee /etc/postgresql/16/main/conf.d/memodi-tuning.conf <<'EOF'
+shared_buffers = 128MB
+max_connections = 20
+work_mem = 4MB
+maintenance_work_mem = 32MB
+effective_cache_size = 256MB
+EOF
+grep -q '^include_dir' /etc/postgresql/16/main/postgresql.conf \
+  || echo "include_dir = 'conf.d'" | sudo tee -a /etc/postgresql/16/main/postgresql.conf
+sudo systemctl restart postgresql
+```
+
 ## 1. PostgreSQL 16 + pgvector (PGDG apt repo)
 
 ```bash
