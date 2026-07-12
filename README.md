@@ -21,8 +21,8 @@ memodi combina tres capacidades en una sola instancia de PostgreSQL:
 ## Arquitectura
 
 ```
-Internet ──HTTPS──► Caddy (auth + TLS) ──► memodi-server (uv + systemd) ──► PostgreSQL
-                    puerto 443              puerto 8787                       nativo en SSD
+Internet ──HTTPS──► Cloudflare Tunnel ──► memodi-server (uv + systemd) ──► PostgreSQL (nativo)
+                    memodi.valdoh.com      puerto 8787, Raspberry Pi
 ```
 
 Claude decide que vale la pena recordar. memodi persiste y consulta. Sin llamadas extra a LLMs — Claude ya esta ahi.
@@ -49,7 +49,7 @@ Necesitas: [Claude Code](https://docs.anthropic.com/en/docs/claude-code) instala
 Registrate en la pagina de signup del server (reemplaza la URL por la de tu instancia):
 
 ```
-https://62-238-15-94.sslip.io/signup
+https://memodi.valdoh.com/signup
 ```
 
 Copia la api key (`mmd_...`) apenas la veas — se muestra una sola vez.
@@ -90,7 +90,7 @@ claude mcp add --transport http \
   -H "X-Memodi-Api-Key: $MEMODI_API_KEY" \
   -H "X-Memodi-Machine: $(hostname)" \
   --scope user \
-  memodi https://62-238-15-94.sslip.io/mcp
+  memodi https://memodi.valdoh.com/mcp
 ```
 
 **5. Permitir todas las tools de memodi** (evita aprobar una por una):
@@ -210,11 +210,35 @@ Module ──AFFECTS───► Module
 ## Produccion
 
 ### Stack
-- **Server**: Hetzner CX23 (2 vCPU, 4GB RAM, Ubuntu 24)
-- **PostgreSQL 16**: nativo en SSD con pgvector + Apache AGE
-- **memodi-server**: Python via uv + systemd (puerto 8787)
-- **Caddy**: Docker, HTTPS automatico + API key auth
-- **Imagen DB**: pre-buildeada en GHCR (`ghcr.io/iam-oov/memodi-db:latest`) con pgvector + Apache AGE
+- **Server**: Raspberry Pi (arm64), todo nativo — sin containers en produccion
+- **PostgreSQL 16**: nativo (PGDG apt repo) con pgvector + Apache AGE compilado desde source — ver `docs/pi-setup.md`
+- **memodi-server**: Python via uv + systemd (`memodi.service`, puerto 8787). Por defecto bindea a todas las interfaces (`0.0.0.0`); en producción `MEMODI_HOST=127.0.0.1` lo restringe a loopback para que solo el túnel local llegue, nunca la LAN
+- **Cloudflare Tunnel**: expone `https://memodi.valdoh.com` con TLS incluido, sin abrir puertos en el router; corre como servicio systemd nativo del usuario (fuera de este repo); el ingress se configura en el dashboard de Zero Trust
+- **Deploy**: push-based — GitHub Actions entra por SSH a traves del mismo tunnel (`pi.valdoh.com`), autenticando con un service token de Cloudflare Access
+
+### Primer arranque (una vez, en el Pi)
+
+El deploy automatico llega al Pi *a traves del tunnel*, asi que no puede
+bootstrapearlo. Antes del primer deploy segui `docs/pi-setup.md` completo:
+PostgreSQL + pgvector + Apache AGE nativos, `memodi.service`, sudoers, env
+file. No hay imagen de Docker que pullear ni compose que levantar —
+`db-image.yml` ya no es un prerequisito de produccion (solo alimenta el
+desarrollo local).
+
+Verificar antes del primer deploy:
+- cloudflared corriendo como servicio nativo del usuario (independiente de cualquier deploy)
+- `MEMODI_SIGNUP_CODE` no esta vacio en `docker/prod/.env` (con signup deshabilitado,
+  `GET /signup` devuelve 503 y el health check del deploy falla)
+- `memodi.service` habilitado y corriendo (`systemctl status memodi`)
+- `https://memodi.valdoh.com/signup` responde 200
+
+### Proteccion de /signup y /mcp
+
+`/signup` es publico por diseno (es el unico punto de entrada sin key). Su proteccion:
+
+- Invite code (`MEMODI_SIGNUP_CODE`) + limite de body a nivel app
+- Una regla de **rate limiting en Cloudflare** sobre `memodi.valdoh.com/signup` — configurala en el dashboard (sugerido: 5 requests por minuto por IP). No hay throttling a nivel app.
+- `/mcp` requiere una api key valida por usuario (`X-Memodi-Api-Key`); sin key o con key invalida responde `not_authenticated`
 
 ### Pipeline CI/CD
 
@@ -222,12 +246,12 @@ Module ──AFFECTS───► Module
 
 | Workflow | Trigger | Que hace |
 |----------|---------|----------|
-| `ci.yml` | PR a main, push a main | Lint + tests (38 tests, 0 skippeados) |
-| `deploy.yml` | `ci.yml` pasa en main | SSH a Hetzner + `systemctl restart` + health check |
+| `ci.yml` | PR a main, push a main | Lint + tests (155 tests, 0 skippeados) |
+| `deploy.yml` | `ci.yml` pasa en main | SSH al Pi a traves del Cloudflare Tunnel + `uv sync` + `systemctl restart memodi` + health check |
 | `release.yml` | Tag `v*` | Changelog desde el tag anterior + GitHub Release |
-| `db-image.yml` | Cambios en `Dockerfile.db` | Build + push a GHCR |
+| `db-image.yml` | Cambios en `Dockerfile.db` | Build + push a GHCR (imagen usada solo en desarrollo local) |
 
-El deploy falla con `exit 1` si `systemctl is-active memodi` no responde despues del restart, y vuelca los ultimos 30 logs del servicio. Se acabaron los deploys "verdes" con un server muerto.
+El deploy falla con `exit 1` si `/signup` no devuelve 200 despues del restart, o si la version instalada no coincide con `__about__.py`, y vuelca los ultimos 30 logs del servicio (`journalctl -u memodi`). Ojo: un GET a `/mcp` devuelve 406 con el server SANO (streamable-http exige headers MCP) — nunca lo uses como health check.
 
 ### Crear un release
 
@@ -242,20 +266,15 @@ El workflow genera el changelog automaticamente desde el tag anterior y crea el 
 ### Deploy manual (si es necesario)
 
 ```bash
-ssh memodi@tu-server
-cd memodi && git pull && ~/.local/bin/uv sync
+ssh -o "ProxyCommand=cloudflared access ssh --hostname %h" usuario@pi.valdoh.com
+cd ~/memodi && git fetch origin main && git reset --hard origin/main
+uv sync --reinstall-package memodi
 sudo systemctl restart memodi
 ```
 
 ### Backups
 
-```bash
-# Diario automatico via cron
-0 3 * * * source /home/memodi/memodi/docker/prod/.env && /home/memodi/memodi/docker/prod/backup.sh
-
-# Restore
-./docker/prod/restore.sh /data/memodi/backups/memodi_20260411.sql.gz
-```
+Backups: deferred — el Pi arranca con DB fresca; la estrategia de backup offsite queda para un cambio futuro.
 
 ## Desarrollo local
 

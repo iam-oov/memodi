@@ -1,8 +1,0 @@
-{$MEMODI_DOMAIN} {
-	@unauthorized {
-		not header X-Api-Key {$MEMODI_API_KEY}
-	}
-	respond @unauthorized "Unauthorized" 401
-
-	reverse_proxy localhost:8787
-}

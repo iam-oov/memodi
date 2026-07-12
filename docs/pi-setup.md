@@ -1,0 +1,150 @@
+# Raspberry Pi Production Setup
+
+One-time bring-up for native PostgreSQL + `memodi.service` on the Pi (arm64).
+Docker is dev-only — production runs everything natively. cloudflared is out
+of scope here: it's the user's existing native systemd service, independent
+of this repo.
+
+## 1. PostgreSQL 16 + pgvector (PGDG apt repo)
+
+```bash
+sudo apt install -y curl ca-certificates gnupg lsb-release
+sudo install -d /usr/share/postgresql-common/pgdg
+sudo curl -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+  https://www.postgresql.org/media/keys/ACCC4CF8.asc
+echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+  | sudo tee /etc/apt/sources.list.d/pgdg.list
+sudo apt update
+sudo apt install -y postgresql-16 postgresql-16-pgvector
+```
+
+## 2. Apache AGE (build from source)
+
+Pinned to `PG16/v1.5.0-rc0` — must match `docker/Dockerfile.db` exactly
+(dev/prod extension parity). Check that file if this doc drifts.
+
+```bash
+sudo apt install -y build-essential git postgresql-server-dev-16 \
+  libreadline-dev zlib1g-dev bison flex
+git clone --branch PG16/v1.5.0-rc0 https://github.com/apache/age.git /tmp/age
+cd /tmp/age
+export PG_CONFIG=/usr/lib/postgresql/16/bin/pg_config
+make
+sudo make install PG_CONFIG=$PG_CONFIG
+cd - && rm -rf /tmp/age
+sudo apt purge -y build-essential postgresql-server-dev-16 bison flex
+sudo apt autoremove -y
+```
+
+## 3. Database + role
+
+```bash
+sudo -u postgres psql <<'SQL'
+CREATE USER memodi WITH PASSWORD 'CHANGE_ME';
+CREATE DATABASE memodi OWNER memodi;
+SQL
+```
+
+## 4. Extensions + grants
+
+Translated from `docker/init-extensions.sql` (superuser section — the app
+user here is not superuser, unlike the Docker image's `POSTGRES_USER`).
+
+```bash
+sudo -u postgres psql -d memodi <<'SQL'
+CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS age;
+ALTER DATABASE memodi SET session_preload_libraries = 'age';
+GRANT USAGE ON SCHEMA ag_catalog TO memodi;
+GRANT ALL ON ALL TABLES IN SCHEMA ag_catalog TO memodi;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA ag_catalog TO memodi;
+SQL
+sudo systemctl restart postgresql
+```
+
+## 5. memodi service user
+
+Everything from here runs AS this user: `memodi.service` hardcodes
+`User=memodi` and `/home/memodi/...`, the deploy SSHes in as it, and the
+sudoers line (step 9) targets it. The GitHub secret `PI_SSH_USER` MUST be
+`memodi` — its `authorized_keys` gets the deploy public key.
+
+```bash
+sudo useradd -m -s /bin/bash memodi
+sudo usermod -aG systemd-journal memodi   # so the deploy's `journalctl -u memodi` prints
+
+# Authorize the deploy public key (paired with the PI_SSH_KEY secret):
+sudo -u memodi mkdir -p /home/memodi/.ssh
+echo 'ssh-ed25519 AAAA...deploy-public-key...' | sudo tee -a /home/memodi/.ssh/authorized_keys
+sudo chown -R memodi:memodi /home/memodi/.ssh
+sudo chmod 700 /home/memodi/.ssh
+sudo chmod 600 /home/memodi/.ssh/authorized_keys
+```
+
+## 6. uv + repo (as the memodi user)
+
+```bash
+sudo -iu memodi bash <<'EOF'
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source $HOME/.local/bin/env
+git clone https://github.com/iam-oov/memodi.git ~/memodi
+cd ~/memodi && uv sync
+EOF
+```
+
+## 7. Env file (as the memodi user)
+
+```bash
+sudo -iu memodi bash <<'EOF'
+cd ~/memodi
+cp docker/prod/.env.prod.example docker/prod/.env
+EOF
+```
+
+Edit `/home/memodi/memodi/docker/prod/.env`: `MEMODI_DB_PASSWORD` (match
+step 3), `MEMODI_SIGNUP_CODE` (non-empty — the deploy health check depends on
+it). `MEMODI_HOST=127.0.0.1` is already set (loopback only; the tunnel
+connects locally, the LAN must not reach the port).
+
+## 8. memodi.service
+
+```bash
+sudo cp /home/memodi/memodi/docker/prod/memodi.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now memodi
+systemctl status memodi
+```
+
+The unit calls `ensure_schema()` at process startup (DB connectivity +
+migrations). A broken DB crash-loops the unit — that's intentional; the
+deploy's health check is what surfaces it, not the unit itself.
+
+## 9. Sudoers (deploy.yml restarts the service over SSH)
+
+```bash
+echo 'memodi ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart memodi' \
+  | sudo tee /etc/sudoers.d/memodi
+sudo chmod 440 /etc/sudoers.d/memodi
+```
+
+Scope this to `systemctl restart memodi` only — do not grant broader sudo.
+
+## 10. cloudflared (out of repo scope)
+
+Not installed or configured by this repo. Before the first deploy, confirm
+the user's existing native cloudflared systemd service is already running,
+independently of any deploy:
+
+- `memodi.valdoh.com` -> `http://localhost:8787` (MCP server + `/signup`)
+- `pi.valdoh.com` -> `ssh://localhost:22` (deploys over SSH)
+- A Cloudflare Access service-token policy authorizing the token used by
+  `deploy.yml` (`CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET`)
+
+## Preconditions checklist (before the first deploy)
+
+- [ ] PostgreSQL 16 + pgvector + Apache AGE installed, extensions created (steps 1-4)
+- [ ] `memodi` OS user created, deploy public key in its `authorized_keys`, `PI_SSH_USER=memodi` (step 5)
+- [ ] `memodi.service` installed and enabled (step 8)
+- [ ] cloudflared tunnel running independently (step 10) — no chicken-and-egg with deploy
+- [ ] `docker/prod/.env` present, `MEMODI_SIGNUP_CODE` non-empty
+- [ ] sudoers line in place for passwordless `systemctl restart memodi` only (step 9)

@@ -12,7 +12,7 @@ CWD=$(printf '%s' "$INPUT" | python3 -c "import sys,json; print(json.load(sys.st
 CWD="${CWD:-$PWD}"
 
 # --- Server URL (env var or production default) ---
-MEMODI_URL="${MEMODI_URL:-https://62-238-15-94.sslip.io}"
+MEMODI_URL="${MEMODI_URL:-https://memodi.valdoh.com}"
 
 # --- Build auth headers (per-user api key + machine identity) ---
 MACHINE="${MEMODI_MACHINE:-$(hostname 2>/dev/null)}"
@@ -29,7 +29,7 @@ The memodi server is not reachable. Memory tools will NOT work this session.
 
 Possible fixes:
 - Check that MEMODI_API_KEY is set in your environment
-- Verify the server is up: `curl -s -o /dev/null -w '%{http_code}\n' https://62-238-15-94.sslip.io/mcp` (any HTTP code means reachable)
+- Verify the server is up: `curl -s -o /dev/null -w '%{http_code}\n' https://memodi.valdoh.com/mcp` (any HTTP code means reachable)
 - For local dev: `docker compose up -d` in the memodi repo
 
 You can still work normally, but observations will NOT be persisted.

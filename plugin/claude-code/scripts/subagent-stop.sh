@@ -14,7 +14,7 @@
 PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 # --- Server URL (env var or production default) ---
-MEMODI_URL="${MEMODI_URL:-https://62-238-15-94.sslip.io}"
+MEMODI_URL="${MEMODI_URL:-https://memodi.valdoh.com}"
 
 # --- Parse stdin JSON ---
 INPUT=$(cat)

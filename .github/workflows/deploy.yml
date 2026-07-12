@@ -1,5 +1,41 @@
 name: Deploy
 
+# Push-based deploy to the Raspberry Pi over SSH THROUGH the Cloudflare Tunnel.
+#
+# Required GitHub secrets:
+#   CF_ACCESS_CLIENT_ID     — Cloudflare Access service token client ID
+#   CF_ACCESS_CLIENT_SECRET — Cloudflare Access service token client secret
+#   PI_SSH_USER             — SSH user on the Pi (repo cloned at ~/memodi)
+#   PI_SSH_KEY              — private SSH key authorized for PI_SSH_USER
+#
+# Cloudflare side (Zero Trust dashboard):
+#   - Tunnel ingress: pi.valdoh.com -> ssh://localhost:22
+#   - Self-hosted Access application for pi.valdoh.com with a Service Auth
+#     policy that allows the service token above
+#
+# cloudflared reads the service token from TUNNEL_SERVICE_TOKEN_ID /
+# TUNNEL_SERVICE_TOKEN_SECRET and sends it as CF-Access-Client-Id /
+# CF-Access-Client-Secret to the Access edge (flags: --service-token-id /
+# --service-token-secret).
+#
+# Preconditions (one-time, before the FIRST deploy — this workflow cannot
+# bootstrap any of them because it reaches the Pi through the tunnel; see
+# docs/pi-setup.md for the full native bring-up):
+#   (a) The cloudflared tunnel connector must already be running on the Pi
+#       as the user's own systemd service, independently of any deploy — no
+#       chicken-and-egg: this workflow SSHes in through that same tunnel, so
+#       if the connector is down there is no path in.
+#   (b) PostgreSQL 16 + pgvector + Apache AGE installed natively, with the
+#       memodi database, role, and extensions created (docs/pi-setup.md).
+#   (c) memodi.service installed and enabled (docker/prod/memodi.service).
+#   (d) docker/prod/.env must exist on the Pi (copy from .env.prod.example
+#       and fill in the values) — memodi.service reads it via EnvironmentFile.
+#   (e) Passwordless sudo for `systemctl restart memodi` ONLY:
+#       memodi ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart memodi
+#   (f) MEMODI_SIGNUP_CODE must be non-empty. The health probe below hits
+#       GET /signup, which returns 503 when signup is disabled (empty code),
+#       which would fail the deploy even on a healthy server.
+
 on:
   workflow_run:
     workflows: ["CI"]
@@ -14,33 +50,62 @@ jobs:
       github.event.workflow_run.event == 'push'
 
     steps:
-      - name: Deploy to Hetzner
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.HETZNER_HOST }}
-          username: memodi
-          key: ${{ secrets.HETZNER_SSH_KEY }}
-          script: |
-            set -e
-            cd memodi
-            git fetch origin main
-            git reset --hard origin/main
-            ~/.local/bin/uv sync --reinstall-package memodi
-            sudo systemctl restart memodi
-            sleep 3
-            systemctl is-active --quiet memodi || {
-              echo "DEPLOY FAILED: memodi service not active"
-              journalctl -u memodi -n 30 --no-pager
-              exit 1
-            }
-            EXPECTED=$(.venv/bin/python -c "from memodi.__about__ import __version__; print(__version__)")
-            INSTALLED=$(.venv/bin/python -c "from importlib.metadata import version; print(version('memodi'))")
-            if [ "$EXPECTED" != "$INSTALLED" ]; then
-              echo "DEPLOY FAILED: version mismatch. source=$EXPECTED, installed=$INSTALLED"
-              journalctl -u memodi -n 30 --no-pager
-              exit 1
-            fi
-            echo "Deploy verified: memodi $INSTALLED running"
-            cd docker/prod
-            docker compose -f docker-compose.prod.yml down
-            docker compose -f docker-compose.prod.yml up -d
+      - name: Install cloudflared
+        run: |
+          curl -fsSL -o cloudflared.deb \
+            https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+          sudo dpkg -i cloudflared.deb
+          cloudflared --version
+
+      - name: Configure SSH key
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.PI_SSH_KEY }}" > ~/.ssh/id_pi
+          chmod 600 ~/.ssh/id_pi
+
+      - name: Deploy to the Pi through the tunnel
+        env:
+          TUNNEL_SERVICE_TOKEN_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          TUNNEL_SERVICE_TOKEN_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        # StrictHostKeyChecking=accept-new: the runner is ephemeral, so TOFU
+        # pinning is meaningless; transport auth already happens at the
+        # Access edge via the service token.
+        run: |
+          ssh -i ~/.ssh/id_pi \
+            -o StrictHostKeyChecking=accept-new \
+            -o "ProxyCommand=cloudflared access ssh --hostname %h" \
+            "${{ secrets.PI_SSH_USER }}@pi.valdoh.com" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd ~/memodi
+          git fetch origin main
+          git reset --hard origin/main
+          ~/.local/bin/uv sync --reinstall-package memodi
+          sudo systemctl restart memodi
+
+          # Health check: /signup returns 200 from a healthy server. The server
+          # runs ensure_schema() at startup, so a down DB or a failing migration
+          # exits nonzero and this unit crash-loops (systemd Restart=on-failure) —
+          # this probe never reaches 200 in that case.
+          # (A GET on the streamable-http /mcp endpoint returns 406 even
+          # when healthy — do not use it as a liveness probe.)
+          CODE=000
+          for _ in $(seq 1 30); do
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8787/signup || true)
+            [ "$CODE" = "200" ] && break
+            sleep 5
+          done
+          if [ "$CODE" != "200" ]; then
+            echo "DEPLOY FAILED: /signup returned $CODE"
+            journalctl -u memodi -n 30 --no-pager
+            exit 1
+          fi
+
+          EXPECTED=$(.venv/bin/python -c "from memodi.__about__ import __version__; print(__version__)")
+          INSTALLED=$(.venv/bin/python -c "from importlib.metadata import version; print(version('memodi'))")
+          if [ "$EXPECTED" != "$INSTALLED" ]; then
+            echo "DEPLOY FAILED: version mismatch. source=$EXPECTED, installed=$INSTALLED"
+            journalctl -u memodi -n 30 --no-pager
+            exit 1
+          fi
+          echo "Deploy verified: memodi $INSTALLED running"
+          REMOTE

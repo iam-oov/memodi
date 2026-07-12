@@ -5,7 +5,7 @@
 # the MCP server connection to the shared production instance.
 #
 # Usage:
-#   1. Sign up for an api key: https://62-238-15-94.sslip.io/signup
+#   1. Sign up for an api key: https://memodi.valdoh.com/signup
 #   2. export MEMODI_API_KEY="mmd_..."
 #   3. ./install.sh
 #
@@ -15,7 +15,7 @@
 
 set -e
 
-MEMODI_BASE_URL="https://62-238-15-94.sslip.io"
+MEMODI_BASE_URL="https://memodi.valdoh.com"
 MEMODI_URL="${MEMODI_BASE_URL}/mcp"
 SIGNUP_URL="${MEMODI_BASE_URL}/signup"
 

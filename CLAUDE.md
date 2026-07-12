@@ -8,7 +8,7 @@ MCP server (Python) that gives Claude Code persistent, distributed memory across
 
 ```
 Local dev:  Claude Code ──HTTP──► memodi-server (docker compose) ──► PostgreSQL (docker)
-Production: Claude Code ──HTTPS──► Caddy ──► memodi-server (uv + systemd) ──► PostgreSQL (native)
+Production: Claude Code ──HTTPS──► Cloudflare Tunnel ──► memodi-server (uv + systemd, Raspberry Pi) ──► PostgreSQL (native)
 ```
 
 ### Storage layers (PostgreSQL)
@@ -29,7 +29,7 @@ Production: Claude Code ──HTTPS──► Caddy ──► memodi-server (uv +
 - **Database**: PostgreSQL 16+ (pgvector + Apache AGE)
 - **Embeddings**: paraphrase-multilingual-MiniLM-L12-v2 (384d, ES+EN)
 - **Local infra**: Docker Compose (DB from GHCR pre-built image, server from source)
-- **Production infra**: uv + systemd (server), native PostgreSQL, Caddy in Docker (TLS + API key)
+- **Production infra**: uv + systemd (`memodi.service`) on a Raspberry Pi, native PostgreSQL + pgvector + Apache AGE, Cloudflare Tunnel (native cloudflared, TLS + DNS at `memodi.valdoh.com`); see `docs/pi-setup.md`; backups: deferred
 - **Config**: System env vars with MEMODI_ prefix
 
 ## Auth Model
@@ -48,12 +48,12 @@ Real per-user accounts, not a single shared key:
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
-| `ci.yml` | PR to main, push to main | Lint + tests (38 tests, full coverage) |
-| `deploy.yml` | `ci.yml` succeeds on main | SSH to Hetzner + restart + health check |
+| `ci.yml` | PR to main, push to main | Lint + tests (155 tests, full coverage) |
+| `deploy.yml` | `ci.yml` succeeds on main | SSH to the Pi through the Cloudflare Tunnel + `uv sync` + `systemctl restart memodi` + health check |
 | `release.yml` | Tag `v*` | Auto-generated changelog + GitHub Release |
-| `db-image.yml` | Changes to `Dockerfile.db` | Build + push to `ghcr.io/iam-oov/memodi-db` |
+| `db-image.yml` | Changes to `Dockerfile.db` | Build + push to `ghcr.io/iam-oov/memodi-db` (dev-only image) |
 
-Deploy verifies `systemctl is-active memodi` after restart and fails the pipeline with journal logs if the service didn't come up.
+Deploy authenticates to Cloudflare Access with a service token (`cloudflared access ssh` as SSH ProxyCommand), then verifies `/signup` returns 200 and the installed version matches `__about__.py` — otherwise it dumps the last 30 `journalctl -u memodi` logs and fails the pipeline. A GET on `/mcp` returns 406 from a healthy server; never use it as a liveness probe.
 
 ## Plugin Structure
 
@@ -88,5 +88,5 @@ The skill tells Claude WHEN and WHY to use memory. The MCP server handles HOW.
 - Every MCP tool must have a clear, single responsibility
 - PostgreSQL is the ONLY persistence — no local files for shared state
 - Credentials come from system env vars only — never hardcode, never commit
-- Docker Compose for local dev, Hetzner for production
+- Docker Compose for local dev only; production runs natively on a Raspberry Pi behind a Cloudflare Tunnel
 - Connection pool sets `idle_in_transaction_session_timeout=30s` — DB kills abandoned transactions automatically

@@ -32,7 +32,7 @@ class TestPrepareConnection:
         assert "search_path" in conn.execute.call_args_list[1].args[0]
 
     def test_swallows_insufficient_privilege_on_load(self) -> None:
-        """Hetzner production: memodi user is not superuser, but AGE is
+        """Native PostgreSQL: memodi user is not superuser, but AGE is
         preloaded via session_preload_libraries. The explicit LOAD fails with
         InsufficientPrivilege — we rollback and continue with SET search_path."""
         conn = MagicMock(spec=psycopg.Connection)

@@ -12,8 +12,8 @@ def _prepare_connection(conn: psycopg.Connection) -> None:
     """Load AGE and set search path. Must be called per-transaction.
 
     LOAD 'age' requires superuser privileges unless the library is listed in
-    session_preload_libraries. In production (Hetzner) the memodi user is not
-    a superuser, but AGE is preloaded at connect time via
+    session_preload_libraries. On a native PostgreSQL where the memodi user
+    is not a superuser, AGE is preloaded at connect time via
     `ALTER DATABASE memodi SET session_preload_libraries = 'age'`. In that
     case the explicit LOAD fails with 'access to library "age" is not
     allowed' even though AGE is already available — we swallow that specific

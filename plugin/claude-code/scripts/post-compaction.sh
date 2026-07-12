@@ -10,7 +10,7 @@ CWD=$(printf '%s' "$INPUT" | python3 -c "import sys,json; print(json.load(sys.st
 CWD="${CWD:-$PWD}"
 
 # --- Server URL (env var or production default) ---
-MEMODI_URL="${MEMODI_URL:-https://62-238-15-94.sslip.io}"
+MEMODI_URL="${MEMODI_URL:-https://memodi.valdoh.com}"
 
 # --- Build auth headers (per-user api key + machine identity) ---
 MACHINE="${MEMODI_MACHINE:-$(hostname 2>/dev/null)}"
