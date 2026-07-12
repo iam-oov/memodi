@@ -9,6 +9,9 @@ User=memodi
 WorkingDirectory=/home/memodi/memodi
 EnvironmentFile=/home/memodi/memodi/docker/prod/.env
 Environment=MEMODI_DB_HOST=localhost
+# Persistent model cache: the default (tempfile.gettempdir()/fastembed_cache)
+# is ephemeral and would force a blocking re-download after every reboot.
+Environment=FASTEMBED_CACHE_PATH=/home/memodi/.cache/fastembed
 # main() calls ensure_schema() at startup (DB connectivity + migrations)
 # before serving. A broken DB or a failing migration exits nonzero here,
 # so this unit crash-loops until it's fixed — the deploy health check

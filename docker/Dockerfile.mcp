@@ -2,18 +2,17 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install PyTorch CPU-only first (avoids pulling CUDA ~4GB). The cpu index
-# serves manylinux aarch64 wheels too (verified: torch-2.11.0+cpu
-# manylinux_2_28_aarch64).
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
-
 COPY pyproject.toml README.md ./
 COPY src/ src/
 
 RUN pip install --no-cache-dir .
 
+# Pin the model cache to a stable in-image path so the build-time pre-download
+# and the runtime lookup resolve to the same location by construction.
+ENV FASTEMBED_CACHE_PATH=/opt/fastembed_cache
+
 # Pre-download the embedding model at build time
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')"
+RUN python -c "from fastembed import TextEmbedding; TextEmbedding('sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2')"
 
 EXPOSE 8787
 

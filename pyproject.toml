@@ -6,11 +6,11 @@ readme = "README.md"
 authors = [{ name = "osvaldo hinojosa", email = "osvaldo.javier14@gmail.com" }]
 requires-python = ">=3.12"
 dependencies = [
+    "fastembed>=0.8.0,<0.9",
     "mcp[cli]>=1.0.0",
     "psycopg[binary]>=3.2.0",
     "pydantic-settings>=2.0.0",
     "python-multipart>=0.0.26",
-    "sentence-transformers>=3.0.0",
 ]
 
 [project.scripts]

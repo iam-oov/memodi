@@ -27,7 +27,7 @@ Production: Claude Code ──HTTPS──► Cloudflare Tunnel ──► memodi-
 - **Language**: Python 3.12+
 - **MCP SDK**: FastMCP (streamable-http transport)
 - **Database**: PostgreSQL 16+ (pgvector + Apache AGE)
-- **Embeddings**: paraphrase-multilingual-MiniLM-L12-v2 (384d, ES+EN)
+- **Embeddings**: paraphrase-multilingual-MiniLM-L12-v2 via fastembed (quantized ONNX runtime, 384d, ES+EN)
 - **Local infra**: Docker Compose (DB from GHCR pre-built image, server from source)
 - **Production infra**: uv + systemd (`memodi.service`) on a Raspberry Pi, native PostgreSQL + pgvector + Apache AGE, Cloudflare Tunnel (native cloudflared, TLS + DNS at `memodi.valdoh.com`); see `docs/pi-setup.md`; backups: deferred
 - **Config**: System env vars with MEMODI_ prefix
