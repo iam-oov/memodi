@@ -4,6 +4,11 @@ from memodi.database import graph_repository, repository
 from memodi.database.connection import ensure_schema
 from memodi.tools.errors import handle_errors
 from memodi.tools.scope import resolve_project
+from memodi.tools.serialization import (
+    serialize_observation_save,
+    serialize_observations,
+    serialize_session_summary,
+)
 
 
 def _ensure() -> None:
@@ -42,7 +47,7 @@ def save(
         embedding=embedding,
         occurred_at=occurred_at,
     )
-    return json.dumps(obs, default=str)
+    return json.dumps(serialize_observation_save(obs), default=str)
 
 
 @handle_errors
@@ -64,7 +69,7 @@ def search(
         limit=limit,
         workspace_id=proj["workspace_id"],
     )
-    return json.dumps(results, default=str)
+    return json.dumps(serialize_observations(results), default=str)
 
 
 @handle_errors
@@ -84,7 +89,12 @@ def context(
         workspace_id=proj["workspace_id"],
     )
     return json.dumps(
-        {"last_session": last_session, "observations": observations},
+        {
+            "last_session": serialize_session_summary(last_session)
+            if last_session
+            else None,
+            "observations": serialize_observations(observations),
+        },
         default=str,
     )
 
@@ -104,7 +114,7 @@ def search_global(
     results = repository.search_observations_global(
         query=query, owner_user_id=user_id, type=type, limit=limit
     )
-    return json.dumps(results, default=str)
+    return json.dumps(serialize_observations(results), default=str)
 
 
 @handle_errors
@@ -196,7 +206,7 @@ def search_similar(
         limit=limit,
         workspace_id=proj["workspace_id"],
     )
-    return json.dumps(results, default=str)
+    return json.dumps(serialize_observations(results), default=str)
 
 
 @handle_errors
@@ -220,7 +230,7 @@ def search_hybrid(
         limit=limit,
         workspace_id=proj["workspace_id"],
     )
-    return json.dumps(results, default=str)
+    return json.dumps(serialize_observations(results), default=str)
 
 
 @handle_errors

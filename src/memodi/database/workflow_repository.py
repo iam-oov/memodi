@@ -135,11 +135,11 @@ def update_plan(
     warnings = _validate_plan(acceptance_criteria, tasks, scope)
 
     # Store scope in the result JSONB (avoids migration)
-    existing_result = json.loads(
+    existing_result = (
         conn.execute(
             "SELECT result FROM workflows WHERE id = %s", (workflow_id,)
         ).fetchone()["result"]
-        or "{}"
+        or {}
     )
     existing_result["scope"] = scope
 

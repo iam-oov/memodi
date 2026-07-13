@@ -1,0 +1,245 @@
+import json
+import uuid
+
+import pytest
+
+from memodi.database.connection import ensure_schema
+from memodi.tools.memory import (
+    context,
+    save,
+    search,
+    search_global,
+    search_hybrid,
+    search_similar,
+)
+from memodi.tools.serialization import _OBSERVATION_READ_FIELDS
+from memodi.tools.session import session_end, session_start
+from tests.conftest import _path
+
+FORBIDDEN_KEYS = {
+    "embedding",
+    "search_vector",
+    "content_hash",
+    "deleted_at",
+    "session_id",
+    "project_id",
+}
+
+SAVE_ACK_FIELDS = {
+    "id",
+    "title",
+    "type",
+    "topic_key",
+    "revision_count",
+    "duplicate_count",
+    "created_at",
+    "updated_at",
+}
+
+OBSERVATION_READ_ALLOWLIST = {
+    "id",
+    "type",
+    "title",
+    "content",
+    "topic_key",
+    "metadata",
+    "occurred_at",
+    "created_at",
+    "updated_at",
+    "revision_count",
+    "duplicate_count",
+    "project_name",
+    "rank",
+    "similarity",
+    "rrf_score",
+    "_deduplicated",
+}
+
+_NON_PERSISTED_READ_FIELDS = {
+    "project_name",
+    "rank",
+    "similarity",
+    "rrf_score",
+    "_deduplicated",
+}
+
+OBSERVATION_ROW_FIELDS = OBSERVATION_READ_ALLOWLIST - _NON_PERSISTED_READ_FIELDS
+
+
+@pytest.fixture(autouse=True)
+def setup_schema():
+    ensure_schema()
+
+
+@pytest.fixture
+def project_name():
+    return f"test-serialization-{uuid.uuid4()}"
+
+
+def _collect_keys(node) -> set:
+    keys: set = set()
+    if isinstance(node, dict):
+        for k, v in node.items():
+            keys.add(k)
+            keys |= _collect_keys(v)
+    elif isinstance(node, list):
+        for item in node:
+            keys |= _collect_keys(item)
+    return keys
+
+
+@pytest.mark.parametrize(
+    "tool_name",
+    ["save", "search", "context", "search_hybrid", "search_similar", "search_global"],
+)
+def test_no_forbidden_keys_leak(registered_workspace, project_name, tool_name):
+    path = _path(registered_workspace, project_name)
+    save(
+        path=path,
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+        title="Leak probe",
+        content="Checking no internals leak through the wire",
+        type="discovery",
+    )
+
+    common = dict(
+        path=path,
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+
+    if tool_name == "save":
+        raw = save(
+            **common,
+            title="Second leak probe",
+            content="Another observation to exercise the save ack",
+            type="discovery",
+        )
+    elif tool_name == "context":
+        raw = context(**common)
+    elif tool_name == "search_global":
+        raw = search_global(user_id=registered_workspace["user_id"], query="leak")
+    else:
+        fn = {
+            "search": search,
+            "search_hybrid": search_hybrid,
+            "search_similar": search_similar,
+        }[tool_name]
+        raw = fn(**common, query="leak")
+
+    payload = json.loads(raw)
+    leaked = _collect_keys(payload) & FORBIDDEN_KEYS
+    assert not leaked, f"{tool_name} leaked forbidden keys: {leaked}"
+
+
+def test_context_last_session_never_leaks_project_id(
+    registered_workspace, project_name
+):
+    path = _path(registered_workspace, project_name)
+    session_start(
+        path=path,
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    session_end(
+        path=path,
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+        summary="Closed with a summary so get_latest_session_summary finds it",
+    )
+
+    payload = json.loads(
+        context(
+            path=path,
+            user_id=registered_workspace["user_id"],
+            machine=registered_workspace["machine"],
+        )
+    )
+
+    assert payload["last_session"] is not None
+    assert payload["last_session"]["summary"].startswith("Closed with a summary")
+    leaked = _collect_keys(payload["last_session"]) & FORBIDDEN_KEYS
+    assert not leaked
+
+
+def test_save_ack_exact_field_set(registered_workspace, project_name):
+    result = json.loads(
+        save(
+            path=_path(registered_workspace, project_name),
+            user_id=registered_workspace["user_id"],
+            machine=registered_workspace["machine"],
+            title="Ack contract",
+            content="Verifying exact save response shape",
+            type="discovery",
+        )
+    )
+    assert set(result.keys()) == SAVE_ACK_FIELDS
+    assert "content" not in result
+    assert "metadata" not in result
+
+
+def test_save_ack_includes_metadata_only_when_non_empty(
+    registered_workspace, project_name
+):
+    result = json.loads(
+        save(
+            path=_path(registered_workspace, project_name),
+            user_id=registered_workspace["user_id"],
+            machine=registered_workspace["machine"],
+            title="Ack with metadata",
+            content="Verifying metadata is included when provided",
+            type="discovery",
+            metadata={"source": "test"},
+        )
+    )
+    assert set(result.keys()) == SAVE_ACK_FIELDS | {"metadata"}
+    assert result["metadata"] == {"source": "test"}
+
+
+def test_read_allowlist_is_pinned():
+    assert _OBSERVATION_READ_FIELDS == OBSERVATION_READ_ALLOWLIST
+
+
+def test_search_hybrid_result_exact_field_set(registered_workspace, project_name):
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    save(
+        **common,
+        title="Hybrid boundary probe",
+        content="Observation exercised through the hybrid search boundary",
+        type="discovery",
+    )
+
+    rows = json.loads(search_hybrid(**common, query="hybrid boundary"))
+    assert rows, "expected at least one hybrid result"
+    row = rows[0]
+
+    assert set(row.keys()) == OBSERVATION_ROW_FIELDS | {"rrf_score"}
+    assert row["content"]
+    assert row["title"]
+
+
+def test_context_observation_exact_field_set(registered_workspace, project_name):
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    save(
+        **common,
+        title="Context boundary probe",
+        content="Observation exercised through the context read boundary",
+        type="discovery",
+    )
+
+    payload = json.loads(context(**common))
+    assert payload["observations"], "expected at least one recent observation"
+    row = payload["observations"][0]
+
+    assert set(row.keys()) == OBSERVATION_ROW_FIELDS
+    assert row["content"]
+    assert row["title"]

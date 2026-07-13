@@ -162,6 +162,93 @@ def test_progress_shows_active_workflow(registered_workspace, project_name):
     assert result["phase"] == "plan"
 
 
+def test_workflow_responses_never_leak_project_id(registered_workspace, project_name):
+    path = _path(registered_workspace, project_name)
+    wf = json.loads(
+        plan(
+            path=path,
+            user_id=registered_workspace["user_id"],
+            machine=registered_workspace["machine"],
+            name="Serialization audit",
+            objective="No internal FK leak",
+        )
+    )
+    assert "project_id" not in wf
+    wf_id = wf["id"]
+
+    wf = json.loads(
+        update_plan(
+            wf_id,
+            acceptance_criteria=[],
+            tasks=[{"name": "Check boundary", "status": "pending", "files": []}],
+        )
+    )
+    assert "project_id" not in wf
+
+    wf = json.loads(approve_plan(wf_id))
+    assert "project_id" not in wf
+
+    wf = json.loads(apply_done(wf_id))
+    assert "project_id" not in wf
+
+    wf = json.loads(verify(wf_id, result={"checks": "ok"}, passed=True))
+    assert "project_id" not in wf
+
+    wf = json.loads(unify(wf_id, summary="Done"))
+    assert "project_id" not in wf
+
+    result = json.loads(
+        progress(
+            path=path,
+            user_id=registered_workspace["user_id"],
+            machine=registered_workspace["machine"],
+        )
+    )
+    assert "project_id" not in result
+
+
+def test_update_plan_twice_succeeds_and_overwrites_scope(
+    registered_workspace, project_name
+):
+    wf = json.loads(
+        plan(
+            path=_path(registered_workspace, project_name),
+            user_id=registered_workspace["user_id"],
+            machine=registered_workspace["machine"],
+            name="Iterate on plan",
+            objective="Refine the plan across two passes",
+        )
+    )
+    wf_id = wf["id"]
+
+    first = json.loads(
+        update_plan(
+            wf_id,
+            acceptance_criteria=[{"id": "AC-1", "description": "Single criterion"}],
+            tasks=[{"name": "Only task", "status": "pending", "criteria": ["AC-1"]}],
+        )
+    )
+    assert first["_scope"] == "quick-fix"
+    assert first["result"]["scope"] == "quick-fix"
+
+    second = json.loads(
+        update_plan(
+            wf_id,
+            acceptance_criteria=[
+                {"id": "AC-1", "description": "First"},
+                {"id": "AC-2", "description": "Second"},
+            ],
+            tasks=[
+                {"name": f"Task {i}", "status": "pending", "criteria": ["AC-1"]}
+                for i in range(6)
+            ],
+        )
+    )
+    assert second["phase"] == "plan"
+    assert second["_scope"] == "complex"
+    assert second["result"]["scope"] == "complex"
+
+
 def test_progress_no_active_workflow(registered_workspace, project_name):
     path = _path(registered_workspace, project_name)
     proj = repository.get_or_create_project(

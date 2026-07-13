@@ -4,6 +4,7 @@ from memodi.database import workflow_repository
 from memodi.database.connection import ensure_schema
 from memodi.tools.errors import handle_errors
 from memodi.tools.scope import resolve_project
+from memodi.tools.serialization import serialize_workflow
 
 
 def _ensure() -> None:
@@ -23,13 +24,13 @@ def plan(
     proj = resolve_project(user_id, machine, path, project)
     active = workflow_repository.get_active_workflow(proj["id"])
     if active:
-        return json.dumps(active, default=str)
+        return json.dumps(serialize_workflow(active), default=str)
     wf = workflow_repository.create_workflow(
         project_id=proj["id"],
         name=name,
         objective=objective,
     )
-    return json.dumps(wf, default=str)
+    return json.dumps(serialize_workflow(wf), default=str)
 
 
 @handle_errors
@@ -40,21 +41,21 @@ def update_plan(
 ) -> str:
     _ensure()
     wf = workflow_repository.update_plan(workflow_id, acceptance_criteria, tasks)
-    return json.dumps(wf, default=str)
+    return json.dumps(serialize_workflow(wf), default=str)
 
 
 @handle_errors
 def approve_plan(workflow_id: str, notes: str | None = None) -> str:
     _ensure()
     wf = workflow_repository.transition_phase(workflow_id, "apply", notes)
-    return json.dumps(wf, default=str)
+    return json.dumps(serialize_workflow(wf), default=str)
 
 
 @handle_errors
 def apply_done(workflow_id: str, notes: str | None = None) -> str:
     _ensure()
     wf = workflow_repository.transition_phase(workflow_id, "verify", notes)
-    return json.dumps(wf, default=str)
+    return json.dumps(serialize_workflow(wf), default=str)
 
 
 @handle_errors
@@ -86,7 +87,7 @@ def verify(
     workflow_repository.update_result(workflow_id, result)
     to_phase = "unify" if passed else "apply"
     wf = workflow_repository.transition_phase(workflow_id, to_phase, notes)
-    response = json.loads(json.dumps(wf, default=str))
+    response = serialize_workflow(wf)
     if warnings:
         response["_warnings"] = warnings
     return json.dumps(response, default=str)
@@ -123,7 +124,7 @@ def unify(workflow_id: str, summary: str, notes: str | None = None) -> str:
 
     workflow_repository.update_result(workflow_id, existing_result)
     wf = workflow_repository.transition_phase(workflow_id, "completed", notes)
-    return json.dumps(wf, default=str)
+    return json.dumps(serialize_workflow(wf), default=str)
 
 
 @handle_errors
@@ -133,7 +134,7 @@ def progress(path: str, user_id: str, machine: str, project: str | None = None) 
     active = workflow_repository.get_active_workflow(proj["id"])
     if active is None:
         return json.dumps({"status": "no active workflow", "project": proj["name"]})
-    return json.dumps(active, default=str)
+    return json.dumps(serialize_workflow(active), default=str)
 
 
 @handle_errors
@@ -145,4 +146,4 @@ def task_update(
 ) -> str:
     _ensure()
     wf = workflow_repository.update_task_status(workflow_id, task_index, status, notes)
-    return json.dumps(wf, default=str)
+    return json.dumps(serialize_workflow(wf), default=str)
