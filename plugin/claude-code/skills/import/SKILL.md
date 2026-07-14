@@ -18,7 +18,7 @@ Activate ONLY when the user explicitly says something like:
 - "import this folder into memodi", "migrate this file to memodi", "ingest this path"
 - Passes a filesystem path or `.md` file with clear intent to load it in bulk
 
-If the user adds phrases like "sin preguntar", "no preguntes", "sin confirmación", "go ahead", skip the briefing confirmation in Phase 2 as well (onboarding still requires confirmation — it's a permanent side-effect).
+If the user adds phrases like "sin preguntar", "no preguntes", "sin confirmación", "go ahead", skip the briefing confirmation in Phase 2 as well (if the path is not registered, the import still stops and points the user to `/memodi:start` — this skill never registers workspaces itself).
 
 Do NOT trigger for regular save flows — those belong to `memodi-memory`.
 
@@ -56,22 +56,16 @@ If the user explicitly asks to include a non-allowlist file, honor it silently.
 
 ## WORKFLOW (6 phases)
 
-### Phase 1 — Discovery + workspace onboarding (silent unless onboarding needed)
+### Phase 1 — Discovery + workspace check (silent unless the path is not registered)
 
-1. Load required deferred tools (once per session):
-   `ToolSearch("select:memodi_list_workspaces")`
-2. Call `memodi_ping`. If it fails, stop and report.
-3. memodi is inert for unregistered paths — there is no dedicated "resolve" tool.
+1. Call `memodi_ping`. If it fails, stop and report.
+2. memodi is inert for unregistered paths — there is no dedicated "resolve" tool.
    Call `memodi_context` with `path: <target repo path>` to find out:
    - If it returns observations (no error) → the path is already registered, continue silently to Phase 2.
    - If it returns `{"type": "not_authenticated"}` → the configured api key is missing or invalid. Tell the user once and stop the import; memodi cannot function until the plugin is reconfigured with a valid key (see README.md / install.sh).
-   - If it returns `{"type": "not_started"}` → **MANDATORY onboarding** (workspace registration is a permanent side-effect; needs user consent):
-     - Call `memodi_list_workspaces` to show existing options (owner-scoped: only the user's own).
-     - Ask the user: *"Este path no está registrado. ¿A qué workspace lo linkeo? (opciones: ..., o nombre nuevo)"*
-     - WAIT for answer. If the user picks an existing workspace, pass its name EXACTLY as returned by the listing — never retype or invent it.
-     - Call `memodi_workspace_start(path=<target repo path or its parent folder>, workspace=<the user's choice>)`.
-4. `Glob` the input. Apply allowlist + exclusions.
-5. For each file, collect: path, size, first 3 headers (to estimate observation count).
+   - If it returns `{"type": "not_started"}` → **STOP the import.** This skill never registers workspaces itself. Tell the user in one line: *"Este path no está registrado en memodi. Corré `/memodi:start` para activarlo (te deja elegir workspace nuevo o enganchar uno de otra máquina) y después re-lanzá el import."* Do not call `memodi_workspace_start`, do not ask for a name, do not proceed.
+3. `Glob` the input. Apply allowlist + exclusions.
+4. For each file, collect: path, size, first 3 headers (to estimate observation count).
 
 ### Phase 2 — One-line pre-flight briefing
 
@@ -285,8 +279,8 @@ Therefore the skill must NOT call `memodi_search_similar` pre-save. It's redunda
 
 ## SAFETY RULES (MANDATORY)
 
-- **Workspace onboarding is the only mandatory confirmation** — it's a permanent side-effect
-- After onboarding confirmed (or path already registered) and the Phase 2 briefing accepted, proceed silently through Phase 3
+- **This skill never registers a workspace** — if the path is `not_started`, stop and point the user to `/memodi:start` (Phase 1). Registration is a permanent side-effect and belongs to that command alone.
+- Once the path is registered and the Phase 2 briefing is accepted, proceed silently through Phase 3
 - **Never** skip the final report — the user needs to see the outcome
 - If `memodi_ping` fails → stop and report, do not proceed
 - If more than 30% of a file's content is unclear or contradictory → note in warnings but keep processing (don't stop the whole import for one bad file)
