@@ -82,7 +82,9 @@ def context(
 ) -> str:
     _ensure()
     proj = resolve_project(user_id, machine, path, project)
-    last_session = repository.get_latest_session_summary(proj["id"])
+    last_session = repository.get_latest_session_summary(
+        proj["id"], workspace_id=proj["workspace_id"]
+    )
     observations = repository.get_recent_observations(
         project_id=proj["id"],
         limit=limit,

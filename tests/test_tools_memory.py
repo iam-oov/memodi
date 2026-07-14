@@ -14,6 +14,7 @@ from memodi.tools.memory import (
     search_hybrid,
     search_similar,
 )
+from memodi.tools.session import session_end, session_start
 from tests.conftest import _path, cleanup_rows
 
 
@@ -153,6 +154,105 @@ def test_context_returns_recent(registered_workspace, project_name):
     assert "Second obs" in result_titles
     assert "First obs" in result_titles
     assert result_titles.index("Third obs") < result_titles.index("First obs")
+
+
+def test_context_returns_workspace_wide_observations(registered_workspace):
+    """Regression test for the cross-machine 'what were we working on?' bug:
+    an observation saved via project A must surface in project B's context
+    call when both resolve to the same workspace, labeled with A's name."""
+    proj_a = f"test-proj-a-{uuid.uuid4()}"
+    proj_b = f"test-proj-b-{uuid.uuid4()}"
+    path_a = f"{registered_workspace['root']}/{proj_a}"
+    path_b = f"{registered_workspace['root']}/{proj_b}"
+
+    save(
+        path=path_a,
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+        title="Cross-project observation",
+        content="Saved from project A, should surface via project B's context",
+        type="discovery",
+    )
+
+    results = json.loads(
+        context(
+            path=path_b,
+            user_id=registered_workspace["user_id"],
+            machine=registered_workspace["machine"],
+        )
+    )
+    match = next(
+        (
+            o
+            for o in results["observations"]
+            if o["title"] == "Cross-project observation"
+        ),
+        None,
+    )
+    assert match is not None
+    assert match["project"] == proj_a
+
+
+def test_context_never_crosses_workspaces(registered_workspace):
+    """Guard: workspace-wide context must stop at the workspace boundary —
+    an accidental broadening of the WHERE clause would surface observations
+    from the caller's OTHER workspaces."""
+    proj_a = f"test-proj-a-{uuid.uuid4()}"
+    proj_b = f"test-proj-b-{uuid.uuid4()}"
+    other = _extra_workspace(registered_workspace["user_id"])
+
+    try:
+        save(
+            path=f"{other['root']}/{proj_b}",
+            user_id=other["user_id"],
+            machine=other["machine"],
+            title="Observation in the other workspace",
+            content="Must never surface through workspace A's context",
+            type="decision",
+        )
+
+        results = json.loads(
+            context(
+                path=f"{registered_workspace['root']}/{proj_a}",
+                user_id=registered_workspace["user_id"],
+                machine=registered_workspace["machine"],
+            )
+        )
+        titles = [o["title"] for o in results["observations"]]
+        assert "Observation in the other workspace" not in titles
+    finally:
+        _cleanup_workspace(other["workspace"])
+
+
+def test_context_last_session_from_another_project_in_workspace(registered_workspace):
+    proj_a = f"test-proj-a-{uuid.uuid4()}"
+    proj_b = f"test-proj-b-{uuid.uuid4()}"
+    path_a = f"{registered_workspace['root']}/{proj_a}"
+    path_b = f"{registered_workspace['root']}/{proj_b}"
+
+    session_start(
+        path=path_a,
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    session_end(
+        path=path_a,
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+        summary="Session summary from project A",
+    )
+
+    results = json.loads(
+        context(
+            path=path_b,
+            user_id=registered_workspace["user_id"],
+            machine=registered_workspace["machine"],
+        )
+    )
+    last_session = results["last_session"]
+    assert last_session is not None
+    assert last_session["summary"] == "Session summary from project A"
+    assert last_session["project"] == proj_a
 
 
 def test_list_projects(registered_workspace, project_name):

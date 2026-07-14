@@ -31,6 +31,7 @@ _OBSERVATION_READ_FIELDS = {
     "revision_count",
     "duplicate_count",
     "project_name",
+    "project",
     "rank",
     "similarity",
     "rrf_score",
@@ -42,6 +43,7 @@ _SESSION_SUMMARY_FIELDS = {
     "started_at",
     "ended_at",
     "summary",
+    "project",
 }
 
 _WORKFLOW_FIELDS = {

@@ -283,18 +283,39 @@ def get_active_session(project_id: str) -> dict | None:
     return dict(row) if row else None
 
 
-def get_latest_session_summary(project_id: str) -> dict | None:
-    """Get the most recent completed session with a summary."""
+def get_latest_session_summary(
+    project_id: str, workspace_id: str | None = None
+) -> dict | None:
+    """Get the most recent completed session with a summary.
+
+    When workspace_id is given, searches across every project in the
+    workspace instead of just project_id, so the session summary is
+    visible to any workspace member regardless of which project resolved
+    the caller's path.
+    """
     conn = get_connection()
-    row = conn.execute(
-        """
-        SELECT * FROM sessions
-        WHERE project_id = %s AND ended_at IS NOT NULL AND summary IS NOT NULL
-        ORDER BY ended_at DESC
-        LIMIT 1
-        """,
-        (project_id,),
-    ).fetchone()
+    if workspace_id:
+        row = conn.execute(
+            """
+            SELECT s.*, p.name AS project FROM sessions s
+            JOIN projects p ON p.id = s.project_id
+            WHERE p.workspace_id = %s
+              AND s.ended_at IS NOT NULL AND s.summary IS NOT NULL
+            ORDER BY s.ended_at DESC
+            LIMIT 1
+            """,
+            (workspace_id,),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            """
+            SELECT * FROM sessions
+            WHERE project_id = %s AND ended_at IS NOT NULL AND summary IS NOT NULL
+            ORDER BY ended_at DESC
+            LIMIT 1
+            """,
+            (project_id,),
+        ).fetchone()
     return dict(row) if row else None
 
 
@@ -536,19 +557,23 @@ def get_recent_observations(
     limit: int = 20,
     workspace_id: str | None = None,
 ) -> list[dict]:
+    """Recent observations for a project, or for the whole workspace when
+    workspace_id is given — every project in the workspace, not just
+    project_id, so the same recent history shows up regardless of which
+    project the caller's path resolved to.
+    """
     conn = get_connection()
     if workspace_id:
         rows = conn.execute(
             """
-            SELECT o.* FROM observations o
+            SELECT o.*, p.name AS project FROM observations o
             JOIN projects p ON p.id = o.project_id
-            WHERE o.project_id = %s
-              AND p.workspace_id = %s
+            WHERE p.workspace_id = %s
               AND o.deleted_at IS NULL
             ORDER BY COALESCE(o.occurred_at, o.created_at) DESC
             LIMIT %s
             """,
-            (project_id, workspace_id, limit),
+            (workspace_id, limit),
         ).fetchall()
     else:
         rows = conn.execute(

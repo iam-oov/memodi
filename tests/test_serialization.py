@@ -49,6 +49,7 @@ OBSERVATION_READ_ALLOWLIST = {
     "revision_count",
     "duplicate_count",
     "project_name",
+    "project",
     "rank",
     "similarity",
     "rrf_score",
@@ -57,6 +58,7 @@ OBSERVATION_READ_ALLOWLIST = {
 
 _NON_PERSISTED_READ_FIELDS = {
     "project_name",
+    "project",
     "rank",
     "similarity",
     "rrf_score",
@@ -159,6 +161,7 @@ def test_context_last_session_never_leaks_project_id(
 
     assert payload["last_session"] is not None
     assert payload["last_session"]["summary"].startswith("Closed with a summary")
+    assert payload["last_session"]["project"] == project_name
     leaked = _collect_keys(payload["last_session"]) & FORBIDDEN_KEYS
     assert not leaked
 
@@ -240,6 +243,6 @@ def test_context_observation_exact_field_set(registered_workspace, project_name)
     assert payload["observations"], "expected at least one recent observation"
     row = payload["observations"][0]
 
-    assert set(row.keys()) == OBSERVATION_ROW_FIELDS
+    assert set(row.keys()) == OBSERVATION_ROW_FIELDS | {"project"}
     assert row["content"]
     assert row["title"]
