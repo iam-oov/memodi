@@ -97,14 +97,20 @@ claude mcp add --transport http \
 
 Agregar `"mcp__memodi__*"` al array `permissions.allow` en `~/.claude/settings.json`.
 
-**6. Reiniciar Claude Code.**
+**6. Reiniciar Claude Code y activar la memoria:**
 
-### Verificar
+```
+/memodi:start
+```
 
-Abri Claude Code en cualquier proyecto. El agente va a:
-1. Chequear si el path ya esta registrado (llamando `memodi_context`)
-2. Si no lo esta, te va a pedir que corras `memodi_workspace_start` sobre la carpeta padre que agrupa tus repos (o que elijas un workspace existente si ya tenes uno en otra maquina)
-3. Empezar a guardar decisiones automaticamente
+### Activar y verificar
+
+Abri Claude Code en tu proyecto y corre `/memodi:start`. Ese comando:
+1. Chequea si el path ya esta registrado en esta maquina (`memodi_context`)
+2. Si no lo esta, registra el workspace — te deja elegir un nombre nuevo o **enganchar uno que ya tengas en otra maquina** (registrar el mismo nombre en dos maquinas comparte las memorias entre ambas)
+3. Carga las memorias de todo el workspace y abre una sesion
+
+Una sola vez por (maquina, carpeta). Despues de eso la memoria se carga **sola y en silencio** cada vez que abris ese repo — no hace falta volver a correr `/memodi:start` salvo que quieras re-traer el contexto a mano. En un path no registrado memodi se queda inerte y callado hasta que corras el comando.
 
 ### Desinstalar
 
@@ -157,7 +163,7 @@ caller) y lo resuelven contra un workspace registrado — ver Modelo de autentic
 ### Workspaces (inerte para paths no registrados — sin auto-creacion)
 | Tool | Descripcion |
 |------|-------------|
-| `memodi_workspace_start` | Registrar una carpeta padre como workspace en esta maquina — el UNICO gate de onboarding |
+| `memodi_workspace_start` | Registrar una carpeta padre como workspace en esta maquina — el UNICO gate de onboarding (normalmente lo dispara `/memodi:start`, no se llama a mano) |
 | `memodi_list_workspaces` | Listar tus workspaces con su cantidad de proyectos |
 | `memodi_merge_projects` | Fusionar un proyecto en otro (repara duplicados, dry_run por defecto) |
 | `memodi_delete_workspace` | Eliminar un workspace |

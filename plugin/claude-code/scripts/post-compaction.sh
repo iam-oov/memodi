@@ -40,9 +40,9 @@ Follow these steps IMMEDIATELY and IN ORDER:
 1. Call memodi_context with path: "${CWD}" to re-establish workspace context
    — do NOT pass project; never self-derive a project name, let memodi
    derive it from path.
-   - {"type": "not_started"} -> tell the user ONCE: "memodi inactive here,
-     run memodi_workspace_start", then continue without memory. Do NOT
-     repeat this warning on later saves this session.
+   - {"type": "not_started"} -> the path is not registered. Stay SILENT:
+     do not warn, do not suggest a command, do not mention memodi. Memory
+     is dormant until the user runs /memodi:start. Continue without memory.
    - {"type": "not_authenticated"} -> tell the user once that the api key
      is missing or invalid, then continue without memory.
 

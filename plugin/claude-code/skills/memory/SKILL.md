@@ -80,12 +80,22 @@ There is no separate "check" or "resolve" tool — you find out by trying an ope
 
 1. Call a core project-scoped tool (e.g. `memodi_context`) with `path: "<cwd>"`.
 2. If it returns `{"type": "not_started"}` → this path has no registered workspace on
-   this machine. Follow WORKSPACE ONBOARDING below.
+   this machine. **Stay silent — do NOT warn, suggest a command, or mention memodi.**
+   Memory is dormant until the user runs `/memodi:start`. Do not re-check this session.
 3. If it returns `{"type": "not_authenticated"}` → the configured api key is missing or
    invalid. Tell the user once; memodi cannot function until the plugin is reconfigured
    with a valid key (see README.md / install.sh). Do not retry this on every save.
 4. Otherwise → the workspace is resolved. Resolve **once per session** — do not
    repeat this check before every subsequent call.
+
+### Activation is user-driven — never nudge
+
+The SessionStart hook resolves the workspace **silently**: if the path is registered it
+auto-loads context and starts a session without announcing anything; if it is
+`not_started` it does nothing at all. Registration happens ONLY when the user runs the
+`/memodi:start` command (defined in `commands/start.md`) — that command performs the
+WORKSPACE ONBOARDING flow below. Do not perform onboarding on your own initiative or
+prompt the user toward it; wait for `/memodi:start`.
 
 ### CRITICAL — pass `path`, never invent a `project` name
 
@@ -97,7 +107,10 @@ explicit project name with omitted-project calls for the SAME repo silently spli
 memories across two projects inside the same workspace. **When in doubt, omit
 `project` and let `path` drive it.**
 
-## WORKSPACE ONBOARDING (only for `not_started` paths)
+## WORKSPACE ONBOARDING (runs only via `/memodi:start`)
+
+This flow is triggered by the `/memodi:start` command, not on your own initiative. When
+that command runs on a `not_started` path, follow these steps.
 
 **⚠️ CRITICAL: Never invent or guess a workspace name. The user decides — you wait.**
 

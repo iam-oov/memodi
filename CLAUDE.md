@@ -59,12 +59,25 @@ Deploy authenticates to Cloudflare Access with a service token (`cloudflared acc
 
 ```
 plugin/claude-code/
-├── .claude-plugin/plugin.json  — plugin metadata
-├── .mcp.json                   — connects to http://localhost:8787/mcp
-└── skills/memory/SKILL.md      — proactive memory instructions
+├── .claude-plugin/plugin.json    — plugin metadata
+├── hooks/hooks.json              — SessionStart / SubagentStop hooks
+├── scripts/session-start.sh      — silent workspace resolution on session start
+├── commands/start.md             — /memodi:start (user-driven activation)
+└── skills/memory/SKILL.md        — proactive memory instructions
 ```
 
 The skill tells Claude WHEN and WHY to use memory. The MCP server handles HOW.
+
+### Activation flow (user-driven, silent otherwise)
+
+- `session-start.sh` resolves the workspace **silently**: if the path is registered it
+  auto-loads context + starts a session with no announcement; if `not_started` it does
+  nothing — no onboarding nudge.
+- Registration happens ONLY when the user runs `/memodi:start` (slash commands are
+  namespaced as `/<plugin>:<command>`, so `commands/start.md` → `/memodi:start`). That
+  command registers the workspace (attaching to an existing name shares memories
+  cross-machine, since observations hang off the workspace, not the machine) and loads
+  workspace-wide memory.
 
 ## Conventions
 
