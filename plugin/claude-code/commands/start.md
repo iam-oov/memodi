@@ -1,14 +1,17 @@
 ---
 description: Activate memodi memory here — register the workspace if needed, load its cross-machine memories, and start a session.
 argument-hint: "[workspace-name]"
-allowed-tools: Bash(pwd), Bash(dirname:*), mcp__memodi__*
+allowed-tools: Bash(pwd), mcp__memodi__*
 ---
 
 The user ran `/memodi:start` to activate memodi memory for the current workspace.
 
 - Current working directory: !`pwd`
-- Parent folder (default workspace root): !`dirname "$(pwd)"`
 - Workspace name argument (may be empty): $ARGUMENTS
+
+The **parent folder** (default workspace root) is the current working
+directory minus its last path segment — derive it from the value above,
+no shell needed (e.g. `/Users/x/Personal/repo` → `/Users/x/Personal`).
 
 Work through these steps in order. Be terse — this is an activation command, not a conversation.
 
@@ -36,7 +39,7 @@ Pick the name:
 
 **Never invent, translate, or "clean up" a name.** To attach to an existing workspace the name must match byte-for-byte — any drift silently creates a separate one. Selection by number/option exists precisely to make that impossible.
 
-Register with the **parent folder** shown above as `path`, so sibling repos share the workspace:
+Register with the **parent folder** derived above as `path`, so sibling repos share the workspace:
 
 `memodi_workspace_start(path=<parent folder>, workspace=<name>)`
 
