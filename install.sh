@@ -88,13 +88,20 @@ CLAUDE_SETTINGS="$HOME/.claude/settings.json"
 
 echo "Installing memodi plugin for Claude Code..."
 
-# --- Add marketplace ---
+# --- Add marketplace and refresh its snapshot ---
+# add no-ops when the marketplace exists but does NOT refresh it, so
+# update always runs after it — otherwise a machine that installed once
+# keeps serving a stale snapshot forever.
 echo "[1/5] Adding marketplace..."
-claude plugin marketplace add iam-oov/memodi 2>/dev/null || true
+claude plugin marketplace add iam-oov/memodi
+claude plugin marketplace update memodi
 
-# --- Install plugin (hooks + skills) ---
+# --- Install or update the plugin (hooks + skills + commands) ---
+# install no-ops when already installed and update no-ops when freshly
+# installed — running both covers first installs and upgrades alike.
 echo "[2/5] Installing plugin..."
-claude plugin install memodi@memodi 2>/dev/null || true
+claude plugin install memodi@memodi
+claude plugin update memodi@memodi
 
 # --- Configure MCP server connection ---
 echo "[3/5] Configuring MCP server..."
