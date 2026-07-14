@@ -22,7 +22,7 @@
   sesión podés decir "qué hay pendiente del migration tool" y memodi te
   lo trae. -->
 
-1. Deploy automático: 4 secrets de GitHub + Access app con service token para pi.valdoh.com hechos; falta confirmar el primer deploy verde (pubkey del user `memodi` en la Pi)
+1. [HECHO] Deploy automático: push a main → CI → deploy a la Pi por Cloudflare Access (service token) — verificado en verde (run 29301850329, 2026-07-14)
 2. Rate-limit en /signup (regla de Cloudflare, 5 min de dashboard)
 3. [HECHO a796803] Adelgazar la respuesta de memodi_save — allowlist de serialización, ack de 8 campos de dominio (sin vector ni search_vector)
 4. Plugin en la Mac — misma key, su propio X-Memodi-Machine
