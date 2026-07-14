@@ -77,18 +77,28 @@ def test_session_end_with_summary(registered_workspace, project_name):
     assert end_result["summary"] == "Worked on auth module"
 
 
-def test_session_end_no_active_session(registered_workspace, project_name):
+def test_session_end_without_active_session_auto_opens_and_persists(
+    registered_workspace, project_name
+):
     result = json.loads(
         session_end(
             path=_path(registered_workspace, project_name),
             user_id=registered_workspace["user_id"],
             machine=registered_workspace["machine"],
-            summary="nothing",
+            summary="summary with no prior session_start",
         )
     )
 
-    assert result["ended"] is False
-    assert "error" in result
+    assert result["ended"] is True
+    assert result["auto_started"] is True
+    assert result["summary"] == "summary with no prior session_start"
+
+    proj = repository.get_or_create_project(
+        project_name, workspace_id=registered_workspace["workspace"]["id"]
+    )
+    assert repository.get_active_session(proj["id"]) is None
+    latest = repository.get_latest_session_summary(proj["id"])
+    assert latest["summary"] == "summary with no prior session_start"
 
 
 def test_session_end_clears_active(registered_workspace, project_name):

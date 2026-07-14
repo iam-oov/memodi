@@ -38,18 +38,24 @@ def session_end(
     summary: str,
     project: str | None = None,
 ) -> str:
-    """Close the active session for a project with a summary."""
+    """Close the active session for a project with a summary.
+
+    If no session is active, one is created and closed on the
+    spot so the summary is never lost.
+    """
     _ensure()
     proj = resolve_project(user_id, machine, path, project)
     active = repository.get_active_session(proj["id"])
 
-    if not active:
-        return json.dumps({"ended": False, "error": "No active session found"})
+    auto_started = active is None
+    if auto_started:
+        active = repository.create_session(proj["id"])
 
     session = repository.end_session(active["id"], summary=summary)
     return json.dumps(
         {
             "ended": True,
+            "auto_started": auto_started,
             "session_id": str(session["id"]),
             "project": proj["name"],
             "summary": summary,

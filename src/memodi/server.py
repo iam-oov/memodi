@@ -104,8 +104,11 @@ def memodi_save(
     metadata: dict | None = None,
     occurred_at: str | None = None,
 ) -> str:
-    """Persist a decision, discovery, bugfix, pattern, config,
-    preference, architecture, or session summary.
+    """Persist an observation to memory.
+
+    type must be one of: decision, discovery, bugfix, pattern,
+    config, preference, architecture, or session (an
+    end-of-session summary).
 
     Call PROACTIVELY after any significant event — don't wait
     to be asked. path is the caller's cwd — memodi resolves it to a
@@ -599,7 +602,10 @@ def memodi_session_end(
     (Goal / Accomplished / Next Steps).
 
     Call before the conversation ends so the next session can
-    pick up where this one left off.
+    pick up where this one left off. Never fails for lack of a
+    session: if session_start was skipped, a session is created
+    and closed on the spot (auto_started: true in the response)
+    so the summary is always persisted.
     """
     caller = _caller(ctx)
     if isinstance(caller, str):
