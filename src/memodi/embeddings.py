@@ -1,14 +1,15 @@
 import os
 
+# huggingface-hub 1.x reads HF_HUB_DISABLE_XET into a module-level constant at
+# IMPORT time, and its default xet CAS backend returns 401 on anonymous
+# downloads of public models. This must be set before fastembed imports
+# huggingface_hub, so the imports below are deliberately not at the top.
+# Override with HF_HUB_DISABLE_XET=0 (e.g. with an authenticated HF_TOKEN).
+os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+
 from fastembed import TextEmbedding
 from numpy import isfinite
 from numpy.linalg import norm
-
-# huggingface-hub 1.x defaults to the xet CAS backend, which returns 401 on
-# anonymous downloads of public models. Force the classic HF CDN so fresh model
-# pulls work in CI and on clean installs. Override with HF_HUB_DISABLE_XET=0
-# (e.g. alongside an authenticated HF_TOKEN) if xet is ever wanted back.
-os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
 
 _model = None
 MODEL_NAME = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
