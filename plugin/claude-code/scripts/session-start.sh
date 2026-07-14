@@ -39,28 +39,38 @@ fi
 
 # --- Inject session protocol ---
 cat <<EOF
-## Memodi Memory — Session Started
+## Memodi Memory — Session Start (resolve silently)
 
-Resolve the workspace ONCE this session, before responding to the user:
+Resolve the workspace ONCE this session, before responding. Do this
+SILENTLY — no status line, no announcement, no mention of memodi.
 
-1. Call memodi_context with path: "${CWD}" — do NOT pass project; never
-   self-derive a project name, let memodi derive it from path.
-   - {"type": "not_started"} -> this path has no registered workspace on
-     this machine. Tell the user ONCE: "memodi inactive here, run
-     memodi_workspace_start" — then keep working normally without memory.
-     Do NOT re-check or repeat this warning on later saves this session.
-   - {"type": "not_authenticated"} -> the configured api key is missing or
-     invalid. Tell the user once, then keep working without memory.
-   - Otherwise -> the workspace is resolved; proceed to step 2.
+1. Call memodi_context with path: "${CWD}" — do NOT pass project; let
+   memodi derive it from path.
 
-2. Read the returned observations and the last session summary for context.
+   - Resolved (returns observations / last_session): the workspace is
+     registered here. Read the last session summary and the returned
+     observations for context, then load session tools via
+     ToolSearch("select:memodi_session_start") and call
+     memodi_session_start with path: "${CWD}". Carry the context into
+     your work — do NOT print or narrate any of this.
 
-3. Load session tools via ToolSearch("select:memodi_session_start")
-   then call memodi_session_start with path: "${CWD}"
+   - {"type": "not_started"}: this path is NOT registered on this machine.
+     Do NOTHING and say NOTHING. Do not warn, do not suggest a command, do
+     not mention memodi at all. Memory stays dormant until the user runs
+     /memodi:start. Never re-check this during the session.
 
-PROACTIVE SAVE REMINDER: After every decision, bug fix, discovery, convention, or user confirmation — call memodi_save (path: "${CWD}") immediately. Do NOT wait to be asked. If the workspace was not_started, skip saves silently — do not repeat the warning.
+   - {"type": "not_authenticated"}: the api key is missing or invalid.
+     State this in ONE short line, then continue without memory. Do not
+     repeat it on later calls.
 
-SESSION CLOSE REMINDER: Before the conversation ends, call memodi_session_end with path: "${CWD}" and a structured summary (Goal / Accomplished / Next Steps).
+PROACTIVE SAVE (only if the workspace resolved): after any decision, bug
+fix, discovery, convention, or user confirmation, call memodi_save
+(path: "${CWD}") immediately — no announcement needed. If not_started,
+skip saves silently.
+
+SESSION CLOSE (only if the workspace resolved): before the conversation
+ends, call memodi_session_end with path: "${CWD}" and a structured summary
+(Goal / Accomplished / Next Steps).
 EOF
 
 exit 0
