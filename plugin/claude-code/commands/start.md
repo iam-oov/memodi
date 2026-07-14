@@ -28,10 +28,13 @@ First, load and call `memodi_list_workspaces` (`ToolSearch("select:memodi_list_w
 
 Pick the name:
 - If the argument gave a name → use it **exactly as given**.
-- Else if the listing has existing workspaces → show them and ask the user to either **pick one by its exact name** (to share memories with another machine) or give a new name. Then WAIT for the answer.
+- Else if the listing has existing workspaces → let the user **select**, never retype:
+  - **4 or fewer**: use the `AskUserQuestion` tool — one option per workspace (label = exact name), so the user picks instead of typing. "Other" covers creating a new workspace.
+  - **5 or more** (AskUserQuestion caps at 4 options): show a numbered list — one workspace per line, plus a final `N+1. Create a new workspace` entry — and WAIT for the user to answer with a number or a new name.
+  - Map the selection back to the workspace's **exact stored name** yourself; the user must never have to retype it.
 - Else (no argument, no existing workspaces) → ask for a short descriptive name (e.g. `trabajo`, `personal`, `tesis`). Then WAIT.
 
-**Never invent, translate, or "clean up" a name.** To attach to an existing workspace the name must match byte-for-byte — any drift silently creates a separate one.
+**Never invent, translate, or "clean up" a name.** To attach to an existing workspace the name must match byte-for-byte — any drift silently creates a separate one. Selection by number/option exists precisely to make that impossible.
 
 Register with the **parent folder** shown above as `path`, so sibling repos share the workspace:
 
