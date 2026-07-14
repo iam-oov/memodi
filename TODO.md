@@ -23,6 +23,6 @@
   lo trae. -->
 
 1. [HECHO] Deploy automático: push a main → CI → deploy a la Pi por Cloudflare Access (service token) — verificado en verde (run 29301850329, 2026-07-14)
-2. Rate-limit en /signup (regla de Cloudflare, 5 min de dashboard)
+2. [HECHO] Rate-limit en /signup — Cloudflare WAF rule (uri.path eq "/signup", 5 req/10s por IP, Block). Free tier: enforcement laxo/laggy, no clampea picos cortos pero sí carga sostenida (brute-force). Health check del deploy no afectado (loopback).
 3. [HECHO a796803] Adelgazar la respuesta de memodi_save — allowlist de serialización, ack de 8 campos de dominio (sin vector ni search_vector)
-4. Plugin en la Mac — misma key, su propio X-Memodi-Machine
+4. Plugin en la Mac: en la Mac correr `export MEMODI_API_KEY="mmd_..."` (misma key) + `./install.sh` (o el curl one-liner del install.sh). Apunta a memodi.valdoh.com; MEMODI_MACHINE defaultea al hostname de la Mac → workspace scopeado aparte del de Linux. Probar: memodi_workspace_start + un save + verificar aislamiento por máquina.
