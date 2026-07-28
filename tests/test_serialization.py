@@ -67,10 +67,7 @@ _NON_PERSISTED_READ_FIELDS = {
     "_deduplicated",
 }
 
-# superseded_by is a real column, but every surfacing read path filters
-# superseded_by IS NULL, so it never reaches serialize_observation() as
-# non-null there — it only shows up when explicitly non-null (see
-# test_serialize_observation_exposes_superseded_by_when_set below).
+
 _CONDITIONALLY_EXPOSED_READ_FIELDS = {"superseded_by"}
 
 OBSERVATION_ROW_FIELDS = (
