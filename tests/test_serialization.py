@@ -6,13 +6,14 @@ import pytest
 from memodi.database.connection import ensure_schema
 from memodi.tools.memory import (
     context,
+    get_observation,
     save,
     search,
     search_global,
     search_hybrid,
     search_similar,
 )
-from memodi.tools.serialization import _OBSERVATION_READ_FIELDS
+from memodi.tools.serialization import _OBSERVATION_READ_FIELDS, serialize_observation
 from memodi.tools.session import session_end, session_start
 from tests.conftest import _path
 
@@ -54,6 +55,7 @@ OBSERVATION_READ_ALLOWLIST = {
     "similarity",
     "rrf_score",
     "_deduplicated",
+    "superseded_by",
 }
 
 _NON_PERSISTED_READ_FIELDS = {
@@ -65,7 +67,17 @@ _NON_PERSISTED_READ_FIELDS = {
     "_deduplicated",
 }
 
-OBSERVATION_ROW_FIELDS = OBSERVATION_READ_ALLOWLIST - _NON_PERSISTED_READ_FIELDS
+# superseded_by is a real column, but every surfacing read path filters
+# superseded_by IS NULL, so it never reaches serialize_observation() as
+# non-null there — it only shows up when explicitly non-null (see
+# test_serialize_observation_exposes_superseded_by_when_set below).
+_CONDITIONALLY_EXPOSED_READ_FIELDS = {"superseded_by"}
+
+OBSERVATION_ROW_FIELDS = (
+    OBSERVATION_READ_ALLOWLIST
+    - _NON_PERSISTED_READ_FIELDS
+    - _CONDITIONALLY_EXPOSED_READ_FIELDS
+)
 
 
 @pytest.fixture(autouse=True)
@@ -204,6 +216,18 @@ def test_read_allowlist_is_pinned():
     assert _OBSERVATION_READ_FIELDS == OBSERVATION_READ_ALLOWLIST
 
 
+def test_serialize_observation_hides_superseded_by_when_null():
+    obs = {"id": "abc", "title": "t", "type": "discovery", "superseded_by": None}
+    result = serialize_observation(obs)
+    assert "superseded_by" not in result
+
+
+def test_serialize_observation_exposes_superseded_by_when_set():
+    obs = {"id": "abc", "title": "t", "type": "discovery", "superseded_by": "new-id"}
+    result = serialize_observation(obs)
+    assert result["superseded_by"] == "new-id"
+
+
 def test_search_hybrid_result_exact_field_set(registered_workspace, project_name):
     common = dict(
         path=_path(registered_workspace, project_name),
@@ -224,6 +248,28 @@ def test_search_hybrid_result_exact_field_set(registered_workspace, project_name
     assert set(row.keys()) == OBSERVATION_ROW_FIELDS | {"rrf_score"}
     assert row["content"]
     assert row["title"]
+
+
+def test_get_observation_exact_field_set(registered_workspace, project_name):
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    obs_id = json.loads(
+        save(
+            **common,
+            title="Audit boundary probe",
+            content="Observation exercised through the by-id read boundary",
+            type="discovery",
+        )
+    )["id"]
+
+    row = json.loads(get_observation(**common, observation_id=obs_id))
+
+    assert set(row.keys()) == OBSERVATION_ROW_FIELDS
+    leaked = _collect_keys(row) & FORBIDDEN_KEYS
+    assert not leaked
 
 
 def test_context_observation_exact_field_set(registered_workspace, project_name):

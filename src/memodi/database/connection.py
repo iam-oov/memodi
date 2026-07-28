@@ -30,6 +30,17 @@ def get_connection() -> psycopg.Connection:
     return _conn
 
 
+def rollback() -> None:
+    """Best-effort rollback of the shared connection.
+
+    Callers that swallow a database error use this so the next statement
+    does not run inside an aborted transaction.
+    """
+    with contextlib.suppress(Exception):
+        if _conn is not None and not _conn.closed:
+            _conn.rollback()
+
+
 def close_connection() -> None:
     global _conn
     if _conn is not None and not _conn.closed:

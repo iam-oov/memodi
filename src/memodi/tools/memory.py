@@ -1,18 +1,81 @@
 import json
+import uuid
 
 from memodi.database import graph_repository, repository
-from memodi.database.connection import ensure_schema
+from memodi.database.connection import ensure_schema, rollback
 from memodi.tools.errors import handle_errors
-from memodi.tools.scope import resolve_project
+from memodi.tools.scope import require_workspace, resolve_project
 from memodi.tools.serialization import (
+    serialize_observation,
     serialize_observation_save,
     serialize_observations,
     serialize_session_summary,
 )
 
+INVALID_OBSERVATION_ID = "invalid observation id"
+
 
 def _ensure() -> None:
     ensure_schema()
+
+
+def _observation_id(value: object) -> str | None:
+    """Canonical uuid string, or None when the value is unusable.
+
+    Validating in Python keeps malformed ids away from Postgres, so a bad
+    id can never surface driver text (or abort the shared transaction)
+    through an MCP response.
+    """
+    try:
+        return str(uuid.UUID(str(value)))
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+
+_SUPERSEDES_REASONS = {
+    "invalid_id": "supersedes is not a valid observation id",
+    "self": (
+        "supersedes points at this same observation — the correction already "
+        "landed in place (topic_key upsert or duplicate merge). Do not retry."
+    ),
+    "not_found": "old observation not found in this workspace",
+    "already_deleted": "old observation is deleted",
+    "already_superseded": "old observation was already superseded",
+    "failed": "supersede could not be applied",
+}
+
+
+def _apply_supersedes(
+    ack: dict, supersedes: object, new_id: str, workspace_id: str
+) -> None:
+    """Attempt the supersede and describe the outcome on an ack that is
+    already backed by a committed observation.
+
+    Nothing here may raise: the save is done, so a failure that propagated
+    would make the client retry and duplicate the observation. Every
+    outcome becomes supersedes_applied plus a discriminated reason.
+    """
+    old_id = _observation_id(supersedes)
+    if old_id is None:
+        reason = "invalid_id"
+    else:
+        try:
+            result = repository.supersede_observation(
+                old_id=old_id,
+                new_id=new_id,
+                workspace_id=workspace_id,
+            )
+            reason = None if result["applied"] else result["reason"]
+        except Exception:
+            rollback()
+            reason = "failed"
+
+    ack["supersedes_applied"] = reason is None
+    if reason is not None:
+        ack["supersedes_reason"] = reason
+        ack["supersedes_error"] = _SUPERSEDES_REASONS.get(
+            reason, _SUPERSEDES_REASONS["failed"]
+        )
 
 
 @handle_errors
@@ -27,6 +90,7 @@ def save(
     topic_key: str | None = None,
     metadata: dict | None = None,
     occurred_at: str | None = None,
+    supersedes: str | None = None,
 ) -> str:
     _ensure()
     from memodi.embeddings import generate_embedding
@@ -47,7 +111,10 @@ def save(
         embedding=embedding,
         occurred_at=occurred_at,
     )
-    return json.dumps(serialize_observation_save(obs), default=str)
+    ack = serialize_observation_save(obs)
+    if supersedes is not None:
+        _apply_supersedes(ack, supersedes, str(obs["id"]), proj["workspace_id"])
+    return json.dumps(ack, default=str)
 
 
 @handle_errors
@@ -96,6 +163,43 @@ def context(
             if last_session
             else None,
             "observations": serialize_observations(observations),
+        },
+        default=str,
+    )
+
+
+@handle_errors
+def get_observation(path: str, user_id: str, machine: str, observation_id: str) -> str:
+    _ensure()
+    obs_id = _observation_id(observation_id)
+    if obs_id is None:
+        raise ValueError(INVALID_OBSERVATION_ID)
+    workspace = require_workspace(user_id, machine, path)
+    obs = repository.get_observation(obs_id, workspace_id=workspace["id"])
+    if obs is None:
+        return json.dumps({"error": f"Observation '{observation_id}' not found"})
+    return json.dumps(serialize_observation(obs), default=str)
+
+
+@handle_errors
+def delete(path: str, user_id: str, machine: str, observation_id: str) -> str:
+    _ensure()
+    obs_id = _observation_id(observation_id)
+    if obs_id is None:
+        return json.dumps({"deleted": False, "error": INVALID_OBSERVATION_ID})
+    workspace = require_workspace(user_id, machine, path)
+    result = repository.delete_observation(obs_id, workspace["id"])
+    if not result["found"]:
+        return json.dumps(
+            {"deleted": False, "error": f"Observation '{observation_id}' not found"}
+        )
+    return json.dumps(
+        {
+            "deleted": True,
+            "id": result["id"],
+            "title": result["title"],
+            "already_deleted": result["already_deleted"],
+            "resurfaced": result["resurfaced"],
         },
         default=str,
     )

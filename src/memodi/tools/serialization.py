@@ -36,6 +36,7 @@ _OBSERVATION_READ_FIELDS = {
     "similarity",
     "rrf_score",
     "_deduplicated",
+    "superseded_by",
 }
 
 _SESSION_SUMMARY_FIELDS = {
@@ -74,7 +75,10 @@ def serialize_observation_save(obs: dict) -> dict:
 
 
 def serialize_observation(obs: dict) -> dict:
-    return _allow(obs, _OBSERVATION_READ_FIELDS)
+    slim = _allow(obs, _OBSERVATION_READ_FIELDS)
+    if not obs.get("superseded_by"):
+        slim.pop("superseded_by", None)
+    return slim
 
 
 def serialize_observations(observations: list[dict]) -> list[dict]:

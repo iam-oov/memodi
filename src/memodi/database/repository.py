@@ -1,7 +1,7 @@
 import hashlib
 import json
 
-from psycopg.errors import UniqueViolation
+from psycopg.errors import InvalidTextRepresentation, UniqueViolation
 
 from memodi.database.connection import get_connection
 
@@ -342,7 +342,8 @@ def save_observation(
         existing = conn.execute(
             """
             SELECT id FROM observations
-            WHERE project_id = %s AND topic_key = %s AND deleted_at IS NULL
+            WHERE project_id = %s AND topic_key = %s
+              AND deleted_at IS NULL AND superseded_by IS NULL
             """,
             (project_id, topic_key),
         ).fetchone()
@@ -406,13 +407,16 @@ def save_observation(
             conn.commit()
             return dict(row)
 
-    # Dedup: check for identical content in same project within 15 min window
+    # Dedup: check for identical content in same project within 15 min window.
+    # Superseded rows are excluded — absorbing a save into one would ack
+    # success while the content surfaced nowhere.
     existing_dup = conn.execute(
         """
         SELECT id FROM observations
         WHERE project_id = %s
           AND content_hash = %s
           AND deleted_at IS NULL
+          AND superseded_by IS NULL
           AND created_at > now() - interval '15 minutes'
         LIMIT 1
         """,
@@ -498,6 +502,7 @@ def search_observations(
             WHERE o.project_id = %s
               AND p.workspace_id = %s
               AND o.deleted_at IS NULL
+              AND o.superseded_by IS NULL
               AND o.search_vector @@ q
         """
         params: list = [query, project_id, workspace_id]
@@ -507,6 +512,7 @@ def search_observations(
             FROM observations, plainto_tsquery('simple', %s) query
             WHERE project_id = %s
               AND deleted_at IS NULL
+              AND superseded_by IS NULL
               AND search_vector @@ query
         """
         params = [query, project_id]
@@ -536,6 +542,7 @@ def search_observations_global(
         JOIN workspaces w ON w.id = p.workspace_id,
         plainto_tsquery('simple', %s) q
         WHERE o.deleted_at IS NULL
+          AND o.superseded_by IS NULL
           AND o.search_vector @@ q
           AND w.owner_user_id = %s
     """
@@ -570,6 +577,7 @@ def get_recent_observations(
             JOIN projects p ON p.id = o.project_id
             WHERE p.workspace_id = %s
               AND o.deleted_at IS NULL
+              AND o.superseded_by IS NULL
             ORDER BY COALESCE(o.occurred_at, o.created_at) DESC
             LIMIT %s
             """,
@@ -579,7 +587,7 @@ def get_recent_observations(
         rows = conn.execute(
             """
             SELECT * FROM observations
-            WHERE project_id = %s AND deleted_at IS NULL
+            WHERE project_id = %s AND deleted_at IS NULL AND superseded_by IS NULL
             ORDER BY COALESCE(occurred_at, created_at) DESC
             LIMIT %s
             """,
@@ -588,13 +596,121 @@ def get_recent_observations(
     return [dict(r) for r in rows]
 
 
-def get_observation(observation_id: str) -> dict | None:
+def get_observation(
+    observation_id: str, workspace_id: str | None = None
+) -> dict | None:
+    """Read a single observation by id, superseded ones included.
+
+    This is the audit path for corrections — a superseded row keeps its
+    superseded_by pointer readable here even though every surfacing read
+    path filters it out. Deleted rows stay hidden. When workspace_id is
+    given, ids outside that workspace report the same shape as a
+    nonexistent id.
+    """
+    conn = get_connection()
+    if workspace_id:
+        row = conn.execute(
+            """
+            SELECT o.* FROM observations o
+            JOIN projects p ON p.id = o.project_id
+            WHERE o.id = %s AND p.workspace_id = %s AND o.deleted_at IS NULL
+            """,
+            (observation_id, workspace_id),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT * FROM observations WHERE id = %s AND deleted_at IS NULL",
+            (observation_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def delete_observation(observation_id: str, workspace_id: str) -> dict:
+    """Soft-delete an observation, scoped to the caller's workspace.
+
+    Cross-workspace ids never match the join, so they report the same
+    shape as a nonexistent id. Deleting an already-deleted observation
+    is idempotent — it acks success with already_deleted=True.
+
+    Deleting an observation also clears every superseded_by pointing at
+    it: superseded_by must never reference a deleted row, or its
+    predecessor would stay hidden forever. Deleting a replacement is the
+    natural undo — it resurfaces what it replaced.
+    """
     conn = get_connection()
     row = conn.execute(
-        "SELECT * FROM observations WHERE id = %s AND deleted_at IS NULL",
+        """
+        SELECT o.id, o.title, o.deleted_at FROM observations o
+        JOIN projects p ON p.id = o.project_id
+        WHERE o.id = %s AND p.workspace_id = %s
+        """,
+        (observation_id, workspace_id),
+    ).fetchone()
+    if not row:
+        return {"found": False}
+    if row["deleted_at"] is not None:
+        return {
+            "found": True,
+            "already_deleted": True,
+            "id": str(row["id"]),
+            "title": row["title"],
+            "resurfaced": 0,
+        }
+    updated = conn.execute(
+        "UPDATE observations SET deleted_at = now() WHERE id = %s RETURNING id, title",
         (observation_id,),
     ).fetchone()
-    return dict(row) if row else None
+    resurfaced = conn.execute(
+        "UPDATE observations SET superseded_by = NULL WHERE superseded_by = %s",
+        (observation_id,),
+    ).rowcount
+    conn.commit()
+    return {
+        "found": True,
+        "already_deleted": False,
+        "id": str(updated["id"]),
+        "title": updated["title"],
+        "resurfaced": resurfaced,
+    }
+
+
+def supersede_observation(old_id: str, new_id: str, workspace_id: str) -> dict:
+    """Mark old_id as superseded by new_id, scoped to the caller's workspace.
+
+    Forgiving by design: a malformed, self-referential, nonexistent,
+    cross-workspace, deleted, or already-superseded old_id never raises —
+    it reports applied=False with a discriminated reason (invalid_id,
+    self, not_found, already_deleted, already_superseded), so a bad
+    supersedes value can never fail the save and the caller can tell a
+    pointless retry from a harmful one.
+    """
+    if str(old_id) == str(new_id):
+        return {"applied": False, "reason": "self"}
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            """
+            SELECT o.deleted_at, o.superseded_by FROM observations o
+            JOIN projects p ON p.id = o.project_id
+            WHERE o.id = %s AND p.workspace_id = %s
+            """,
+            (old_id, workspace_id),
+        ).fetchone()
+    except InvalidTextRepresentation:
+        conn.rollback()
+        return {"applied": False, "reason": "invalid_id"}
+    if not row:
+        return {"applied": False, "reason": "not_found"}
+    if row["deleted_at"] is not None:
+        return {"applied": False, "reason": "already_deleted"}
+    if row["superseded_by"] is not None:
+        return {"applied": False, "reason": "already_superseded"}
+    conn.execute(
+        "UPDATE observations SET superseded_by = %s WHERE id = %s",
+        (new_id, old_id),
+    )
+    conn.commit()
+    return {"applied": True}
 
 
 def list_projects(
@@ -679,6 +795,7 @@ def search_similar(
             WHERE o.project_id = %s
               AND p.workspace_id = %s
               AND o.deleted_at IS NULL
+              AND o.superseded_by IS NULL
               AND o.embedding IS NOT NULL
             ORDER BY o.embedding <=> %s::vector
             LIMIT %s
@@ -692,6 +809,7 @@ def search_similar(
             FROM observations
             WHERE project_id = %s
               AND deleted_at IS NULL
+              AND superseded_by IS NULL
               AND embedding IS NOT NULL
             ORDER BY embedding <=> %s::vector
             LIMIT %s
@@ -722,6 +840,7 @@ def search_hybrid(
             FROM observations
             WHERE project_id = %s
               AND deleted_at IS NULL
+              AND superseded_by IS NULL
               AND search_vector @@ plainto_tsquery('simple', %s)
         ),
         semantic AS (
@@ -730,6 +849,7 @@ def search_hybrid(
             FROM observations
             WHERE project_id = %s
               AND deleted_at IS NULL
+              AND superseded_by IS NULL
               AND embedding IS NOT NULL
         )
     """
@@ -745,6 +865,7 @@ def search_hybrid(
             WHERE o.project_id = %s
               AND p.workspace_id = %s
               AND o.deleted_at IS NULL
+              AND o.superseded_by IS NULL
               AND (k.id IS NOT NULL OR s.id IS NOT NULL)
             ORDER BY rrf_score DESC
             LIMIT %s
@@ -771,6 +892,7 @@ def search_hybrid(
             LEFT JOIN semantic s ON o.id = s.id
             WHERE o.project_id = %s
               AND o.deleted_at IS NULL
+              AND o.superseded_by IS NULL
               AND (k.id IS NOT NULL OR s.id IS NOT NULL)
             ORDER BY rrf_score DESC
             LIMIT %s

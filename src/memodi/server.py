@@ -103,6 +103,7 @@ def memodi_save(
     topic_key: str | None = None,
     metadata: dict | None = None,
     occurred_at: str | None = None,
+    supersedes: str | None = None,
 ) -> str:
     """Persist an observation to memory.
 
@@ -120,6 +121,17 @@ def memodi_save(
     e.g. migrating notes from legacy .md files. Ordering by
     recency uses COALESCE(occurred_at, created_at), so omitting
     it means "this happened now".
+
+    Pass supersedes=<old-observation-id> when this observation
+    replaces one whose topic_key you don't know — the old one
+    stops surfacing in context/search but stays readable via
+    memodi_get_observation (audit trail). A bad id never fails the
+    save; check supersedes_applied, plus supersedes_reason and
+    supersedes_error, in the response. Reasons are discriminated
+    (invalid_id, self, not_found, already_deleted,
+    already_superseded, failed) so you can tell whether retrying
+    would help — 'self' means a topic_key upsert or duplicate
+    merge already corrected that same row, so do NOT retry.
     """
     caller = _caller(ctx)
     if isinstance(caller, str):
@@ -135,6 +147,7 @@ def memodi_save(
         topic_key,
         metadata,
         occurred_at,
+        supersedes,
     )
 
 
@@ -205,6 +218,44 @@ def memodi_search_global(
     if isinstance(caller, str):
         return caller
     return memory.search_global(caller["user_id"], query, type, limit)
+
+
+@mcp.tool()
+def memodi_get_observation(ctx: Context, path: str, observation_id: str) -> str:
+    """Read one observation by id — the audit path for corrections.
+
+    An observation replaced via memodi_save(supersedes=...) stops surfacing
+    in context and search but stays readable here, with superseded_by
+    pointing at its replacement — that's how the 'why did we change this?'
+    chain is followed. Deleted observations are hidden.
+    """
+    caller = _caller(ctx)
+    if isinstance(caller, str):
+        return caller
+    return memory.get_observation(
+        path, caller["user_id"], caller["machine"], observation_id
+    )
+
+
+@mcp.tool()
+def memodi_delete(ctx: Context, path: str, observation_id: str) -> str:
+    """Soft-delete a junk, test, or wrong observation — sets deleted_at
+    but keeps the row.
+
+    Prefer memodi_save with a matching topic_key, or its supersedes
+    parameter, when the goal is to correct an observation — this tool
+    is for cleanup, not corrections. Reversible at the DB level.
+    Idempotent: deleting an already-deleted observation still acks
+    success.
+
+    Deleting an observation that superseded another one is the undo of
+    that correction: the observation it replaced surfaces again (the
+    ack reports how many via resurfaced).
+    """
+    caller = _caller(ctx)
+    if isinstance(caller, str):
+        return caller
+    return memory.delete(path, caller["user_id"], caller["machine"], observation_id)
 
 
 # --- Workspace management ---

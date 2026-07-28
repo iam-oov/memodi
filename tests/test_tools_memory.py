@@ -7,6 +7,8 @@ from memodi.database import auth_repository, repository
 from memodi.database.connection import ensure_schema, get_connection
 from memodi.tools.memory import (
     context,
+    delete,
+    get_observation,
     list_projects,
     save,
     search,
@@ -16,6 +18,22 @@ from memodi.tools.memory import (
 )
 from memodi.tools.session import session_end, session_start
 from tests.conftest import _path, cleanup_rows
+
+DB_INTERNALS = (
+    "invalid input syntax",
+    "unnamed portal",
+    "operator does not exist",
+    "psycopg",
+    "select",
+    "where",
+    "$1",
+)
+
+
+def _assert_no_db_internals(ack: dict) -> None:
+    payload = json.dumps(ack).lower()
+    leaked = [marker for marker in DB_INTERNALS if marker in payload]
+    assert not leaked, f"ack leaked database internals {leaked}: {payload}"
 
 
 @pytest.fixture(autouse=True)
@@ -683,6 +701,645 @@ def test_save_without_occurred_at_stays_backward_compatible(
 
     assert titles.index("Gamma") < titles.index("Beta")
     assert titles.index("Beta") < titles.index("Alpha")
+
+
+def test_delete_hides_observation_from_context_and_hybrid_search(
+    registered_workspace, project_name
+):
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    obs_id = json.loads(
+        save(
+            **common,
+            title="Zebra migration note",
+            content="Throwaway test data that must be deletable",
+            type="discovery",
+        )
+    )["id"]
+
+    result = json.loads(delete(**common, observation_id=obs_id))
+    assert result["deleted"] is True
+    assert result["already_deleted"] is False
+
+    context_titles = [o["title"] for o in json.loads(context(**common))["observations"]]
+    assert "Zebra migration note" not in context_titles
+
+    hybrid_titles = [
+        r["title"] for r in json.loads(search_hybrid(**common, query="zebra migration"))
+    ]
+    assert "Zebra migration note" not in hybrid_titles
+
+
+def test_delete_makes_get_observation_return_none(registered_workspace, project_name):
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    obs_id = json.loads(
+        save(
+            **common,
+            title="To be deleted",
+            content="Should vanish from get_observation too",
+            type="discovery",
+        )
+    )["id"]
+
+    delete(**common, observation_id=obs_id)
+
+    assert repository.get_observation(obs_id) is None
+
+
+def test_delete_nonexistent_id_returns_not_found(registered_workspace, project_name):
+    result = json.loads(
+        delete(
+            path=_path(registered_workspace, project_name),
+            user_id=registered_workspace["user_id"],
+            machine=registered_workspace["machine"],
+            observation_id=str(uuid.uuid4()),
+        )
+    )
+    assert result["deleted"] is False
+
+
+def test_delete_cross_workspace_returns_not_found(registered_workspace, project_name):
+    other = _extra_workspace(registered_workspace["user_id"])
+    try:
+        obs_id = json.loads(
+            save(
+                path=f"{other['root']}/{project_name}",
+                user_id=other["user_id"],
+                machine=other["machine"],
+                title="Belongs to the other workspace",
+                content="Must not be deletable from workspace A",
+                type="discovery",
+            )
+        )["id"]
+
+        result = json.loads(
+            delete(
+                path=_path(registered_workspace, project_name),
+                user_id=registered_workspace["user_id"],
+                machine=registered_workspace["machine"],
+                observation_id=obs_id,
+            )
+        )
+        assert result["deleted"] is False
+        assert repository.get_observation(obs_id) is not None
+    finally:
+        _cleanup_workspace(other["workspace"])
+
+
+def test_delete_twice_is_idempotent(registered_workspace, project_name):
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    obs_id = json.loads(
+        save(
+            **common,
+            title="Delete me twice",
+            content="Second delete should still ack success",
+            type="discovery",
+        )
+    )["id"]
+
+    first = json.loads(delete(**common, observation_id=obs_id))
+    second = json.loads(delete(**common, observation_id=obs_id))
+
+    assert first["deleted"] is True
+    assert first["already_deleted"] is False
+    assert second["deleted"] is True
+    assert second["already_deleted"] is True
+
+
+def test_save_with_supersedes_hides_old_and_keeps_audit_trail(
+    registered_workspace, project_name
+):
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    old_id = json.loads(
+        save(
+            **common,
+            title="Old indentation rule",
+            content="Use tabs for indentation",
+            type="decision",
+        )
+    )["id"]
+
+    new_ack = json.loads(
+        save(
+            **common,
+            title="New indentation rule",
+            content="Use spaces for indentation",
+            type="decision",
+            supersedes=old_id,
+        )
+    )
+    assert new_ack["supersedes_applied"] is True
+
+    context_titles = [o["title"] for o in json.loads(context(**common))["observations"]]
+    assert "New indentation rule" in context_titles
+    assert "Old indentation rule" not in context_titles
+
+    old_obs = repository.get_observation(old_id)
+    assert old_obs is not None
+    assert str(old_obs["superseded_by"]) == new_ack["id"]
+
+
+def test_save_with_bogus_supersedes_id_still_saves(registered_workspace, project_name):
+    result = json.loads(
+        save(
+            path=_path(registered_workspace, project_name),
+            user_id=registered_workspace["user_id"],
+            machine=registered_workspace["machine"],
+            title="New note with a bad supersedes reference",
+            content="The save must succeed even if supersedes is garbage",
+            type="discovery",
+            supersedes="not-a-real-observation-id",
+        )
+    )
+    assert "id" in result
+    assert result["supersedes_applied"] is False
+    assert "supersedes_error" in result
+
+
+def test_topic_key_upsert_skips_superseded_rows(registered_workspace, project_name):
+    topic = "test/topic-supersede-skip"
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    old_id = json.loads(
+        save(
+            **common,
+            title="Topic v1",
+            content="First version under this topic_key",
+            type="architecture",
+            topic_key=topic,
+        )
+    )["id"]
+
+    save(
+        **common,
+        title="Superseding note",
+        content="Marks v1 as superseded",
+        type="discovery",
+        supersedes=old_id,
+    )
+
+    new_ack = json.loads(
+        save(
+            **common,
+            title="Topic v2 (fresh insert, not an upsert of v1)",
+            content="Same topic_key, but v1 is superseded so this must insert",
+            type="architecture",
+            topic_key=topic,
+        )
+    )
+    # The real invariant: a brand-new row, not an in-place update of v1.
+    assert new_ack["id"] != old_id
+    assert new_ack["revision_count"] == 1
+
+    old_obs = repository.get_observation(old_id)
+    assert old_obs["title"] == "Topic v1"
+
+
+def test_supersedes_on_topic_key_upsert_never_self_supersedes(
+    registered_workspace, project_name
+):
+    """A topic_key upsert returns the SAME row it corrected. Superseding that
+    id would point the row at itself and erase it from every read path."""
+    topic = "test/self-supersede-upsert"
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    old_id = json.loads(
+        save(
+            **common,
+            title="Indentation rule v1",
+            content="Use tabs for indentation",
+            type="decision",
+            topic_key=topic,
+        )
+    )["id"]
+
+    ack = json.loads(
+        save(
+            **common,
+            title="Indentation rule v2",
+            content="Use spaces for indentation",
+            type="decision",
+            topic_key=topic,
+            supersedes=old_id,
+        )
+    )
+    assert ack["id"] == old_id
+    assert ack["supersedes_applied"] is False
+
+    titles = [o["title"] for o in json.loads(context(**common))["observations"]]
+    assert "Indentation rule v2" in titles
+    assert repository.get_observation(old_id)["superseded_by"] is None
+
+
+def test_supersedes_on_deduplicated_save_never_self_supersedes(
+    registered_workspace, project_name
+):
+    """A re-save inside the 15-minute dedup window returns the existing row's
+    id. Superseding it would make the observation vanish."""
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    first_id = json.loads(
+        save(
+            **common,
+            title="Repeated note",
+            content="Exactly the same content twice",
+            type="discovery",
+        )
+    )["id"]
+
+    ack = json.loads(
+        save(
+            **common,
+            title="Repeated note",
+            content="Exactly the same content twice",
+            type="discovery",
+            supersedes=first_id,
+        )
+    )
+    assert ack["id"] == first_id
+    assert ack["supersedes_applied"] is False
+
+    titles = [o["title"] for o in json.loads(context(**common))["observations"]]
+    assert "Repeated note" in titles
+    assert repository.get_observation(first_id)["superseded_by"] is None
+
+
+def test_dedup_never_absorbs_into_a_superseded_observation(
+    registered_workspace, project_name
+):
+    """Re-saving content identical to a SUPERSEDED row must create a new
+    visible observation — absorbing it would ack success while surfacing
+    nowhere."""
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    old_id = json.loads(
+        save(
+            **common,
+            title="Deploy note",
+            content="Deploys run through the tunnel",
+            type="config",
+        )
+    )["id"]
+    json.loads(
+        save(
+            **common,
+            title="Deploy note v2",
+            content="Deploys run through the tunnel with a service token",
+            type="config",
+            supersedes=old_id,
+        )
+    )
+
+    re_ack = json.loads(
+        save(
+            **common,
+            title="Deploy note",
+            content="Deploys run through the tunnel",
+            type="config",
+        )
+    )
+    assert re_ack["id"] != old_id
+
+    titles = [o["title"] for o in json.loads(context(**common))["observations"]]
+    assert "Deploy note" in titles
+
+
+def test_delete_malformed_id_returns_clean_error(registered_workspace, project_name):
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    result = json.loads(delete(**common, observation_id="not-a-uuid"))
+
+    assert result["deleted"] is False
+    assert result["error"] == "invalid observation id"
+    _assert_no_db_internals(result)
+
+    # The shared connection must still be usable afterwards.
+    assert "id" in json.loads(
+        save(
+            **common,
+            title="Still working",
+            content="A malformed delete must not poison the connection",
+            type="discovery",
+        )
+    )
+
+
+@pytest.mark.parametrize("bad_id", ["not-a-uuid", "", 12])
+def test_save_with_invalid_supersedes_leaks_no_db_internals(
+    registered_workspace, project_name, bad_id
+):
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    ack = json.loads(
+        save(
+            **common,
+            title="Note with an unusable supersedes value",
+            content="The save must persist and the ack must stay domain-level",
+            type="discovery",
+            supersedes=bad_id,
+        )
+    )
+
+    assert "id" in ack
+    assert ack["supersedes_applied"] is False
+    _assert_no_db_internals(ack)
+    assert repository.get_observation(ack["id"]) is not None
+
+
+def test_supersede_failure_never_breaks_the_save(
+    registered_workspace, project_name, monkeypatch
+):
+    """The observation is already committed when the supersede runs — a
+    failure there must never turn into an error the client would retry."""
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    old_id = json.loads(
+        save(
+            **common,
+            title="Old rule",
+            content="To be replaced while the supersede path is broken",
+            type="decision",
+        )
+    )["id"]
+
+    def boom(**kwargs):
+        raise RuntimeError("transient database failure")
+
+    monkeypatch.setattr(repository, "supersede_observation", boom)
+
+    ack = json.loads(
+        save(
+            **common,
+            title="New rule",
+            content="Saved even though superseding blew up",
+            type="decision",
+            supersedes=old_id,
+        )
+    )
+    assert "error" not in ack
+    assert "id" in ack
+    assert ack["supersedes_applied"] is False
+    _assert_no_db_internals(ack)
+
+
+def test_deleting_successor_resurfaces_predecessor(registered_workspace, project_name):
+    """Deleting the replacement is the natural undo — superseded_by must never
+    point at a deleted row, or the predecessor stays invisible forever."""
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    old_id = json.loads(
+        save(
+            **common,
+            title="Predecessor rule",
+            content="Original decision that got replaced",
+            type="decision",
+        )
+    )["id"]
+    new_ack = json.loads(
+        save(
+            **common,
+            title="Successor rule",
+            content="Replacement decision that turns out to be wrong",
+            type="decision",
+            supersedes=old_id,
+        )
+    )
+    assert new_ack["supersedes_applied"] is True
+
+    undo = json.loads(delete(**common, observation_id=new_ack["id"]))
+    assert undo["resurfaced"] == 1
+
+    titles = [o["title"] for o in json.loads(context(**common))["observations"]]
+    assert "Predecessor rule" in titles
+    assert "Successor rule" not in titles
+    assert repository.get_observation(old_id)["superseded_by"] is None
+
+
+def test_supersedes_reasons_are_discriminated(registered_workspace, project_name):
+    """The LLM must be able to tell a pointless retry from a harmful one, so
+    each failure mode reports its own reason instead of one lumped message."""
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+
+    def _reason(supersedes, **overrides):
+        payload = dict(
+            title=f"Reason probe {uuid.uuid4()}",
+            content=f"Distinct content {uuid.uuid4()}",
+            type="discovery",
+        )
+        payload.update(overrides)
+        ack = json.loads(save(**common, **payload, supersedes=supersedes))
+        assert ack["supersedes_applied"] is False
+        return ack["supersedes_reason"]
+
+    assert _reason("not-a-uuid") == "invalid_id"
+    assert _reason(str(uuid.uuid4())) == "not_found"
+
+    deleted_id = json.loads(
+        save(**common, title="Doomed", content="About to be deleted", type="discovery")
+    )["id"]
+    delete(**common, observation_id=deleted_id)
+    assert _reason(deleted_id) == "already_deleted"
+
+    superseded_id = json.loads(
+        save(
+            **common,
+            title="Replaced once",
+            content="Already has an heir",
+            type="config",
+        )
+    )["id"]
+    save(
+        **common,
+        title="The heir",
+        content="First replacement",
+        type="config",
+        supersedes=superseded_id,
+    )
+    assert _reason(superseded_id) == "already_superseded"
+
+    topic = "test/discriminated-self"
+    self_id = json.loads(
+        save(
+            **common,
+            title="Topic under a key",
+            content="Will be corrected in place",
+            type="config",
+            topic_key=topic,
+        )
+    )["id"]
+    assert _reason(self_id, topic_key=topic) == "self"
+
+
+def test_superseded_observation_hidden_from_every_search_path(
+    registered_workspace, project_name
+):
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    old_id = json.loads(
+        save(
+            **common,
+            title="Superseded flamingo note",
+            content="Flamingo migration runs on Sunday",
+            type="config",
+        )
+    )["id"]
+    save(
+        **common,
+        title="Current flamingo note",
+        content="Flamingo migration runs on Monday",
+        type="config",
+        supersedes=old_id,
+    )
+
+    for search_fn in (search, search_hybrid, search_similar):
+        rows = json.loads(search_fn(**common, query="flamingo migration"))
+        titles = [r["title"] for r in rows]
+        assert "Current flamingo note" in titles, search_fn.__name__
+        assert "Superseded flamingo note" not in titles, search_fn.__name__
+
+
+def test_get_observation_returns_superseded_row_with_pointer(
+    registered_workspace, project_name
+):
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    old_id = json.loads(
+        save(
+            **common,
+            title="Audited old rule",
+            content="Kept readable by id after being replaced",
+            type="decision",
+        )
+    )["id"]
+    new_ack = json.loads(
+        save(
+            **common,
+            title="Audited new rule",
+            content="The replacement",
+            type="decision",
+            supersedes=old_id,
+        )
+    )
+
+    payload = json.loads(get_observation(**common, observation_id=old_id))
+    assert payload["id"] == old_id
+    assert payload["title"] == "Audited old rule"
+    assert payload["superseded_by"] == new_ack["id"]
+
+
+def test_get_observation_hides_deleted(registered_workspace, project_name):
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    obs_id = json.loads(
+        save(
+            **common,
+            title="Deleted and unreadable",
+            content="Soft-deleted rows stay hidden from the audit path",
+            type="discovery",
+        )
+    )["id"]
+    delete(**common, observation_id=obs_id)
+
+    payload = json.loads(get_observation(**common, observation_id=obs_id))
+    assert "error" in payload
+    assert "title" not in payload
+
+
+def test_get_observation_cross_workspace_returns_not_found(
+    registered_workspace, project_name
+):
+    other = _extra_workspace(registered_workspace["user_id"])
+    try:
+        obs_id = json.loads(
+            save(
+                path=f"{other['root']}/{project_name}",
+                user_id=other["user_id"],
+                machine=other["machine"],
+                title="Belongs to the other workspace",
+                content="Must not be readable from workspace A",
+                type="discovery",
+            )
+        )["id"]
+
+        payload = json.loads(
+            get_observation(
+                path=_path(registered_workspace, project_name),
+                user_id=registered_workspace["user_id"],
+                machine=registered_workspace["machine"],
+                observation_id=obs_id,
+            )
+        )
+        assert "error" in payload
+        assert "title" not in payload
+    finally:
+        _cleanup_workspace(other["workspace"])
+
+
+def test_get_observation_malformed_id_returns_clean_error(
+    registered_workspace, project_name
+):
+    payload = json.loads(
+        get_observation(
+            path=_path(registered_workspace, project_name),
+            user_id=registered_workspace["user_id"],
+            machine=registered_workspace["machine"],
+            observation_id="not-a-uuid",
+        )
+    )
+    assert payload["error"] == "invalid observation id"
+    _assert_no_db_internals(payload)
 
 
 def test_occurred_at_persisted_on_upsert(registered_workspace, project_name):

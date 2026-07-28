@@ -10,7 +10,7 @@ This protocol is MANDATORY and ALWAYS ACTIVE — not something you activate on d
 
 ## TOOL LOADING
 
-Memodi has **6 core tools** always in your context and **27 deferred tools** available via ToolSearch.
+Memodi has **6 core tools** always in your context and **29 deferred tools** available via ToolSearch.
 
 - **Core tools** — ready to use immediately, no extra steps needed
 - **Deferred tools** — call `ToolSearch("select:memodi_toolname")` to load them first
@@ -70,6 +70,10 @@ Memodi has **6 core tools** always in your context and **27 deferred tools** ava
 
 **Maintenance** — `ToolSearch("select:memodi_backfill")`
 - `memodi_backfill` — generate embeddings for old observations without them
+
+**Correcting memory** — `ToolSearch("select:memodi_delete,memodi_get_observation")`
+- `memodi_delete` — for junk, test, or wrong observations only
+- `memodi_get_observation` — read one observation by id, superseded ones included (audit path)
 
 ## WORKSPACE GATE (mandatory before any project-scoped call)
 
@@ -209,6 +213,27 @@ Re-creating the same relationship invalidates the old version and creates a new 
 - Different topics MUST NOT overwrite each other
 - Same topic evolving → use same topic_key (upsert)
 - When unsure, use a descriptive key like "config/database" or "pattern/error-handling"
+
+## CORRECTING MEMORY
+
+memodi has three corrective mechanisms — pick the narrowest one that fits:
+
+1. **topic_key upsert** (default) — same topic_key on `memodi_save` updates the
+   existing observation in place. Use this whenever you know the topic_key.
+2. **supersedes** — pass `supersedes=<old-observation-id>` on `memodi_save` when
+   you're replacing an observation but don't know its topic_key. The old one
+   stops surfacing in context/search; it stays readable via
+   `memodi_get_observation` with `superseded_by` pointing at the replacement.
+   A bad id never fails the save: check `supersedes_applied` and
+   `supersedes_reason` — `self` means a topic_key upsert or duplicate merge
+   already corrected that same row, so do NOT retry.
+3. **memodi_delete** — load via `ToolSearch("select:memodi_delete")`. Only for
+   junk, test, or flat-out wrong observations — not for "this decision changed."
+   Soft delete, reversible at the DB level, idempotent (deleting twice still
+   acks success).
+
+Undoing a supersede: delete the replacement. Deleting an observation clears
+every `superseded_by` pointing at it, so whatever it replaced surfaces again.
 
 ## WHEN TO SEARCH MEMORY
 
