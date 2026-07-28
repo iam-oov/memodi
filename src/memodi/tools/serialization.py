@@ -37,6 +37,7 @@ _OBSERVATION_READ_FIELDS = {
     "rrf_score",
     "_deduplicated",
     "superseded_by",
+    "supersedes",
 }
 
 _SESSION_SUMMARY_FIELDS = {
@@ -78,6 +79,8 @@ def serialize_observation(obs: dict) -> dict:
     slim = _allow(obs, _OBSERVATION_READ_FIELDS)
     if not obs.get("superseded_by"):
         slim.pop("superseded_by", None)
+    if not obs.get("supersedes"):
+        slim.pop("supersedes", None)
     return slim
 
 

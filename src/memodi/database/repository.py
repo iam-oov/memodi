@@ -606,12 +606,29 @@ def get_observation(
     path filters it out. Deleted rows stay hidden. When workspace_id is
     given, ids outside that workspace report the same shape as a
     nonexistent id.
+
+    The chain is walkable both ways: superseded_by points forward to the
+    replacement, supersedes back to the ids it replaced. supersedes is a
+    list, most-recent-first — the topic_key upsert flow lets several
+    corrections resolve to the same row. It is absent when the row replaced
+    nothing, when every predecessor was deleted, and (like the row itself)
+    when a predecessor lives outside workspace_id, since that id would read
+    back as nonexistent. The reverse lookup shares the row's statement so
+    both sides come from one snapshot.
     """
     conn = get_connection()
     if workspace_id:
         row = conn.execute(
             """
-            SELECT o.* FROM observations o
+            SELECT o.*, (
+                SELECT array_agg(pred.id ORDER BY pred.updated_at DESC)
+                FROM observations pred
+                JOIN projects pp ON pp.id = pred.project_id
+                WHERE pred.superseded_by = o.id
+                  AND pred.deleted_at IS NULL
+                  AND pp.workspace_id = p.workspace_id
+            ) AS supersedes
+            FROM observations o
             JOIN projects p ON p.id = o.project_id
             WHERE o.id = %s AND p.workspace_id = %s AND o.deleted_at IS NULL
             """,
@@ -619,10 +636,23 @@ def get_observation(
         ).fetchone()
     else:
         row = conn.execute(
-            "SELECT * FROM observations WHERE id = %s AND deleted_at IS NULL",
+            """
+            SELECT o.*, (
+                SELECT array_agg(pred.id ORDER BY pred.updated_at DESC)
+                FROM observations pred
+                WHERE pred.superseded_by = o.id AND pred.deleted_at IS NULL
+            ) AS supersedes
+            FROM observations o
+            WHERE o.id = %s AND o.deleted_at IS NULL
+            """,
             (observation_id,),
         ).fetchone()
-    return dict(row) if row else None
+    if not row:
+        return None
+    result = dict(row)
+    if not result["supersedes"]:
+        del result["supersedes"]
+    return result
 
 
 def delete_observation(observation_id: str, workspace_id: str) -> dict:

@@ -1,7 +1,7 @@
 {
   "name": "memodi",
   "description": "Persistent distributed memory for AI coding agents. PostgreSQL-backed with full-text search, workflow engine, and cross-project context.",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "author": {
     "name": "Osvaldo Hinojosa"
   },

@@ -227,7 +227,10 @@ def memodi_get_observation(ctx: Context, path: str, observation_id: str) -> str:
     An observation replaced via memodi_save(supersedes=...) stops surfacing
     in context and search but stays readable here, with superseded_by
     pointing at its replacement — that's how the 'why did we change this?'
-    chain is followed. Deleted observations are hidden.
+    chain is followed. The chain also walks the other way: reading the
+    replacement shows supersedes, the list of ids it replaced, most-recent
+    first. That list is absent when the observation replaced nothing or
+    every predecessor was deleted. Deleted observations are hidden.
     """
     caller = _caller(ctx)
     if isinstance(caller, str):

@@ -60,6 +60,18 @@ def _extra_workspace(user_id: str) -> dict:
     }
 
 
+def _backdate_updated_at(observation_id: str, hours: int) -> None:
+    """Pin updated_at so a most-recent-first assertion cannot pass by
+    riding on insertion order."""
+    conn = get_connection()
+    conn.execute(
+        "UPDATE observations SET updated_at = now() - make_interval(hours => %s) "
+        "WHERE id = %s",
+        (hours, observation_id),
+    )
+    conn.commit()
+
+
 def _cleanup_workspace(workspace: dict) -> None:
     ws_id = workspace["id"]
     cleanup_rows(
@@ -1274,6 +1286,264 @@ def test_get_observation_returns_superseded_row_with_pointer(
     assert payload["id"] == old_id
     assert payload["title"] == "Audited old rule"
     assert payload["superseded_by"] == new_ack["id"]
+
+
+def test_get_observation_returns_supersedes_for_successor(
+    registered_workspace, project_name
+):
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    old_id = json.loads(
+        save(
+            **common,
+            title="Reverse lookup old rule",
+            content="The predecessor discoverable from its successor",
+            type="decision",
+        )
+    )["id"]
+    new_ack = json.loads(
+        save(
+            **common,
+            title="Reverse lookup new rule",
+            content="The replacement that should expose supersedes",
+            type="decision",
+            supersedes=old_id,
+        )
+    )
+
+    new_payload = json.loads(get_observation(**common, observation_id=new_ack["id"]))
+    assert new_payload["supersedes"] == [old_id]
+
+    old_payload = json.loads(get_observation(**common, observation_id=old_id))
+    assert old_payload["superseded_by"] == new_ack["id"]
+    assert "supersedes" not in old_payload
+
+
+def test_get_observation_supersedes_lists_every_predecessor_recent_first(
+    registered_workspace, project_name
+):
+    """Two acked corrections can land on the same successor row through the
+    topic_key upsert flow, so the reverse pointer has to carry both ids —
+    reporting only one would deny a correction the server already acked."""
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    topic = "test/reverse-multi-predecessor"
+    first_old_id = json.loads(
+        save(
+            **common,
+            title="First scattered rule",
+            content="One of two rules folded into a single successor",
+            type="decision",
+        )
+    )["id"]
+    second_old_id = json.loads(
+        save(
+            **common,
+            title="Second scattered rule",
+            content="The other rule folded into the same successor",
+            type="decision",
+        )
+    )["id"]
+    successor_id = json.loads(
+        save(
+            **common,
+            title="Consolidated rule",
+            content="The row both corrections resolve to",
+            type="decision",
+            topic_key=topic,
+        )
+    )["id"]
+    first_ack = json.loads(
+        save(
+            **common,
+            title="Consolidated rule",
+            content="Now also covering the first scattered rule",
+            type="decision",
+            topic_key=topic,
+            supersedes=first_old_id,
+        )
+    )
+    second_ack = json.loads(
+        save(
+            **common,
+            title="Consolidated rule",
+            content="Now also covering the second scattered rule",
+            type="decision",
+            topic_key=topic,
+            supersedes=second_old_id,
+        )
+    )
+    assert first_ack["id"] == successor_id
+    assert second_ack["id"] == successor_id
+    assert first_ack["supersedes_applied"] is True
+    assert second_ack["supersedes_applied"] is True
+
+    _backdate_updated_at(first_old_id, hours=1)
+    _backdate_updated_at(second_old_id, hours=2)
+
+    payload = json.loads(get_observation(**common, observation_id=successor_id))
+    assert payload["supersedes"] == [first_old_id, second_old_id]
+
+
+def test_get_observation_supersedes_excludes_predecessor_outside_workspace(
+    registered_workspace, project_name
+):
+    """A predecessor whose project was merged into another workspace must
+    drop out of the reverse pointer — the caller could not read that id."""
+    other = _extra_workspace(registered_workspace["user_id"])
+    try:
+        predecessor_project = f"{project_name}-predecessor"
+        old_id = json.loads(
+            save(
+                path=_path(registered_workspace, predecessor_project),
+                user_id=registered_workspace["user_id"],
+                machine=registered_workspace["machine"],
+                title="Predecessor about to leave the workspace",
+                content="Its project gets merged into another workspace",
+                type="decision",
+            )
+        )["id"]
+        common = dict(
+            path=_path(registered_workspace, project_name),
+            user_id=registered_workspace["user_id"],
+            machine=registered_workspace["machine"],
+        )
+        new_ack = json.loads(
+            save(
+                **common,
+                title="Successor left behind",
+                content="Must not point at an id outside the caller's workspace",
+                type="decision",
+                supersedes=old_id,
+            )
+        )
+        assert new_ack["supersedes_applied"] is True
+
+        before = json.loads(get_observation(**common, observation_id=new_ack["id"]))
+        assert before["supersedes"] == [old_id], (
+            "a predecessor in another project of the SAME workspace is readable, "
+            "so the reverse pointer must scope by workspace, not by project"
+        )
+
+        save(
+            path=f"{other['root']}/{project_name}-sink",
+            user_id=other["user_id"],
+            machine=other["machine"],
+            title="Merge target in the other workspace",
+            content="Receives the predecessor's project",
+            type="decision",
+        )
+        source = repository.get_or_create_project(
+            predecessor_project,
+            workspace_id=registered_workspace["workspace"]["id"],
+        )
+        target = repository.get_or_create_project(
+            f"{project_name}-sink", workspace_id=other["workspace"]["id"]
+        )
+        repository.merge_projects(source["id"], target["id"])
+
+        moved = json.loads(get_observation(**common, observation_id=old_id))
+        assert "error" in moved
+
+        payload = json.loads(get_observation(**common, observation_id=new_ack["id"]))
+        assert "supersedes" not in payload
+    finally:
+        _cleanup_workspace(other["workspace"])
+
+
+def test_repository_get_observation_returns_uuid_ids(
+    registered_workspace, project_name
+):
+    """The reverse pointer must use the same id type as id/superseded_by —
+    json.dumps(default=str) handles the wire, so no eager stringifying."""
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    old_id = json.loads(
+        save(
+            **common,
+            title="Typed predecessor",
+            content="Read back through the repository, not the tool",
+            type="decision",
+        )
+    )["id"]
+    new_id = json.loads(
+        save(
+            **common,
+            title="Typed successor",
+            content="Its supersedes entries must be uuid.UUID",
+            type="decision",
+            supersedes=old_id,
+        )
+    )["id"]
+
+    obs = repository.get_observation(
+        new_id, workspace_id=registered_workspace["workspace"]["id"]
+    )
+    assert isinstance(obs["id"], uuid.UUID)
+    assert obs["supersedes"] == [uuid.UUID(old_id)]
+    assert all(isinstance(pred, uuid.UUID) for pred in obs["supersedes"])
+
+
+def test_get_observation_supersedes_absent_when_nothing_replaced(
+    registered_workspace, project_name
+):
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    obs_id = json.loads(
+        save(
+            **common,
+            title="Standalone rule",
+            content="Never replaced anything",
+            type="decision",
+        )
+    )["id"]
+
+    payload = json.loads(get_observation(**common, observation_id=obs_id))
+    assert "supersedes" not in payload
+
+
+def test_get_observation_supersedes_absent_after_predecessor_deleted(
+    registered_workspace, project_name
+):
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    old_id = json.loads(
+        save(
+            **common,
+            title="Deletable predecessor",
+            content="Will be deleted after being superseded",
+            type="decision",
+        )
+    )["id"]
+    new_ack = json.loads(
+        save(
+            **common,
+            title="Successor of a deletable predecessor",
+            content="Its supersedes pointer must clear once the predecessor is gone",
+            type="decision",
+            supersedes=old_id,
+        )
+    )
+
+    delete(**common, observation_id=old_id)
+
+    payload = json.loads(get_observation(**common, observation_id=new_ack["id"]))
+    assert "supersedes" not in payload
 
 
 def test_get_observation_hides_deleted(registered_workspace, project_name):

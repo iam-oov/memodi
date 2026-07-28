@@ -232,6 +232,10 @@ memodi has three corrective mechanisms — pick the narrowest one that fits:
    Soft delete, reversible at the DB level, idempotent (deleting twice still
    acks success).
 
+The chain reads both ways on `memodi_get_observation`: the replaced id exposes
+`superseded_by` (its replacement), and the replacement exposes `supersedes` — the list
+of ids it replaced, most-recent first, absent when it replaced nothing.
+
 Undoing a supersede: delete the replacement. Deleting an observation clears
 every `superseded_by` pointing at it, so whatever it replaced surfaces again.
 

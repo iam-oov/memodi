@@ -56,6 +56,7 @@ OBSERVATION_READ_ALLOWLIST = {
     "rrf_score",
     "_deduplicated",
     "superseded_by",
+    "supersedes",
 }
 
 _NON_PERSISTED_READ_FIELDS = {
@@ -65,10 +66,11 @@ _NON_PERSISTED_READ_FIELDS = {
     "similarity",
     "rrf_score",
     "_deduplicated",
+    "supersedes",
 }
 
 
-_CONDITIONALLY_EXPOSED_READ_FIELDS = {"superseded_by"}
+_CONDITIONALLY_EXPOSED_READ_FIELDS = {"superseded_by", "supersedes"}
 
 OBSERVATION_ROW_FIELDS = (
     OBSERVATION_READ_ALLOWLIST
@@ -225,6 +227,29 @@ def test_serialize_observation_exposes_superseded_by_when_set():
     assert result["superseded_by"] == "new-id"
 
 
+def test_serialize_observation_hides_supersedes_when_absent():
+    obs = {"id": "abc", "title": "t", "type": "discovery"}
+    result = serialize_observation(obs)
+    assert "supersedes" not in result
+
+
+def test_serialize_observation_hides_supersedes_when_empty():
+    obs = {"id": "abc", "title": "t", "type": "discovery", "supersedes": []}
+    result = serialize_observation(obs)
+    assert "supersedes" not in result
+
+
+def test_serialize_observation_exposes_supersedes_when_set():
+    obs = {
+        "id": "abc",
+        "title": "t",
+        "type": "discovery",
+        "supersedes": ["old-id", "older-id"],
+    }
+    result = serialize_observation(obs)
+    assert result["supersedes"] == ["old-id", "older-id"]
+
+
 def test_search_hybrid_result_exact_field_set(registered_workspace, project_name):
     common = dict(
         path=_path(registered_workspace, project_name),
@@ -267,6 +292,81 @@ def test_get_observation_exact_field_set(registered_workspace, project_name):
     assert set(row.keys()) == OBSERVATION_ROW_FIELDS
     leaked = _collect_keys(row) & FORBIDDEN_KEYS
     assert not leaked
+
+
+def test_get_observation_successor_exact_field_set(
+    registered_workspace, project_name
+):
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    old_id = json.loads(
+        save(
+            **common,
+            title="Audit boundary predecessor",
+            content="Replaced so its successor carries the reverse pointer",
+            type="discovery",
+        )
+    )["id"]
+    new_id = json.loads(
+        save(
+            **common,
+            title="Audit boundary successor",
+            content="Exercised through the by-id read boundary",
+            type="discovery",
+            supersedes=old_id,
+        )
+    )["id"]
+
+    row = json.loads(get_observation(**common, observation_id=new_id))
+
+    assert set(row.keys()) == OBSERVATION_ROW_FIELDS | {"supersedes"}
+    leaked = _collect_keys(row) & FORBIDDEN_KEYS
+    assert not leaked
+
+
+def test_successor_carries_no_supersedes_through_context_and_search(
+    registered_workspace, project_name
+):
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    old_id = json.loads(
+        save(
+            **common,
+            title="Surfacing boundary predecessor",
+            content="Pelican rollout happens on Sunday",
+            type="discovery",
+        )
+    )["id"]
+    save(
+        **common,
+        title="Surfacing boundary successor",
+        content="Pelican rollout happens on Monday",
+        type="discovery",
+        supersedes=old_id,
+    )
+
+    payload = json.loads(context(**common))
+    surfaced = [
+        row
+        for row in payload["observations"]
+        if row["title"] == "Surfacing boundary successor"
+    ]
+    assert surfaced, "expected the successor in context"
+    assert "supersedes" not in surfaced[0]
+
+    for search_fn in (search, search_hybrid, search_similar):
+        rows = json.loads(search_fn(**common, query="pelican rollout"))
+        hits = [
+            row for row in rows if row["title"] == "Surfacing boundary successor"
+        ]
+        assert hits, f"expected the successor in {search_fn.__name__}"
+        assert "supersedes" not in hits[0], search_fn.__name__
 
 
 def test_context_observation_exact_field_set(registered_workspace, project_name):
