@@ -10,6 +10,7 @@ from memodi.tools.context import client_context
 from memodi.tools.errors import NotAuthenticatedError
 from memodi.tools.scope import require_user
 from memodi.tools.system import ping, status, version
+from memodi.web.hooks import post_capture, post_session_close, post_session_start
 from memodi.web.signup import get_signup, post_signup
 
 # Tools always loaded into Claude's context. All others are deferred
@@ -42,6 +43,12 @@ mcp = FastMCP(
 
 mcp.custom_route("/signup", methods=["GET"])(get_signup)
 mcp.custom_route("/signup", methods=["POST"])(post_signup)
+
+# --- Web (hooks — plain HTTP counterpart to MCP, for Claude Code shell hooks) ---
+
+mcp.custom_route("/hooks/session-start", methods=["POST"])(post_session_start)
+mcp.custom_route("/hooks/session-close", methods=["POST"])(post_session_close)
+mcp.custom_route("/hooks/capture", methods=["POST"])(post_capture)
 
 
 def _caller(ctx: Context) -> dict | str:
@@ -639,8 +646,13 @@ def memodi_session_start(ctx: Context, path: str, project: str | None = None) ->
     """Begin tracking a work session — all subsequent
     memodi_save calls auto-attach to this session.
 
-    Closes any previous active session. Use at the start of
-    every conversation.
+    Closes any previous active session.
+
+    Under the Claude Code plugin, do NOT call this: its SessionStart hook
+    already opens the session over plain HTTP, tagged with the Claude Code
+    session id so the SessionEnd hook can close that exact row. Calling this
+    would replace that tagged session with an untagged one no hook can ever
+    close. This tool is for MCP clients that ship no such hook.
     """
     caller = _caller(ctx)
     if isinstance(caller, str):
@@ -657,9 +669,14 @@ def memodi_session_end(
 
     Call before the conversation ends so the next session can
     pick up where this one left off. Never fails for lack of a
-    session: if session_start was skipped, a session is created
-    and closed on the spot (auto_started: true in the response)
-    so the summary is always persisted.
+    session: if no session is active, one is created and closed
+    on the spot (auto_started: true in the response) so the
+    summary is always persisted.
+
+    summary is required: an empty or whitespace-only one is
+    rejected with a validation error, because it would still
+    satisfy `summary IS NOT NULL` and outrank the last real
+    recap the next session reads.
     """
     caller = _caller(ctx)
     if isinstance(caller, str):

@@ -116,3 +116,84 @@ def test_session_end_clears_active(registered_workspace, project_name):
     )
     active = repository.get_active_session(proj["id"])
     assert active is None
+
+
+def test_session_end_rejects_empty_summary(registered_workspace, project_name):
+    path = _path(registered_workspace, project_name)
+    kwargs = {
+        "path": path,
+        "user_id": registered_workspace["user_id"],
+        "machine": registered_workspace["machine"],
+    }
+    session_start(**kwargs)
+
+    result = json.loads(session_end(**kwargs, summary=""))
+
+    assert result["type"] == "validation"
+
+    proj = repository.get_or_create_project(
+        project_name, workspace_id=registered_workspace["workspace"]["id"]
+    )
+    assert repository.get_active_session(proj["id"]) is not None
+
+
+def test_session_end_rejects_whitespace_only_summary(
+    registered_workspace, project_name
+):
+    path = _path(registered_workspace, project_name)
+    kwargs = {
+        "path": path,
+        "user_id": registered_workspace["user_id"],
+        "machine": registered_workspace["machine"],
+    }
+    session_start(**kwargs)
+
+    result = json.loads(session_end(**kwargs, summary="   \n\t  "))
+
+    assert result["type"] == "validation"
+
+
+def test_session_end_empty_summary_does_not_clobber_real_summary(
+    registered_workspace, project_name
+):
+    path = _path(registered_workspace, project_name)
+    kwargs = {
+        "path": path,
+        "user_id": registered_workspace["user_id"],
+        "machine": registered_workspace["machine"],
+    }
+    session_start(**kwargs)
+    session_end(**kwargs, summary="Worked on the real feature")
+
+    # A later attempt with a blank summary (e.g. a caller bug) must never
+    # outrank this real summary in get_latest_session_summary.
+    session_start(**kwargs)
+    result = json.loads(session_end(**kwargs, summary=""))
+    assert result["type"] == "validation"
+
+    proj = repository.get_or_create_project(
+        project_name, workspace_id=registered_workspace["workspace"]["id"]
+    )
+    latest = repository.get_latest_session_summary(proj["id"])
+    assert latest["summary"] == "Worked on the real feature"
+
+
+def test_session_start_persists_client_session_id(registered_workspace, project_name):
+    path = _path(registered_workspace, project_name)
+    client_session_id = str(uuid.uuid4())
+
+    result = json.loads(
+        session_start(
+            path=path,
+            user_id=registered_workspace["user_id"],
+            machine=registered_workspace["machine"],
+            client_session_id=client_session_id,
+        )
+    )
+
+    proj = repository.get_or_create_project(
+        project_name, workspace_id=registered_workspace["workspace"]["id"]
+    )
+    active = repository.get_active_session(proj["id"])
+    assert str(active["id"]) == result["session_id"]
+    assert active["client_session_id"] == client_session_id

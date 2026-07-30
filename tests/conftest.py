@@ -42,6 +42,7 @@ def registered_workspace():
         "machine": machine,
         "root": root,
         "workspace": workspace,
+        "api_key": user["api_key"],
     }
 
     cleanup_rows(

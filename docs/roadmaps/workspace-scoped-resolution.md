@@ -82,7 +82,7 @@ Notes for the pooling change (from the Phase 2-3 reviews): `resolve_workspace` w
 ## Phase 5 — Plugin contract, installer, docs
 
 - `session-start.sh` / `post-compaction.sh`: resolve path ONCE per session; unresolved → inform "memodi inactive here, run memodi_workspace_start" (no per-save spam); pass full `${CWD}`.
-- `subagent-stop.sh` + `mcp-capture.py`: send `X-Memodi-Api-Key`/`X-Memodi-Machine` headers, pass `path`; on `not_started` exit 0 silently (opt-in inertness).
+- `subagent-stop.sh`: send `X-Memodi-Api-Key`/`X-Memodi-Machine` headers, pass `path`; on `not_started` exit 0 silently (opt-in inertness).
 - `install.sh`: add both headers to `claude mcp add`; print the signup URL first so the user obtains a key before installing.
 - `SKILL.md`: replace register_path+link_project onboarding with the start gate; document parent-folder pattern, machine-#2 select-your-workspace flow (list owner-scoped workspaces → USER picks, never invented), inert behavior, and the `path` param rule. Fix project-derivation inconsistency (lines 82 vs 151). Update tool tables/counts.
 - `README.md`/`CLAUDE.md`: per-user auth model, signup, api-key = the app-level access control.

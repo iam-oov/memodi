@@ -134,7 +134,7 @@ else
 fi
 
 # --- Persist env vars for the plugin hooks ---
-# The hooks (session start, post-compaction, subagent capture) read
+# The hooks (session start, session end, post-compaction, subagent capture) read
 # MEMODI_API_KEY and MEMODI_MACHINE from the shell environment. Without
 # them they stay silently inactive in future sessions.
 echo "[5/5] Persisting environment to your shell rc..."

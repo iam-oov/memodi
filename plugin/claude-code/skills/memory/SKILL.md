@@ -60,9 +60,9 @@ Memodi has **6 core tools** always in your context and **29 deferred tools** ava
 - `memodi_progress` — show active workflow state
 - `memodi_task_update` — update a specific task's status
 
-**Session lifecycle** — `ToolSearch("select:memodi_session_start,memodi_session_end")`
-- `memodi_session_start` — start a session (observations auto-attach to it)
-- `memodi_session_end` — close session with structured summary
+**Session close** — `ToolSearch("select:memodi_session_end")`
+- `memodi_session_end` — close session with a required structured summary (Goal / Accomplished / Next Steps)
+- Do NOT call `memodi_session_start` — the plugin's `SessionStart` hook owns the session lifecycle (see SESSION LIFECYCLE below)
 
 **System extras** — `ToolSearch("select:memodi_status,memodi_version")`
 - `memodi_status` — check database health and extensions
@@ -279,10 +279,12 @@ Workflow (memodi_plan/approve/verify/unify) is ON DEMAND.
 
 Sessions group observations within a work period. Observations are auto-attached to the active session.
 
-### Starting a session
-After the workspace gate resolves and context loading, load session tools and start a session:
-1. `ToolSearch("select:memodi_session_start")`
-2. Call `memodi_session_start` with `path`
+### Starting a session — the hook's job, never yours
+
+The plugin's `SessionStart` hook opens the memodi session over plain HTTP, tagged with
+this Claude Code session id, so the `SessionEnd` hook can later close that exact row.
+Do NOT call `memodi_session_start`: it would close the hook's tagged session and open an
+untagged one that no hook can ever match, leaking the session open forever.
 
 ### Ending a session
 Before the user ends the conversation or says "done"/"listo"/"that's it":
@@ -301,3 +303,14 @@ Before the user ends the conversation or says "done"/"listo"/"that's it":
 ```
 
 `memodi_context` returns the last session summary — the next session starts with context from the previous one.
+
+The user can also run `/memodi:end` directly — the explicit, reliable way to close a
+session with this same structured summary; prefer it when the user asks to wrap up.
+
+A `SessionEnd` hook also runs automatically on every exit, over plain HTTP
+(`/hooks/session-close`, not MCP — shell hooks can't reliably speak the MCP protocol).
+It does hygiene only: it closes ONLY the session carrying this exact Claude Code session
+id, with a NULL summary, so `ended_at` stays truthful without ever guessing which
+project or window it belongs to. It can never write a summary and can never create a
+project — `memodi_session_end` (or `/memodi:end`) is the only way the next session gets
+a real recap instead of just a truthfully closed row.

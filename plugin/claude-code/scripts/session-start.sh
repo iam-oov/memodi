@@ -1,14 +1,21 @@
 #!/bin/sh
 # Memodi — SessionStart hook (startup|clear)
 #
-# 1. Reads cwd from stdin JSON
+# 1. Reads cwd + session_id from stdin JSON
 # 2. Checks if memodi server is reachable
-# 3. Injects a workspace-resolution + context-loading protocol,
-#    resolved ONCE per session — no per-save re-checks
+# 3. Injects a context-loading protocol, resolved ONCE per session
+# 4. Opens the memodi session over plain HTTP (/hooks/session-start),
+#    tagged with this Claude Code session id — deterministic, does not
+#    depend on the model remembering to call memodi_session_start
+#
+# The protocol is emitted BEFORE the POST on purpose: it is the part the
+# session cannot work without, and a slow or failing POST must never cost
+# it. The POST is fire-and-forget, so its outcome is never asserted.
 
 # --- Parse stdin JSON ---
 INPUT=$(cat)
 CWD=$(printf '%s' "$INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('cwd',''))" 2>/dev/null)
+SESSION_ID=$(printf '%s' "$INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('session_id',''))" 2>/dev/null)
 CWD="${CWD:-$PWD}"
 
 # --- Server URL (env var or production default) ---
@@ -37,22 +44,22 @@ EOF
   exit 0
 fi
 
-# --- Inject session protocol ---
+# --- Inject context-loading protocol ---
 cat <<EOF
 ## Memodi Memory — Session Start (resolve silently)
 
-Resolve the workspace ONCE this session, before responding. Do this
-SILENTLY — no status line, no announcement, no mention of memodi.
+This hook manages the memodi session for this workspace — do NOT call
+memodi_session_start yourself. Resolve context ONCE this session, before
+responding. Do this SILENTLY — no status line, no announcement, no mention
+of memodi.
 
 1. Call memodi_context with path: "${CWD}" — do NOT pass project; let
    memodi derive it from path.
 
    - Resolved (returns observations / last_session): the workspace is
      registered here. Read the last session summary and the returned
-     observations for context, then load session tools via
-     ToolSearch("select:memodi_session_start") and call
-     memodi_session_start with path: "${CWD}". Carry the context into
-     your work — do NOT print or narrate any of this.
+     observations for context. Carry the context into your work — do NOT
+     print or narrate any of this.
 
    - {"type": "not_started"}: this path is NOT registered on this machine.
      Do NOTHING and say NOTHING. Do not warn, do not suggest a command, do
@@ -70,7 +77,21 @@ skip saves silently.
 
 SESSION CLOSE (only if the workspace resolved): before the conversation
 ends, call memodi_session_end with path: "${CWD}" and a structured summary
-(Goal / Accomplished / Next Steps).
+(Goal / Accomplished / Next Steps). A SessionEnd hook also runs on exit as
+a hygiene net, but it can NEVER write a summary — calling
+memodi_session_end yourself (or the user running /memodi:end) is the only
+way the next session gets a real recap instead of just a truthfully closed
+row.
 EOF
+
+# --- Open the session over plain HTTP (opt-in inert: not_started/not_authenticated are no-ops) ---
+PAYLOAD=$(CWD="$CWD" SESSION_ID="$SESSION_ID" python3 -c "
+import json, os
+print(json.dumps({'path': os.environ['CWD'], 'client_session_id': os.environ['SESSION_ID']}))
+" 2>/dev/null)
+curl -s -o /dev/null --max-time 5 -X POST $AUTH_HEADERS \
+  -H "Content-Type: application/json" \
+  -d "$PAYLOAD" \
+  "${MEMODI_URL}/hooks/session-start" 2>/dev/null
 
 exit 0

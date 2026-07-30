@@ -1,5 +1,5 @@
 {
-  "description": "Memodi persistent memory hooks — connectivity, context injection, compaction recovery, and subagent capture",
+  "description": "Memodi persistent memory hooks — connectivity, context injection, compaction recovery, subagent capture, and session-end hygiene close",
   "hooks": {
     "SessionStart": [
       {
@@ -8,7 +8,7 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/scripts/session-start.sh",
-            "timeout": 5,
+            "timeout": 10,
             "statusMessage": "Connecting to memodi..."
           }
         ]
@@ -32,6 +32,17 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/scripts/subagent-stop.sh",
             "timeout": 15
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/session-end.sh",
+            "timeout": 10
           }
         ]
       }

@@ -37,7 +37,7 @@ Production: Claude Code ──HTTPS──► Cloudflare Tunnel ──► memodi-
 Real per-user accounts, not a single shared key:
 
 - Sign up at `/signup` (public route, no MCP auth by design) — creates a user and shows the `mmd_…` api key ONCE; only its hash is stored server-side
-- `X-Memodi-Api-Key` header — the caller's identity. This IS the app-level access control; there is no other gate in front of `/mcp`
+- `X-Memodi-Api-Key` header — the caller's identity. This IS the app-level access control; there is no other gate in front of `/mcp`, nor in front of the three plain-HTTP hook routes (`POST /hooks/session-start`, `/hooks/session-close`, `/hooks/capture`) that share the same header contract
 - `X-Memodi-Machine` header — per-machine identity, used to scope path registration (`memodi_workspace_start`) so the same filesystem path can resolve to different workspaces on different machines
 - `path` (the caller's cwd) is an explicit per-call parameter on every project-scoped tool — never inferred from the api key or machine
 - Unregistered path → `{"type": "not_started"}`; missing or invalid key → `{"type": "not_authenticated"}` — both self-describing errors, no silent auto-creation of projects or workspaces
@@ -60,9 +60,12 @@ Deploy authenticates to Cloudflare Access with a service token (`cloudflared acc
 ```
 plugin/claude-code/
 ├── .claude-plugin/plugin.json    — plugin metadata
-├── hooks/hooks.json              — SessionStart / SubagentStop hooks
-├── scripts/session-start.sh      — silent workspace resolution on session start
+├── hooks/hooks.json              — SessionStart / SubagentStop / SessionEnd hooks
+├── scripts/session-start.sh      — silent workspace resolution + session open on session start
+├── scripts/session-end.sh        — hygiene session close on session end (plain HTTP)
+├── scripts/subagent-stop.sh      — captures subagent findings (plain HTTP)
 ├── commands/start.md             — /memodi:start (user-driven activation)
+├── commands/end.md               — /memodi:end (user-driven session close with a real summary)
 └── skills/memory/SKILL.md        — proactive memory instructions
 ```
 
@@ -78,6 +81,18 @@ The skill tells Claude WHEN and WHY to use memory. The MCP server handles HOW.
   command registers the workspace (attaching to an existing name shares memories
   cross-machine, since observations hang off the workspace, not the machine) and loads
   workspace-wide memory.
+
+### Session close (two doors, two audiences)
+
+- `/memodi:end` (MCP, model-driven) — the only way a session gets a real summary; the
+  model builds Goal / Accomplished / Next Steps from the conversation and calls
+  `memodi_session_end`, which requires a non-empty summary.
+- `SessionEnd` hook (automation) — plain HTTP (`/hooks/session-close`), never MCP: a
+  shell hook cannot reliably speak the MCP protocol (no `mcp` package outside the
+  project venv). It closes ONLY the session whose `client_session_id` matches the
+  Claude Code session id from the hook payload, always with a NULL summary, and never
+  creates a project — a hygiene net that can never clobber a real summary or close
+  another window's session.
 
 ## Conventions
 

@@ -1,17 +1,18 @@
 #!/bin/sh
 # Memodi — SubagentStop hook
 #
-# Captures key learnings from subagent output and saves them to memodi.
-# Runs async — does not block Claude. Opt-in inert: if the caller's path
-# has no registered workspace (not_started), mcp-capture.py exits
-# silently — no spam, no error surfaced to the user.
+# Captures key learnings from subagent output and saves them to memodi via
+# plain HTTP (/hooks/capture) — no MCP client, no python `mcp` dependency
+# (that package lives only in the project venv, not system python3; see
+# plugin/hook-mcp-dependency-broken). Runs async — does not block Claude.
+# Opt-in inert: if the caller's path has no registered workspace
+# (not_started), the route is a silent no-op — no spam, no error surfaced
+# to the user.
 #
 # stdin JSON fields:
 #   last_assistant_message — the subagent's final reply text
 #   cwd — current working directory
 #   agent_type — type of subagent (Explore, Plan, etc.)
-
-PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 # --- Server URL (env var or production default) ---
 MEMODI_URL="${MEMODI_URL:-https://memodi.valdoh.com}"
@@ -28,8 +29,12 @@ AGENT_TYPE=$(printf '%s' "$INPUT" | python3 -c "import sys,json; print(json.load
 CWD="${CWD:-$PWD}"
 
 # --- Extract key sections ---
-EXTRACTED=$(printf '%s' "$MESSAGE" | python3 -c "
-import re, sys
+# Truncated because the server caps the capture body at 64KB: a long
+# subagent reply must degrade to a shorter observation, never to a rejected
+# request (and never to a multi-megabyte POST).
+MAX_CONTENT=32768
+EXTRACTED=$(printf '%s' "$MESSAGE" | MAX_CONTENT="$MAX_CONTENT" python3 -c "
+import os, re, sys
 
 content = sys.stdin.read()
 sections = []
@@ -51,7 +56,11 @@ for pattern in patterns:
             sections.append(text)
 
 if sections:
-    print('\n\n'.join(sections))
+    joined = '\n\n'.join(sections)
+    limit = int(os.environ['MAX_CONTENT'])
+    if len(joined) > limit:
+        joined = joined[:limit] + '\n\n[truncated by the memodi SubagentStop hook]'
+    print(joined)
 " 2>/dev/null)
 
 # Nothing meaningful extracted
@@ -68,9 +77,22 @@ if ! curl -s -o /dev/null --max-time 2 $AUTH_HEADERS "${MEMODI_URL}/mcp" 2>/dev/
   exit 0  # Server not reachable, skip silently
 fi
 
-# --- Save via MCP protocol (opt-in inert: not_started exits silently) ---
+# --- Save via plain HTTP (opt-in inert: not_started exits silently) ---
+# No topic_key: it would upsert, so every later capture in the project would
+# overwrite the same single row. Each capture is its own observation; the
+# server's content-hash dedup already collapses exact repeats.
 TITLE="Subagent (${AGENT_TYPE}) findings"
-python3 "${PLUGIN_ROOT}/scripts/mcp-capture.py" \
-  "$MEMODI_URL" "$CWD" "$TITLE" "$EXTRACTED" 2>/dev/null
+PAYLOAD=$(CWD="$CWD" TITLE="$TITLE" CONTENT="$EXTRACTED" python3 -c "
+import json, os
+print(json.dumps({
+    'path': os.environ['CWD'],
+    'title': os.environ['TITLE'],
+    'content': os.environ['CONTENT'],
+}))
+" 2>/dev/null)
+curl -s -o /dev/null --max-time 10 -X POST $AUTH_HEADERS \
+  -H "Content-Type: application/json" \
+  -d "$PAYLOAD" \
+  "${MEMODI_URL}/hooks/capture" 2>/dev/null
 
 exit 0

@@ -243,11 +243,12 @@ def merge_projects(source_project_id: str, target_project_id: str) -> dict:
     }
 
 
-def create_session(project_id: str) -> dict:
+def create_session(project_id: str, client_session_id: str | None = None) -> dict:
     conn = get_connection()
     row = conn.execute(
-        "INSERT INTO sessions (project_id) VALUES (%s) RETURNING *",
-        (project_id,),
+        "INSERT INTO sessions (project_id, client_session_id) VALUES (%s, %s) "
+        "RETURNING *",
+        (project_id, client_session_id),
     ).fetchone()
     conn.commit()
     return dict(row)
@@ -266,6 +267,32 @@ def end_session(session_id: str, summary: str | None = None) -> dict:
     ).fetchone()
     conn.commit()
     return dict(row)
+
+
+def close_session_by_client_id(
+    workspace_id: str, client_session_id: str
+) -> dict | None:
+    """Close the active session carrying this exact client_session_id, scoped
+    to any project inside this workspace. Never creates a project or a
+    session, and never touches a session with a different (or missing) id —
+    the caller (a hook, or any other client) proves which session is theirs
+    purely by this id, never by "the workspace's active session"."""
+    conn = get_connection()
+    row = conn.execute(
+        """
+        UPDATE sessions s
+        SET ended_at = now(), summary = NULL
+        FROM projects p
+        WHERE s.project_id = p.id
+          AND p.workspace_id = %s
+          AND s.client_session_id = %s
+          AND s.ended_at IS NULL
+        RETURNING s.*
+        """,
+        (workspace_id, client_session_id),
+    ).fetchone()
+    conn.commit()
+    return dict(row) if row else None
 
 
 def get_active_session(project_id: str) -> dict | None:

@@ -45,10 +45,11 @@ Register with the **parent folder** derived above as `path`, so sibling repos sh
 
 State plainly what you registered: `workspace "<name>" → <parent folder> (this repo and its siblings share it)`. If the user actually works out of this single repo only, register the cwd instead — but default to the parent.
 
-## 3. Load cross-machine memories and start the session
+## 3. Load cross-machine memories
 
-1. Call `memodi_context` with `path` (cwd) — this returns recent observations for the **whole workspace** (every project, every machine) plus the last session summary.
-2. Load and call `memodi_session_start` (`ToolSearch("select:memodi_session_start")`) with `path` (cwd).
+Call `memodi_context` with `path` (cwd) — this returns recent observations for the **whole workspace** (every project, every machine) plus the last session summary.
+
+Do NOT call `memodi_session_start`. The `SessionStart` hook owns the session lifecycle; from the next session on it opens one automatically for this now-registered path. For the rest of THIS conversation there is no open session, which costs nothing: `/memodi:end` creates and closes one on the spot so the summary is never lost.
 
 Then give the user a **short** recap and stop:
 - workspace name → project resolved

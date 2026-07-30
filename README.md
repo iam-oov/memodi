@@ -112,6 +112,8 @@ Abri Claude Code en tu proyecto y corre `/memodi:start`. Ese comando:
 
 Una sola vez por (maquina, carpeta). Despues de eso la memoria se carga **sola y en silencio** cada vez que abris ese repo — no hace falta volver a correr `/memodi:start` salvo que quieras re-traer el contexto a mano. En un path no registrado memodi se queda inerte y callado hasta que corras el comando.
 
+Para cerrar una sesion de forma explicita corre `/memodi:end`: arma un resumen estructurado (Goal / Accomplished / Next Steps) y lo guarda con `memodi_session_end`, para que la proxima sesion arranque con ese contexto. Un hook `SessionEnd` corre igual en cada salida como red de contencion, por HTTP plano (no MCP), pero solo cierra la sesion que coincide exactamente con el session id de Claude Code y siempre con resumen NULL — nunca reemplaza el resumen real.
+
 ### Desinstalar
 
 ```bash
@@ -188,7 +190,7 @@ caller) y lo resuelven contra un workspace registrado — ver Modelo de autentic
 | Tool | Descripcion |
 |------|-------------|
 | `memodi_session_start` | Iniciar una sesion (las observaciones se auto-adjuntan) |
-| `memodi_session_end` | Cerrar sesion con un resumen estructurado |
+| `memodi_session_end` | Cerrar sesion con un resumen estructurado (obligatorio) |
 
 ## Modelo del grafo
 
@@ -240,13 +242,21 @@ Verificar antes del primer deploy:
 - `memodi.service` habilitado y corriendo (`systemctl status memodi`)
 - `https://memodi.valdoh.com/signup` responde 200
 
-### Proteccion de /signup y /mcp
+### Proteccion de /signup, /mcp y /hooks/*
 
 `/signup` es publico por diseno (es el unico punto de entrada sin key). Su proteccion:
 
 - Invite code (`MEMODI_SIGNUP_CODE`) + limite de body a nivel app
 - Una regla de **rate limiting en Cloudflare** sobre `memodi.valdoh.com/signup` — configurala en el dashboard (sugerido: 5 requests por minuto por IP). No hay throttling a nivel app.
 - `/mcp` requiere una api key valida por usuario (`X-Memodi-Api-Key`); sin key o con key invalida responde `not_authenticated`
+
+Ademas de `/mcp` hay **tres rutas HTTP planas** para los hooks del plugin, con el mismo
+contrato de auth (`X-Memodi-Api-Key` + `X-Memodi-Machine`) y sin ninguna otra puerta
+delante: `POST /hooks/session-start`, `POST /hooks/session-close` y `POST /hooks/capture`.
+Quien configure el WAF tiene que saber que existen:
+
+- Cada ruta valida y acota sus campos, y limita el body a nivel app (4KB las de sesion, 64KB `capture`)
+- Igual que `/signup`, no hay throttling a nivel app — una regla de **rate limiting en Cloudflare** sobre `/hooks/*` queda como accion de operador
 
 ### Pipeline CI/CD
 
