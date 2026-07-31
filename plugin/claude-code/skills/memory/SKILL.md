@@ -224,9 +224,16 @@ memodi has three corrective mechanisms — pick the narrowest one that fits:
    you're replacing an observation but don't know its topic_key. The old one
    stops surfacing in context/search; it stays readable via
    `memodi_get_observation` with `superseded_by` pointing at the replacement.
-   A bad id never fails the save: check `supersedes_applied` and
-   `supersedes_reason` — `self` means a topic_key upsert or duplicate merge
-   already corrected that same row, so do NOT retry.
+   A bad id never fails the save: for a single id, check `supersedes_applied`
+   plus `supersedes_reason` — `self` means a topic_key upsert or duplicate merge
+   already corrected that same row, so do NOT retry. `supersedes` also takes a
+   list of string ids, to consolidate several scattered same-theme observations
+   into one. Duplicates are deduped (equivalent spellings of one uuid
+   included), and `supersedes_applied` is true only when every id applied —
+   when one did not, `supersedes_results` maps each id string you sent to its
+   outcome. Over 20 ids the whole list is refused: NOTHING is applied, there is
+   no `supersedes_results`, and `supersedes_reason` is `"too_many"`, so split
+   the consolidation into several saves. The save itself always persists.
 3. **memodi_delete** — load via `ToolSearch("select:memodi_delete")`. Only for
    junk, test, or flat-out wrong observations — not for "this decision changed."
    Soft delete, reversible at the DB level, idempotent (deleting twice still

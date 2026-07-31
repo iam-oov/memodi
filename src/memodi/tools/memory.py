@@ -15,6 +15,10 @@ from memodi.tools.serialization import (
 
 INVALID_OBSERVATION_ID = "invalid observation id"
 
+MAX_SUPERSEDES = 20
+
+MAX_SUPERSEDES_KEY = 64
+
 
 def _ensure() -> None:
     ensure_schema()
@@ -43,40 +47,99 @@ _SUPERSEDES_REASONS = {
     "already_deleted": "old observation is deleted",
     "already_superseded": "old observation was already superseded",
     "failed": "supersede could not be applied",
+    "too_many": f"supersedes list exceeds the {MAX_SUPERSEDES}-id cap — split it "
+    "into multiple saves",
 }
+
+
+def _supersede_reason(raw_id: object, new_id: str, workspace_id: str) -> str | None:
+    """Attempt one supersede; returns None when applied, else a
+    discriminated reason token. Never raises — see _apply_supersedes.
+    """
+    old_id = _observation_id(raw_id)
+    if old_id is None:
+        return "invalid_id"
+    try:
+        result = repository.supersede_observation(
+            old_id=old_id,
+            new_id=new_id,
+            workspace_id=workspace_id,
+        )
+        return None if result["applied"] else result["reason"]
+    except Exception:
+        rollback()
+        return "failed"
+
+
+def _dedup_preserve_order(values: list) -> list:
+    """First occurrence wins, keeping the caller's raw strings. Deduping on
+    the canonical id collapses equivalent spellings of one uuid (case,
+    hyphens, braces), which would otherwise be attempted twice and report a
+    phantom already_superseded on the second spelling.
+    """
+    seen: set[str] = set()
+    unique: list = []
+    for value in values:
+        key = _observation_id(value) or str(value)
+        if key not in seen:
+            seen.add(key)
+            unique.append(value)
+    return unique
+
+
+def _results_key(raw_id: object) -> str:
+    """The caller's own spelling, so an agent can look an outcome up by the
+    string it sent — bounded and control-character-free, since this echoes
+    unvalidated input back inside the hottest ack.
+    """
+    key = str(raw_id).replace("\x00", "")
+    if len(key) > MAX_SUPERSEDES_KEY:
+        return key[:MAX_SUPERSEDES_KEY] + "…"
+    return key
 
 
 def _apply_supersedes(
     ack: dict, supersedes: object, new_id: str, workspace_id: str
 ) -> None:
-    """Attempt the supersede and describe the outcome on an ack that is
+    """Attempt the supersede(s) and describe the outcome on an ack that is
     already backed by a committed observation.
 
     Nothing here may raise: the save is done, so a failure that propagated
-    would make the client retry and duplicate the observation. Every
-    outcome becomes supersedes_applied plus a discriminated reason.
+    would make the client retry and duplicate the observation. A plain
+    string keeps today's exact ack shape (supersedes_applied plus a single
+    discriminated reason). A list is capped on the raw length the caller
+    sent, then deduped (first occurrence wins), then each id gets the same
+    per-id treatment; supersedes_applied is true only when every id
+    applied, and a per-id supersedes_results map is added only when
+    something did not.
     """
-    old_id = _observation_id(supersedes)
-    if old_id is None:
-        reason = "invalid_id"
-    else:
-        try:
-            result = repository.supersede_observation(
-                old_id=old_id,
-                new_id=new_id,
-                workspace_id=workspace_id,
+    if not isinstance(supersedes, list):
+        reason = _supersede_reason(supersedes, new_id, workspace_id)
+        ack["supersedes_applied"] = reason is None
+        if reason is not None:
+            ack["supersedes_reason"] = reason
+            ack["supersedes_error"] = _SUPERSEDES_REASONS.get(
+                reason, _SUPERSEDES_REASONS["failed"]
             )
-            reason = None if result["applied"] else result["reason"]
-        except Exception:
-            rollback()
-            reason = "failed"
+        return
 
-    ack["supersedes_applied"] = reason is None
-    if reason is not None:
-        ack["supersedes_reason"] = reason
-        ack["supersedes_error"] = _SUPERSEDES_REASONS.get(
-            reason, _SUPERSEDES_REASONS["failed"]
-        )
+    if not supersedes:
+        return
+
+    if len(supersedes) > MAX_SUPERSEDES:
+        ack["supersedes_applied"] = False
+        ack["supersedes_reason"] = "too_many"
+        ack["supersedes_error"] = _SUPERSEDES_REASONS["too_many"]
+        return
+
+    results = {
+        _results_key(raw_id): _supersede_reason(raw_id, new_id, workspace_id)
+        or "applied"
+        for raw_id in _dedup_preserve_order(supersedes)
+    }
+    ack["supersedes_applied"] = all(value == "applied" for value in results.values())
+    if not ack["supersedes_applied"]:
+        ack["supersedes_results"] = results
 
 
 def _attach_related(
@@ -116,7 +179,7 @@ def save(
     topic_key: str | None = None,
     metadata: dict | None = None,
     occurred_at: str | None = None,
-    supersedes: str | None = None,
+    supersedes: str | list[str] | None = None,
 ) -> str:
     _ensure()
     from memodi.embeddings import generate_embedding

@@ -1547,6 +1547,654 @@ def test_get_observation_supersedes_absent_after_predecessor_deleted(
     assert "supersedes" not in payload
 
 
+def test_save_with_supersedes_list_hides_all_and_acks_applied(
+    registered_workspace, project_name
+):
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    first_id = json.loads(
+        save(
+            **common,
+            title="Pi note part 1",
+            content="Raspberry Pi runs the server via systemd",
+            type="config",
+        )
+    )["id"]
+    second_id = json.loads(
+        save(
+            **common,
+            title="Pi note part 2",
+            content="Cloudflare Tunnel handles TLS for the Pi",
+            type="config",
+        )
+    )["id"]
+
+    new_ack = json.loads(
+        save(
+            **common,
+            title="Consolidated Pi operational notes",
+            content="Systemd + Cloudflare Tunnel, distilled from two notes",
+            type="config",
+            supersedes=[first_id, second_id],
+        )
+    )
+
+    assert new_ack["supersedes_applied"] is True
+    assert "supersedes_results" not in new_ack
+
+    context_titles = [o["title"] for o in json.loads(context(**common))["observations"]]
+    assert "Consolidated Pi operational notes" in context_titles
+    assert "Pi note part 1" not in context_titles
+    assert "Pi note part 2" not in context_titles
+
+    assert str(repository.get_observation(first_id)["superseded_by"]) == new_ack["id"]
+    assert str(repository.get_observation(second_id)["superseded_by"]) == new_ack["id"]
+
+
+def test_save_with_mixed_supersedes_list_reports_discriminated_results(
+    registered_workspace, project_name
+):
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    valid_id = json.loads(
+        save(
+            **common,
+            title="Valid predecessor",
+            content="Will be superseded",
+            type="discovery",
+        )
+    )["id"]
+
+    already_superseded_id = json.loads(
+        save(
+            **common,
+            title="Already replaced once",
+            content="Has an heir already",
+            type="discovery",
+        )
+    )["id"]
+    save(
+        **common,
+        title="Existing heir",
+        content="First replacement",
+        type="discovery",
+        supersedes=already_superseded_id,
+    )
+
+    bogus_id = "not-a-real-observation-id"
+
+    ack = json.loads(
+        save(
+            **common,
+            title="Consolidated with mixed outcomes",
+            content="One valid, one bogus, one already superseded",
+            type="discovery",
+            supersedes=[valid_id, bogus_id, already_superseded_id],
+        )
+    )
+
+    assert ack["supersedes_applied"] is False
+    assert ack["supersedes_results"] == {
+        valid_id: "applied",
+        bogus_id: "invalid_id",
+        already_superseded_id: "already_superseded",
+    }
+    assert str(repository.get_observation(valid_id)["superseded_by"]) == ack["id"]
+
+    context_titles = [o["title"] for o in json.loads(context(**common))["observations"]]
+    assert "Consolidated with mixed outcomes" in context_titles
+
+
+def test_supersedes_list_containing_own_id_reports_self_others_applied(
+    registered_workspace, project_name
+):
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    topic = "test/self-in-supersedes-list"
+    existing_id = json.loads(
+        save(
+            **common,
+            title="Topic v1",
+            content="First version under this topic_key",
+            type="architecture",
+            topic_key=topic,
+        )
+    )["id"]
+    other_old_id = json.loads(
+        save(
+            **common,
+            title="Scattered note",
+            content="A separate note folded into the same consolidation",
+            type="architecture",
+        )
+    )["id"]
+
+    ack = json.loads(
+        save(
+            **common,
+            title="Topic v2",
+            content="Upsert of v1, also folding in the scattered note",
+            type="architecture",
+            topic_key=topic,
+            supersedes=[existing_id, other_old_id],
+        )
+    )
+
+    assert ack["id"] == existing_id
+    assert ack["supersedes_applied"] is False
+    assert ack["supersedes_results"] == {
+        existing_id: "self",
+        other_old_id: "applied",
+    }
+    assert str(repository.get_observation(other_old_id)["superseded_by"]) == existing_id
+
+
+def test_supersedes_list_duplicates_deduped_before_applying(
+    registered_workspace, project_name
+):
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    valid_id = json.loads(
+        save(
+            **common,
+            title="Duplicated predecessor",
+            content="Referenced twice in one list",
+            type="discovery",
+        )
+    )["id"]
+    bogus_id = "still-not-a-real-id"
+
+    ack = json.loads(
+        save(
+            **common,
+            title="Consolidated, deduped",
+            content="Same id listed twice plus a bogus one",
+            type="discovery",
+            supersedes=[valid_id, valid_id, bogus_id],
+        )
+    )
+
+    assert ack["supersedes_applied"] is False
+    assert ack["supersedes_results"] == {valid_id: "applied", bogus_id: "invalid_id"}
+    assert str(repository.get_observation(valid_id)["superseded_by"]) == ack["id"]
+
+
+def test_supersedes_list_over_cap_applies_nothing(registered_workspace, project_name):
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    old_ids = [
+        json.loads(
+            save(
+                **common,
+                title=f"Over-cap predecessor {i}",
+                content=f"Distinct content {i}",
+                type="discovery",
+            )
+        )["id"]
+        for i in range(21)
+    ]
+
+    ack = json.loads(
+        save(
+            **common,
+            title="Attempted mega-consolidation",
+            content="Too many ids in one call",
+            type="discovery",
+            supersedes=old_ids,
+        )
+    )
+
+    assert ack["supersedes_applied"] is False
+    assert ack["supersedes_reason"] == "too_many"
+    assert "supersedes_results" not in ack
+
+    context_titles = [
+        o["title"] for o in json.loads(context(**common, limit=50))["observations"]
+    ]
+    for i in range(21):
+        assert f"Over-cap predecessor {i}" in context_titles
+    for old_id in old_ids:
+        assert repository.get_observation(old_id)["superseded_by"] is None
+
+
+def test_supersedes_empty_list_is_a_no_op(registered_workspace, project_name):
+    ack = json.loads(
+        save(
+            path=_path(registered_workspace, project_name),
+            user_id=registered_workspace["user_id"],
+            machine=registered_workspace["machine"],
+            title="No supersedes at all",
+            content="Empty list must behave exactly like omitting supersedes",
+            type="discovery",
+            supersedes=[],
+        )
+    )
+    assert "supersedes_applied" not in ack
+    assert "supersedes_reason" not in ack
+    assert "supersedes_error" not in ack
+    assert "supersedes_results" not in ack
+
+
+def test_supersedes_list_non_string_element_invalid_id_for_in_process_callers(
+    registered_workspace, project_name
+):
+    """Internal robustness only, NOT the MCP contract: over MCP, pydantic
+    rejects a non-string element with a validation error before this body
+    runs, so nothing is ever persisted. This pins that a direct in-process
+    caller still gets a per-id invalid_id instead of a TypeError on an ack
+    whose observation is already committed."""
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    valid_id = json.loads(
+        save(
+            **common,
+            title="Valid one",
+            content="Superseded by the consolidation",
+            type="discovery",
+        )
+    )["id"]
+
+    ack = json.loads(
+        save(
+            **common,
+            title="Consolidation with a garbage element",
+            content="One valid id, one int, one None",
+            type="discovery",
+            supersedes=[valid_id, 12, None],
+        )
+    )
+
+    assert ack["supersedes_applied"] is False
+    assert ack["supersedes_results"][valid_id] == "applied"
+    assert ack["supersedes_results"]["12"] == "invalid_id"
+    assert ack["supersedes_results"]["None"] == "invalid_id"
+    _assert_no_db_internals(ack)
+
+
+def test_deleting_successor_of_supersedes_list_resurfaces_all(
+    registered_workspace, project_name
+):
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    old_ids = [
+        json.loads(
+            save(
+                **common,
+                title=f"Scattered note {i}",
+                content=f"Part {i} of the theme",
+                type="discovery",
+            )
+        )["id"]
+        for i in range(3)
+    ]
+
+    new_ack = json.loads(
+        save(
+            **common,
+            title="Consolidated theme",
+            content="Folds three scattered notes into one",
+            type="discovery",
+            supersedes=old_ids,
+        )
+    )
+    assert new_ack["supersedes_applied"] is True
+
+    undo = json.loads(delete(**common, observation_id=new_ack["id"]))
+    assert undo["resurfaced"] == 3
+
+    context_titles = [
+        o["title"] for o in json.loads(context(**common, limit=50))["observations"]
+    ]
+    for i in range(3):
+        assert f"Scattered note {i}" in context_titles
+    assert "Consolidated theme" not in context_titles
+
+
+def test_save_related_excludes_every_row_in_supersedes_list(
+    registered_workspace, project_name
+):
+    """The list variant of the order guard: none of the N just-superseded ids
+    may come back as related, or the agent gets told to supersede them again."""
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    sibling_id = json.loads(
+        save(
+            **common,
+            title="Sibling deploy race note",
+            content=(
+                "Deploy failure: concurrent GitHub Actions runs race for the "
+                "same git ref lock"
+            ),
+            type="bugfix",
+        )
+    )["id"]
+    old_ids = [
+        json.loads(
+            save(
+                **common,
+                title=f"Old deploy race note {i}",
+                content=(
+                    f"We saw run {i} of the deploy pipeline fail because two "
+                    "runs raced for the same git ref lock"
+                ),
+                type="bugfix",
+            )
+        )["id"]
+        for i in range(2)
+    ]
+
+    ack = json.loads(
+        save(
+            **common,
+            title="Superseding deploy race note",
+            content=(
+                "Deploy pipeline breaks when concurrent runs race for the "
+                "same git ref lock file"
+            ),
+            type="bugfix",
+            supersedes=old_ids,
+        )
+    )
+
+    assert ack["supersedes_applied"] is True
+    related_ids = [r["id"] for r in ack.get("related", [])]
+    for old_id in old_ids:
+        assert old_id not in related_ids, (
+            "a row this save just superseded came back as related"
+        )
+    assert sibling_id in related_ids, (
+        "a genuine sibling must still surface — otherwise this test proves nothing"
+    )
+
+
+def test_get_observation_supersedes_list_returns_all_predecessors(
+    registered_workspace, project_name
+):
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    old_ids = [
+        json.loads(
+            save(
+                **common,
+                title=f"Reverse lookup predecessor {i}",
+                content=f"Part {i} folded into the consolidated row",
+                type="decision",
+            )
+        )["id"]
+        for i in range(3)
+    ]
+    for i, old_id in enumerate(old_ids):
+        _backdate_updated_at(old_id, hours=i + 1)
+
+    new_ack = json.loads(
+        save(
+            **common,
+            title="Consolidated reverse lookup row",
+            content="The successor that should expose all three",
+            type="decision",
+            supersedes=old_ids,
+        )
+    )
+    assert new_ack["supersedes_applied"] is True
+
+    payload = json.loads(get_observation(**common, observation_id=new_ack["id"]))
+    assert payload["supersedes"] == old_ids
+
+
+def test_supersedes_list_dedupes_equivalent_uuid_spellings(
+    registered_workspace, project_name
+):
+    """Uppercase and hyphen-less spellings are the SAME id: deduping on the
+    raw string would attempt the same row twice and report a phantom
+    already_superseded conflict on an ack that actually consolidated fine."""
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    valid_id = json.loads(
+        save(
+            **common,
+            title="Spelled three ways",
+            content="Referenced as lowercase, uppercase and hyphen-less",
+            type="discovery",
+        )
+    )["id"]
+
+    ack = json.loads(
+        save(
+            **common,
+            title="Consolidated across spellings",
+            content="One id, three spellings, one supersede",
+            type="discovery",
+            supersedes=[valid_id, valid_id.upper(), valid_id.replace("-", "")],
+        )
+    )
+
+    assert ack["supersedes_applied"] is True
+    assert "supersedes_results" not in ack
+    assert "supersedes_reason" not in ack
+    assert str(repository.get_observation(valid_id)["superseded_by"]) == ack["id"]
+
+
+def test_supersedes_repository_shape_surprise_never_breaks_the_save(
+    registered_workspace, project_name, monkeypatch
+):
+    """A repository return-shape surprise must be absorbed as a per-id
+    `failed`: the observation is already committed, so letting it escape
+    would hand the client an error for a save that DID land."""
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    valid_id = json.loads(
+        save(
+            **common,
+            title="Predecessor of a shape surprise",
+            content="The supersede call will return a dict without applied",
+            type="discovery",
+        )
+    )["id"]
+
+    monkeypatch.setattr(
+        repository, "supersede_observation", lambda **kwargs: {"unexpected": True}
+    )
+
+    ack = json.loads(
+        save(
+            **common,
+            title="Saved despite the shape surprise",
+            content="The save itself must still be acked normally",
+            type="discovery",
+            supersedes=[valid_id],
+        )
+    )
+
+    assert "error" not in ack
+    assert ack["title"] == "Saved despite the shape surprise"
+    assert ack["supersedes_applied"] is False
+    assert ack["supersedes_results"] == {valid_id: "failed"}
+    _assert_no_db_internals(ack)
+
+
+def test_supersedes_list_at_the_cap_applies_every_id(
+    registered_workspace, project_name
+):
+    """Exactly 20 ids is legal. The count is spelled out on purpose: reading
+    it from MAX_SUPERSEDES would make the test move with the constant and pin
+    neither the cap value nor the boundary (a `>=` comparison refuses this)."""
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    old_ids = [
+        json.loads(
+            save(
+                **common,
+                title=f"At-cap predecessor {i}",
+                content=f"Distinct at-cap content {i}",
+                type="discovery",
+            )
+        )["id"]
+        for i in range(20)
+    ]
+
+    ack = json.loads(
+        save(
+            **common,
+            title="Consolidation exactly at the cap",
+            content="Twenty ids is the largest legal list",
+            type="discovery",
+            supersedes=old_ids,
+        )
+    )
+
+    assert ack["supersedes_applied"] is True
+    assert "supersedes_reason" not in ack
+    assert "supersedes_results" not in ack
+    for old_id in old_ids:
+        assert str(repository.get_observation(old_id)["superseded_by"]) == ack["id"]
+
+
+def test_supersedes_list_over_cap_counts_raw_length_before_dedup(
+    registered_workspace, project_name
+):
+    """The cap guards the caller's raw list, not the deduped one: 21 copies of
+    one id is still an over-cap call, so nothing is applied."""
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    valid_id = json.loads(
+        save(
+            **common,
+            title="Repeated past the cap",
+            content="Listed twenty-one times in one call",
+            type="discovery",
+        )
+    )["id"]
+
+    ack = json.loads(
+        save(
+            **common,
+            title="Duplicate-heavy over-cap consolidation",
+            content="One id, twenty-one entries",
+            type="discovery",
+            supersedes=[valid_id] * 21,
+        )
+    )
+
+    assert ack["supersedes_applied"] is False
+    assert ack["supersedes_reason"] == "too_many"
+    assert "supersedes_results" not in ack
+    assert repository.get_observation(valid_id)["superseded_by"] is None
+
+
+def test_supersedes_results_keys_are_truncated(registered_workspace, project_name):
+    """Caller input is echoed back as result keys, so it must be bounded —
+    otherwise a megabyte of junk rides back inside the hottest ack."""
+    overlong = "x" * 200
+    raw = save(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+        title="Consolidation with an overlong id",
+        content="The echoed key must be truncated",
+        type="discovery",
+        supersedes=[overlong],
+    )
+    ack = json.loads(raw)
+
+    assert ack["supersedes_results"] == {"x" * 64 + "…": "invalid_id"}
+    assert overlong not in raw
+
+
+def test_supersedes_results_keys_strip_nul(registered_workspace, project_name):
+    """A NUL byte in an echoed key is a control character no client should
+    have to handle — strip it instead of round-tripping it."""
+    raw = save(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+        title="Consolidation with a NUL in the id",
+        content="The echoed key must lose the NUL",
+        type="discovery",
+        supersedes=["abc\x00def"],
+    )
+    ack = json.loads(raw)
+
+    assert ack["supersedes_results"] == {"abcdef": "invalid_id"}
+    assert "\x00" not in raw
+    assert "\\u0000" not in raw
+
+
+def test_supersedes_results_keys_are_the_raw_strings_the_caller_sent(
+    registered_workspace, project_name
+):
+    """Keys echo the caller's spelling so an agent can match them against the
+    list it sent; canonicalizing them would break that lookup."""
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    valid_id = json.loads(
+        save(
+            **common,
+            title="Referenced in uppercase",
+            content="The caller shouted the id",
+            type="discovery",
+        )
+    )["id"]
+    bogus_id = "definitely-not-an-id"
+
+    ack = json.loads(
+        save(
+            **common,
+            title="Consolidation with an uppercase id",
+            content="One uppercase valid id and one bogus id",
+            type="discovery",
+            supersedes=[valid_id.upper(), bogus_id],
+        )
+    )
+
+    assert ack["supersedes_results"] == {
+        valid_id.upper(): "applied",
+        bogus_id: "invalid_id",
+    }
+    assert valid_id not in ack["supersedes_results"]
+
+
 def test_get_observation_hides_deleted(registered_workspace, project_name):
     common = dict(
         path=_path(registered_workspace, project_name),

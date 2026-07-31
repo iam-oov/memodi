@@ -110,7 +110,7 @@ def memodi_save(
     topic_key: str | None = None,
     metadata: dict | None = None,
     occurred_at: str | None = None,
-    supersedes: str | None = None,
+    supersedes: str | list[str] | None = None,
 ) -> str:
     """Persist an observation to memory.
 
@@ -142,12 +142,26 @@ def memodi_save(
     replaces one whose topic_key you don't know — the old one
     stops surfacing in context/search but stays readable via
     memodi_get_observation (audit trail). A bad id never fails the
-    save; check supersedes_applied, plus supersedes_reason and
-    supersedes_error, in the response. Reasons are discriminated
-    (invalid_id, self, not_found, already_deleted,
+    save; for a single id, check supersedes_applied plus
+    supersedes_reason and supersedes_error in the response. Reasons
+    are discriminated (invalid_id, self, not_found, already_deleted,
     already_superseded, failed) so you can tell whether retrying
     would help — 'self' means a topic_key upsert or duplicate
     merge already corrected that same row, so do NOT retry.
+
+    supersedes also accepts a list of string ids, to distill several
+    scattered same-theme observations into this one — the audit chain
+    then shows all of them via memodi_get_observation. The list form
+    acks differently: supersedes_applied is true only when every id
+    applied, and when one did not, supersedes_results maps each id
+    string you sent to "applied" or its reason (no supersedes_reason,
+    no supersedes_error). Duplicates are deduped, equivalent spellings
+    of one uuid included. Over 20 ids the whole list is refused —
+    NOTHING is applied, there is no supersedes_results, and
+    supersedes_reason is "too_many", so split the consolidation into
+    several saves. Every element must be a string; a non-string element
+    is rejected at this boundary before anything is saved. The save
+    itself always persists.
 
     The response may carry a `related` list — up to 3 existing
     observations from anywhere in the workspace very similar to
