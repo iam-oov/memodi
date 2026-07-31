@@ -9,6 +9,7 @@ from memodi.tools.serialization import (
     serialize_observation,
     serialize_observation_save,
     serialize_observations,
+    serialize_related,
     serialize_session_summary,
 )
 
@@ -78,6 +79,31 @@ def _apply_supersedes(
         )
 
 
+def _attach_related(
+    ack: dict, embedding: list[float], observation_id: str, workspace_id: str
+) -> None:
+    """Look up existing observations similar to the one just saved and
+    attach them as `related` when there is anything worth surfacing.
+
+    Nothing here may raise, serializing the rows included: the save is
+    done, so a lookup or row-shape failure must never turn into an error
+    the client would retry — it just leaves the ack without a `related`
+    key. The read transaction the lookup opens is closed either way, so a
+    save never hands the shared connection back idle in transaction.
+    """
+    try:
+        related = repository.find_related_observations(
+            workspace_id=workspace_id,
+            embedding=embedding,
+            exclude_id=observation_id,
+        )
+        rollback()
+        if related:
+            ack["related"] = serialize_related(related)
+    except Exception:
+        rollback()
+
+
 @handle_errors
 def save(
     path: str,
@@ -114,6 +140,7 @@ def save(
     ack = serialize_observation_save(obs)
     if supersedes is not None:
         _apply_supersedes(ack, supersedes, str(obs["id"]), proj["workspace_id"])
+    _attach_related(ack, embedding, str(obs["id"]), proj["workspace_id"])
     return json.dumps(ack, default=str)
 
 

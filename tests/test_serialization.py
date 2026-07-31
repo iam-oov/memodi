@@ -13,7 +13,12 @@ from memodi.tools.memory import (
     search_hybrid,
     search_similar,
 )
-from memodi.tools.serialization import _OBSERVATION_READ_FIELDS, serialize_observation
+from memodi.tools.serialization import (
+    _OBSERVATION_READ_FIELDS,
+    _RELATED_FIELDS,
+    serialize_observation,
+    serialize_related,
+)
 from memodi.tools.session import session_end, session_start
 from tests.conftest import _path
 
@@ -213,6 +218,112 @@ def test_save_ack_includes_metadata_only_when_non_empty(
 
 def test_read_allowlist_is_pinned():
     assert _OBSERVATION_READ_FIELDS == OBSERVATION_READ_ALLOWLIST
+
+
+def test_related_fields_allowlist_is_pinned():
+    assert {"id", "title", "topic_key", "project", "similarity"} == _RELATED_FIELDS
+
+
+def test_save_ack_includes_related_only_when_present(
+    registered_workspace, project_name
+):
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    save(
+        **common,
+        title="Related ack probe",
+        content=(
+            "The deploy pipeline fails when two GitHub Actions runs race "
+            "for the same git ref lock"
+        ),
+        type="bugfix",
+    )
+
+    ack = json.loads(
+        save(
+            **common,
+            title="Related ack probe, reworded",
+            content=(
+                "Concurrent deploys can race for the git ref lock causing "
+                "pipeline failures"
+            ),
+            type="bugfix",
+        )
+    )
+
+    assert set(ack.keys()) == SAVE_ACK_FIELDS | {"related"}
+
+
+def test_related_entries_never_carry_content_or_internals(
+    registered_workspace, project_name
+):
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    save(
+        **common,
+        title="Leaked internals probe",
+        content=(
+            "The deploy pipeline fails when two GitHub Actions runs race "
+            "for the same git ref lock"
+        ),
+        type="bugfix",
+    )
+
+    ack = json.loads(
+        save(
+            **common,
+            title="Leaked internals probe, reworded",
+            content=(
+                "Concurrent deploys can race for the git ref lock causing "
+                "pipeline failures"
+            ),
+            type="bugfix",
+        )
+    )
+
+    assert ack.get("related"), "expected a related entry for this test to be meaningful"
+    for entry in ack["related"]:
+        assert set(entry.keys()) <= _RELATED_FIELDS
+        assert {"id", "title", "project", "similarity"} <= set(entry.keys())
+        leaked = _collect_keys(entry) & FORBIDDEN_KEYS
+        assert not leaked
+
+
+def test_serialize_related_rounds_similarity_to_three_decimals():
+    rows = [
+        {"id": "a", "title": "t", "topic_key": "k", "project": "p", "similarity": 0.8},
+        {
+            "id": "b",
+            "title": "t",
+            "topic_key": "k",
+            "project": "p",
+            "similarity": 0.8123456789,
+        },
+        {
+            "id": "c",
+            "title": "t",
+            "topic_key": "k",
+            "project": "p",
+            "similarity": 0.6666666666,
+        },
+    ]
+    assert [e["similarity"] for e in serialize_related(rows)] == [0.8, 0.812, 0.667]
+
+
+def test_serialize_related_omits_topic_key_when_null():
+    rows = [
+        {"id": "a", "title": "t", "topic_key": None, "project": "p", "similarity": 0.8},
+        {"id": "b", "title": "t", "topic_key": "k", "project": "p", "similarity": 0.8},
+    ]
+    entries = serialize_related(rows)
+    assert "topic_key" not in entries[0]
+    assert entries[1]["topic_key"] == "k"
 
 
 def test_serialize_observation_hides_superseded_by_when_null():

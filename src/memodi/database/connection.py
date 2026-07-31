@@ -31,10 +31,12 @@ def get_connection() -> psycopg.Connection:
 
 
 def rollback() -> None:
-    """Best-effort rollback of the shared connection.
+    """Best-effort end of the shared connection's open transaction.
 
     Callers that swallow a database error use this so the next statement
-    does not run inside an aborted transaction.
+    does not run inside an aborted transaction; callers that finish a
+    read-only lookup use it so the connection is not handed back idle in
+    transaction, which the server kills after 30s.
     """
     with contextlib.suppress(Exception):
         if _conn is not None and not _conn.closed:

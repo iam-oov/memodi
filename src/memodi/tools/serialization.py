@@ -40,6 +40,14 @@ _OBSERVATION_READ_FIELDS = {
     "supersedes",
 }
 
+_RELATED_FIELDS = {
+    "id",
+    "title",
+    "topic_key",
+    "project",
+    "similarity",
+}
+
 _SESSION_SUMMARY_FIELDS = {
     "id",
     "started_at",
@@ -86,6 +94,15 @@ def serialize_observation(obs: dict) -> dict:
 
 def serialize_observations(observations: list[dict]) -> list[dict]:
     return [serialize_observation(obs) for obs in observations]
+
+
+def serialize_related(observations: list[dict]) -> list[dict]:
+    slim = [_allow(obs, _RELATED_FIELDS) for obs in observations]
+    for entry in slim:
+        entry["similarity"] = round(entry["similarity"], 3)
+        if not entry.get("topic_key"):
+            entry.pop("topic_key", None)
+    return slim
 
 
 def serialize_session_summary(session: dict) -> dict:

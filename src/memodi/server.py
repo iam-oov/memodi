@@ -148,6 +148,15 @@ def memodi_save(
     already_superseded, failed) so you can tell whether retrying
     would help — 'self' means a topic_key upsert or duplicate
     merge already corrected that same row, so do NOT retry.
+
+    The response may carry a `related` list — up to 3 existing
+    observations from anywhere in the workspace very similar to
+    this one (id, title, topic_key, project, similarity, never
+    content); absence means nothing surfaced or the lookup was
+    unavailable. Read an entry with memodi_get_observation before
+    correcting it, and reuse its topic_key only if its project is
+    yours — upsert is project-scoped, so a reused key forks the
+    knowledge instead of correcting it.
     """
     caller = _caller(ctx)
     if isinstance(caller, str):

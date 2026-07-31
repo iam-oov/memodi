@@ -2,6 +2,7 @@ import json
 import uuid
 
 import pytest
+from psycopg.pq import TransactionStatus
 
 from memodi.database import auth_repository, repository
 from memodi.database.connection import ensure_schema, get_connection
@@ -1610,6 +1611,568 @@ def test_get_observation_malformed_id_returns_clean_error(
     )
     assert payload["error"] == "invalid observation id"
     _assert_no_db_internals(payload)
+
+
+def test_save_returns_related_for_similar_existing_observation(
+    registered_workspace, project_name
+):
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    first_id = json.loads(
+        save(
+            **common,
+            title="Deploy race incident",
+            content=(
+                "The deploy pipeline fails when two GitHub Actions runs race "
+                "for the same git ref lock"
+            ),
+            type="bugfix",
+        )
+    )["id"]
+
+    ack = json.loads(
+        save(
+            **common,
+            title="Deploy race incident, reworded",
+            content=(
+                "Concurrent deploys can race for the git ref lock causing "
+                "pipeline failures"
+            ),
+            type="bugfix",
+        )
+    )
+
+    assert "related" in ack
+    match = next((r for r in ack["related"] if r["id"] == first_id), None)
+    assert match is not None
+    assert match["title"] == "Deploy race incident"
+    assert match["similarity"] >= repository.MIN_RELATED_SIMILARITY
+
+
+def test_save_unrelated_content_returns_no_related_key(
+    registered_workspace, project_name
+):
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    save(
+        **common,
+        title="Deploy race incident",
+        content=(
+            "The deploy pipeline fails when two GitHub Actions runs race "
+            "for the same git ref lock"
+        ),
+        type="bugfix",
+    )
+
+    ack = json.loads(
+        save(
+            **common,
+            title="Banana nutrition fact",
+            content="Bananas are a good source of potassium and are yellow when ripe",
+            type="discovery",
+        )
+    )
+
+    assert "related" not in ack
+
+
+def test_save_upsert_by_topic_key_excludes_itself_from_related(
+    registered_workspace, project_name
+):
+    """A topic_key upsert returns the SAME row it corrected. Without
+    exclude_id, that row would match its own just-written embedding
+    (similarity ~1.0) and list itself as related."""
+    topic = "test/related-upsert-self-exclusion"
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    save(
+        **common,
+        title="Upsert topic v1",
+        content="First version of a note that will be upserted in place",
+        type="discovery",
+        topic_key=topic,
+    )
+
+    ack = json.loads(
+        save(
+            **common,
+            title="Upsert topic v2",
+            content="Second version of the same note, upserted in place",
+            type="discovery",
+            topic_key=topic,
+        )
+    )
+
+    assert "related" not in ack
+
+
+def test_save_related_excludes_superseded_observations(
+    registered_workspace, project_name
+):
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    old_id = json.loads(
+        save(
+            **common,
+            title="Old deploy race note",
+            content=(
+                "The deploy pipeline fails when two GitHub Actions runs race "
+                "for the same git ref lock"
+            ),
+            type="bugfix",
+        )
+    )["id"]
+    save(
+        **common,
+        title="Superseding deploy race note",
+        content=(
+            "Deploy failure: concurrent GitHub Actions runs race for the "
+            "same git ref lock"
+        ),
+        type="bugfix",
+        supersedes=old_id,
+    )
+
+    ack = json.loads(
+        save(
+            **common,
+            title="Third deploy race note",
+            content=(
+                "We saw the deploy pipeline fail because two runs raced for "
+                "the same git ref lock"
+            ),
+            type="bugfix",
+        )
+    )
+
+    related_ids = [r["id"] for r in ack.get("related", [])]
+    assert old_id not in related_ids
+
+
+def test_save_related_excludes_deleted_observations(
+    registered_workspace, project_name
+):
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    doomed_id = json.loads(
+        save(
+            **common,
+            title="Doomed deploy race note",
+            content=(
+                "The deploy pipeline fails when two GitHub Actions runs race "
+                "for the same git ref lock"
+            ),
+            type="bugfix",
+        )
+    )["id"]
+    delete(**common, observation_id=doomed_id)
+
+    ack = json.loads(
+        save(
+            **common,
+            title="Fresh deploy race note",
+            content=(
+                "Concurrent deploys can race for the git ref lock causing "
+                "pipeline failures"
+            ),
+            type="bugfix",
+        )
+    )
+
+    related_ids = [r["id"] for r in ack.get("related", [])]
+    assert doomed_id not in related_ids
+
+
+def test_save_related_capped_at_three_ordered_by_similarity_descending(
+    registered_workspace, project_name
+):
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    cluster = [
+        (
+            "The deploy pipeline fails when two GitHub Actions runs race "
+            "for the same git ref lock"
+        ),
+        "Deploy failure: concurrent GitHub Actions runs race for the same git ref lock",
+        (
+            "We saw the deploy pipeline fail because two runs raced for "
+            "the same git ref lock"
+        ),
+        "Two simultaneous deploy runs racing for the git ref lock breaks the pipeline",
+    ]
+    for i, content in enumerate(cluster):
+        save(**common, title=f"Deploy race note {i}", content=content, type="bugfix")
+
+    ack = json.loads(
+        save(
+            **common,
+            title="Deploy race note query",
+            content=(
+                "Deploy pipeline breaks when concurrent runs race for the "
+                "same git ref lock file"
+            ),
+            type="bugfix",
+        )
+    )
+
+    assert len(ack["related"]) == 3
+    similarities = [r["similarity"] for r in ack["related"]]
+    assert similarities == sorted(similarities, reverse=True)
+
+
+def test_save_related_crosses_projects_within_workspace_labeled_with_project_name(
+    registered_workspace,
+):
+    proj_a = f"test-proj-a-{uuid.uuid4()}"
+    proj_b = f"test-proj-b-{uuid.uuid4()}"
+    path_a = f"{registered_workspace['root']}/{proj_a}"
+    path_b = f"{registered_workspace['root']}/{proj_b}"
+
+    save(
+        path=path_a,
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+        title="Deploy race note in project A",
+        content=(
+            "The deploy pipeline fails when two GitHub Actions runs race "
+            "for the same git ref lock"
+        ),
+        type="bugfix",
+    )
+
+    ack = json.loads(
+        save(
+            path=path_b,
+            user_id=registered_workspace["user_id"],
+            machine=registered_workspace["machine"],
+            title="Deploy race note in project B",
+            content=(
+                "Concurrent deploys can race for the git ref lock causing "
+                "pipeline failures"
+            ),
+            type="bugfix",
+        )
+    )
+
+    assert "related" in ack
+    match = next(
+        (r for r in ack["related"] if r["title"] == "Deploy race note in project A"),
+        None,
+    )
+    assert match is not None
+    assert match["project"] == proj_a
+
+
+def test_save_related_never_crosses_users(registered_workspace, project_name):
+    """The workspace_id predicate on the related query is the only thing
+    between the save ack and cross-user disclosure: another user's
+    observation must never surface, however similar it is."""
+    email = f"test-related-owner-{uuid.uuid4()}@example.com"
+    other = auth_repository.create_user(email)
+    other_machine = f"test-machine-{uuid.uuid4()}"
+    other_root = f"/tmp/test-related-owner-{uuid.uuid4()}"
+    other_ws = repository.workspace_start(
+        other["id"], other_machine, other_root, f"test-related-owner-ws-{uuid.uuid4()}"
+    )
+
+    try:
+        secret_id = json.loads(
+            save(
+                path=f"{other_root}/test-proj-{uuid.uuid4()}",
+                user_id=other["id"],
+                machine=other_machine,
+                title="Deploy race incident",
+                content=(
+                    "The deploy pipeline fails when two GitHub Actions runs "
+                    "race for the same git ref lock"
+                ),
+                type="bugfix",
+            )
+        )["id"]
+
+        ack = json.loads(
+            save(
+                path=_path(registered_workspace, project_name),
+                user_id=registered_workspace["user_id"],
+                machine=registered_workspace["machine"],
+                title="Deploy race incident, reworded",
+                content=(
+                    "Concurrent deploys can race for the git ref lock causing "
+                    "pipeline failures"
+                ),
+                type="bugfix",
+            )
+        )
+
+        assert "related" not in ack, (
+            f"related leaked outside the caller's workspace: {ack.get('related')}"
+        )
+        assert secret_id not in [r["id"] for r in ack.get("related", [])]
+    finally:
+        _cleanup_workspace(other_ws)
+        cleanup_rows("DELETE FROM users WHERE id = %s", (other["id"],))
+
+
+def test_save_related_excludes_the_row_this_save_just_superseded(
+    registered_workspace, project_name
+):
+    """The supersede has to land BEFORE the related lookup runs, or the row
+    this save just replaced comes back as related — advising the agent to
+    supersede it a second time."""
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    sibling_id = json.loads(
+        save(
+            **common,
+            title="Sibling deploy race note",
+            content=(
+                "Deploy failure: concurrent GitHub Actions runs race for the "
+                "same git ref lock"
+            ),
+            type="bugfix",
+        )
+    )["id"]
+    old_id = json.loads(
+        save(
+            **common,
+            title="Old deploy race note",
+            content=(
+                "We saw the deploy pipeline fail because two runs raced for "
+                "the same git ref lock"
+            ),
+            type="bugfix",
+        )
+    )["id"]
+
+    ack = json.loads(
+        save(
+            **common,
+            title="Superseding deploy race note",
+            content=(
+                "Deploy pipeline breaks when concurrent runs race for the "
+                "same git ref lock file"
+            ),
+            type="bugfix",
+            supersedes=old_id,
+        )
+    )
+
+    assert ack["supersedes_applied"] is True
+    related_ids = [r["id"] for r in ack.get("related", [])]
+    assert old_id not in related_ids, (
+        "the row this save just superseded came back as related"
+    )
+    assert sibling_id in related_ids, (
+        "a genuine sibling must still surface — otherwise this test proves nothing"
+    )
+
+
+def test_save_related_never_surfaces_a_nan_similarity(
+    registered_workspace, project_name
+):
+    """A zero-norm embedding makes cosine distance NaN, and Postgres sorts
+    NaN above every float — a similarity threshold would let it through and
+    json.dumps would emit a bare NaN, which is not valid JSON."""
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    zero_id = json.loads(
+        save(
+            **common,
+            title="Zero norm embedding row",
+            content="This row gets a zero vector planted under it",
+            type="discovery",
+        )
+    )["id"]
+    conn = get_connection()
+    conn.execute(
+        "UPDATE observations SET embedding = %s WHERE id = %s",
+        (str([0.0] * 384), zero_id),
+    )
+    conn.commit()
+
+    raw = save(
+        **common,
+        title="Deploy race incident",
+        content=(
+            "The deploy pipeline fails when two GitHub Actions runs race "
+            "for the same git ref lock"
+        ),
+        type="bugfix",
+    )
+
+    assert "NaN" not in raw, f"ack carries a bare NaN, which is invalid JSON: {raw}"
+    ack = json.loads(raw)
+    assert zero_id not in [r["id"] for r in ack.get("related", [])]
+
+
+def test_save_related_row_shape_failure_never_breaks_save(
+    registered_workspace, project_name, monkeypatch
+):
+    """Serializing the rows is part of the guarded work: a row the
+    repository hands back in an unexpected shape must not error the ack of
+    an already committed save."""
+    monkeypatch.setattr(
+        repository,
+        "find_related_observations",
+        lambda **kwargs: [
+            {
+                "id": str(uuid.uuid4()),
+                "title": "Row with no similarity",
+                "topic_key": None,
+                "project": "somewhere",
+                "similarity": None,
+            }
+        ],
+    )
+
+    ack = json.loads(
+        save(
+            path=_path(registered_workspace, project_name),
+            user_id=registered_workspace["user_id"],
+            machine=registered_workspace["machine"],
+            title="Save that survives a bad related row",
+            content="The ack drops related rather than failing the save",
+            type="discovery",
+        )
+    )
+
+    assert "error" not in ack
+    assert "id" in ack
+    assert "related" not in ack
+
+
+def test_save_related_db_failure_leaves_the_connection_usable(
+    registered_workspace, project_name, monkeypatch
+):
+    """A real database error in the related lookup aborts the transaction.
+    The save must still ack, the shared connection must survive without
+    being torn down and reconnected, and the next save must still work AND
+    still return related — proving the aborted transaction was cleared."""
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    first_id = json.loads(
+        save(
+            **common,
+            title="Deploy race incident",
+            content=(
+                "The deploy pipeline fails when two GitHub Actions runs race "
+                "for the same git ref lock"
+            ),
+            type="bugfix",
+        )
+    )["id"]
+
+    def broken_query(**kwargs):
+        return [
+            dict(r)
+            for r in get_connection()
+            .execute("SELECT no_such_column FROM observations LIMIT 1")
+            .fetchall()
+        ]
+
+    monkeypatch.setattr(repository, "find_related_observations", broken_query)
+    conn_before = get_connection()
+
+    ack = json.loads(
+        save(
+            **common,
+            title="Deploy race incident, reworded",
+            content=(
+                "Concurrent deploys can race for the git ref lock causing "
+                "pipeline failures"
+            ),
+            type="bugfix",
+        )
+    )
+    assert "error" not in ack
+    assert "id" in ack
+    assert "related" not in ack
+    assert get_connection() is conn_before, (
+        "the aborted transaction was left behind, so the connection layer had "
+        "to tear the connection down and reconnect"
+    )
+
+    monkeypatch.undo()
+
+    recovered = json.loads(
+        save(
+            **common,
+            title="Deploy race incident, third wording",
+            content=(
+                "Deploy pipeline breaks when concurrent runs race for the "
+                "same git ref lock file"
+            ),
+            type="bugfix",
+        )
+    )
+    assert "error" not in recovered
+    assert first_id in [r["id"] for r in recovered.get("related", [])]
+
+
+def test_save_leaves_no_open_transaction(registered_workspace, project_name):
+    """The related lookup opens a read transaction on every save. Left open,
+    it arms the 30s idle-in-transaction kill on the shared connection.
+
+    The status is read off a held reference: get_connection() runs its own
+    liveness SELECT, which would open a transaction and mask the answer.
+    """
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    conn = get_connection()
+    save(
+        **common,
+        title="Deploy race incident",
+        content=(
+            "The deploy pipeline fails when two GitHub Actions runs race "
+            "for the same git ref lock"
+        ),
+        type="bugfix",
+    )
+    assert conn.info.transaction_status == TransactionStatus.IDLE
+
+    ack = json.loads(
+        save(
+            **common,
+            title="Deploy race incident, reworded",
+            content=(
+                "Concurrent deploys can race for the git ref lock causing "
+                "pipeline failures"
+            ),
+            type="bugfix",
+        )
+    )
+    assert "related" in ack, "the related-present path is the one under test"
+    assert conn.info.transaction_status == TransactionStatus.IDLE
 
 
 def test_occurred_at_persisted_on_upsert(registered_workspace, project_name):

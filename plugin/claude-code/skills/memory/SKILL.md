@@ -239,6 +239,32 @@ of ids it replaced, most-recent first, absent when it replaced nothing.
 Undoing a supersede: delete the replacement. Deleting an observation clears
 every `superseded_by` pointing at it, so whatever it replaced surfaces again.
 
+### When save returns `related`
+
+`memodi_save`'s response may include a `related` list — up to 3 existing
+observations from anywhere in the workspace that are very similar to what you
+just saved (id, title, topic_key, project, similarity). No `related` key means
+nothing surfaced, or the lookup was unavailable — never read its absence as
+"memodi knows nothing about this". Entries never carry content: call
+`memodi_get_observation` on an id for the full text.
+
+**Similarity is a hint, not a verdict.** NEVER correct an entry on the strength
+of its score. `memodi_get_observation` it first and decide from what it actually
+says — reading is the decision, the score only tells you where to look.
+
+Once you have read it and it really does cover the same ground, pick by the
+entry's `project`:
+
+- **Its `project` is yours** — correct it in place: re-save with its topic_key
+  (upsert) if you know it, otherwise `supersedes=<related id>`.
+- **Its `project` is a different one** — do NOT reuse its topic_key. Upsert is
+  scoped to a single project, so the same key under your project creates a
+  SECOND observation and forks the knowledge instead of correcting it. Use
+  `supersedes=<related id>`, which is workspace-scoped and does reach across
+  projects, when you are genuinely replacing it. Otherwise leave it alone and
+  name its id in your own content.
+- **Not the same ground after all** — it is just useful context. No action.
+
 ## WHEN TO SEARCH MEMORY
 
 When the user asks to recall something — any variation of "remember", "recall", "what did we do", "acordate", "que hicimos", or references to past work:

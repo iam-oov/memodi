@@ -911,6 +911,72 @@ def search_similar(
     return [dict(r) for r in rows]
 
 
+MIN_RELATED_SIMILARITY = 0.65
+
+RELATED_CANDIDATES = 40
+
+
+def find_related_observations(
+    workspace_id: str,
+    embedding: list[float],
+    exclude_id: str,
+    limit: int = 3,
+    min_similarity: float = MIN_RELATED_SIMILARITY,
+) -> list[dict]:
+    """Most similar existing observations across the whole workspace.
+
+    Mirrors search_similar's workspace-wide join, labeled with the owning
+    project like get_recent_observations. Takes an already-computed
+    embedding — never re-embeds. Excludes the observation just saved
+    (exclude_id), deleted and superseded rows, and anything below
+    min_similarity, so only entries worth surfacing come back.
+
+    Best-effort by design: the bar is applied to the nearest
+    RELATED_CANDIDATES rows rather than to the whole table, so an
+    approximate index scan can miss a match a full scan would have found.
+    Cheap surfacing on every save beats exhaustive recall here —
+    search_similar is the exhaustive path.
+    """
+    conn = get_connection()
+    query_embedding = str(embedding)
+    # Nearest-K-then-filter: the bar sits outside the vector-ordered
+    # subquery so ORDER BY/LIMIT can drive idx_obs_embedding, K over-fetches
+    # because an approximate scan under row filters can under-return, and
+    # the bar is a distance ceiling because Postgres sorts NaN above every
+    # float — a zero-norm embedding must fail the bar, not pass it.
+    rows = conn.execute(
+        """
+        SELECT id, title, topic_key, project, 1 - distance AS similarity
+        FROM (
+            SELECT o.id, o.title, o.topic_key, p.name AS project,
+                   o.embedding <=> %s::vector AS distance
+            FROM observations o
+            JOIN projects p ON p.id = o.project_id
+            WHERE p.workspace_id = %s
+              AND o.id != %s
+              AND o.deleted_at IS NULL
+              AND o.superseded_by IS NULL
+              AND o.embedding IS NOT NULL
+            ORDER BY o.embedding <=> %s::vector
+            LIMIT %s
+        ) candidates
+        WHERE distance <= %s
+        ORDER BY similarity DESC
+        LIMIT %s
+        """,
+        (
+            query_embedding,
+            workspace_id,
+            exclude_id,
+            query_embedding,
+            RELATED_CANDIDATES,
+            1 - min_similarity,
+            limit,
+        ),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def search_hybrid(
     project_id: str,
     query: str,
