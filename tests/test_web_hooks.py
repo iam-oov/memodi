@@ -200,6 +200,54 @@ def test_session_close_two_windows_only_matching_one_closes(
     assert active["client_session_id"] == id_a
 
 
+def test_session_close_two_concurrent_sessions_only_closes_its_own(
+    client, registered_workspace
+):
+    """Two windows in the same folder: starting the second must not close
+    the first (the root regression), and closing one must not touch the
+    other — both stay legally active until each closes itself."""
+    project_name = f"test-hooks-{uuid.uuid4()}"
+    path = _path(registered_workspace, project_name)
+    id_a = str(uuid.uuid4())
+    id_b = str(uuid.uuid4())
+    headers = _headers(registered_workspace)
+
+    client.post(
+        "/hooks/session-start",
+        json={"path": path, "client_session_id": id_a},
+        headers=headers,
+    )
+    client.post(
+        "/hooks/session-start",
+        json={"path": path, "client_session_id": id_b},
+        headers=headers,
+    )
+
+    proj = _project(registered_workspace, project_name)
+    conn = get_connection()
+    active_count = conn.execute(
+        "SELECT COUNT(*) AS c FROM sessions WHERE project_id = %s AND ended_at IS NULL",
+        (proj["id"],),
+    ).fetchone()["c"]
+    assert active_count == 2
+
+    close = client.post(
+        "/hooks/session-close",
+        json={"path": path, "client_session_id": id_a},
+        headers=headers,
+    )
+    assert close.json()["closed"] is True
+
+    row_a = conn.execute(
+        "SELECT ended_at FROM sessions WHERE client_session_id = %s", (id_a,)
+    ).fetchone()
+    row_b = conn.execute(
+        "SELECT ended_at FROM sessions WHERE client_session_id = %s", (id_b,)
+    ).fetchone()
+    assert row_a["ended_at"] is not None
+    assert row_b["ended_at"] is None
+
+
 def test_session_close_unregistered_path_returns_not_started(
     client, registered_workspace
 ):

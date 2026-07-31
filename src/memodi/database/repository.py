@@ -254,19 +254,27 @@ def create_session(project_id: str, client_session_id: str | None = None) -> dic
     return dict(row)
 
 
-def end_session(session_id: str, summary: str | None = None) -> dict:
+def end_session(session_id: str, summary: str | None = None) -> dict | None:
+    """Close a session that is still open, returning the closed row.
+
+    Returns None when the row is already closed (or absent): without the
+    `ended_at IS NULL` guard this is a lost update — a second close
+    replaces a summary that is already there. Concurrent active sessions
+    per project make that window reachable, so the guard is in the SQL
+    rather than in the callers.
+    """
     conn = get_connection()
     row = conn.execute(
         """
         UPDATE sessions
         SET ended_at = now(), summary = %s
-        WHERE id = %s
+        WHERE id = %s AND ended_at IS NULL
         RETURNING *
         """,
         (summary, session_id),
     ).fetchone()
     conn.commit()
-    return dict(row)
+    return dict(row) if row else None
 
 
 def close_session_by_client_id(
@@ -306,6 +314,33 @@ def get_active_session(project_id: str) -> dict | None:
         LIMIT 1
         """,
         (project_id,),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def get_active_session_by_client_id(
+    project_id: str, client_session_id: str | None
+) -> dict | None:
+    """Get the most recent unclosed session for a project tagged with this
+    exact client_session_id.
+
+    Uses IS NOT DISTINCT FROM rather than =, so NULL matches NULL: an
+    untagged caller (client_session_id=None) still finds its own previous
+    untagged row, while two differently-tagged callers never match each
+    other's session. This is what makes concurrent active sessions per
+    project legal — each client_session_id owns its own row.
+    """
+    conn = get_connection()
+    row = conn.execute(
+        """
+        SELECT * FROM sessions
+        WHERE project_id = %s
+          AND client_session_id IS NOT DISTINCT FROM %s
+          AND ended_at IS NULL
+        ORDER BY started_at DESC
+        LIMIT 1
+        """,
+        (project_id, client_session_id),
     ).fetchone()
     return dict(row) if row else None
 

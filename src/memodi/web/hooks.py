@@ -24,7 +24,9 @@ MAX_SESSION_BODY = 4 * 1024
 MAX_CAPTURE_BODY = 64 * 1024
 
 MAX_PATH = 1024
-MAX_CLIENT_SESSION_ID = 256
+# One limit for the whole column: tools/session.py validates it too, for the
+# MCP tool that writes the same field without passing through this boundary.
+MAX_CLIENT_SESSION_ID = session.MAX_CLIENT_SESSION_ID
 MAX_TITLE = 512
 MAX_CONTENT = 48 * 1024
 MAX_TOPIC_KEY = 512

@@ -39,7 +39,7 @@ Omit a section only if it is genuinely empty (e.g. no remaining steps).
 
 ## 3. Close the session
 
-Load `memodi_session_end` (`ToolSearch("select:memodi_session_end")`) and call it with `path` (the cwd above) and the `summary` built in step 2.
+Load `memodi_session_end` (`ToolSearch("select:memodi_session_end")`) and call it with `path` (the cwd above) and the `summary` built in step 2. If the SessionStart protocol earlier in this conversation gave you a `client_session_id` to pass on close, pass it here too — it targets this window's own session instead of whichever session is newest. If it did not (or you cannot tell), omit it.
 
 ## 4. Confirm
 

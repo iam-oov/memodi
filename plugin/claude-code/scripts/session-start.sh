@@ -44,6 +44,21 @@ EOF
   exit 0
 fi
 
+# --- Session-close arguments ---
+# Claude Code does not always put session_id on stdin. Name client_session_id
+# ONLY when there is a real one: telling the model to pass "" would make it
+# pass the untagged identity, which is not this window's session.
+if [ -n "$SESSION_ID" ]; then
+  CLOSE_ARGS="path: \"${CWD}\", client_session_id: \"${SESSION_ID}\", and a
+structured summary (Goal / Accomplished / Next Steps). Passing
+client_session_id targets THIS window's own session — concurrent windows in
+the same folder each have their own, and leaving it out risks closing
+another window's."
+else
+  CLOSE_ARGS="path: \"${CWD}\" and a structured summary (Goal / Accomplished
+/ Next Steps)."
+fi
+
 # --- Inject context-loading protocol ---
 cat <<EOF
 ## Memodi Memory — Session Start (resolve silently)
@@ -76,9 +91,8 @@ fix, discovery, convention, or user confirmation, call memodi_save
 skip saves silently.
 
 SESSION CLOSE (only if the workspace resolved): before the conversation
-ends, call memodi_session_end with path: "${CWD}" and a structured summary
-(Goal / Accomplished / Next Steps). A SessionEnd hook also runs on exit as
-a hygiene net, but it can NEVER write a summary — calling
+ends, call memodi_session_end with ${CLOSE_ARGS} A SessionEnd hook also
+runs on exit as a hygiene net, but it can NEVER write a summary — calling
 memodi_session_end yourself (or the user running /memodi:end) is the only
 way the next session gets a real recap instead of just a truthfully closed
 row.
@@ -87,7 +101,10 @@ EOF
 # --- Open the session over plain HTTP (opt-in inert: not_started/not_authenticated are no-ops) ---
 PAYLOAD=$(CWD="$CWD" SESSION_ID="$SESSION_ID" python3 -c "
 import json, os
-print(json.dumps({'path': os.environ['CWD'], 'client_session_id': os.environ['SESSION_ID']}))
+payload = {'path': os.environ['CWD']}
+if os.environ.get('SESSION_ID'):
+    payload['client_session_id'] = os.environ['SESSION_ID']
+print(json.dumps(payload))
 " 2>/dev/null)
 curl -s -o /dev/null --max-time 5 -X POST $AUTH_HEADERS \
   -H "Content-Type: application/json" \

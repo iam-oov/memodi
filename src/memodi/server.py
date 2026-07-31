@@ -123,6 +123,15 @@ def memodi_save(
     workspace registered via memodi_workspace_start. Use topic_key to
     update evolving topics (same key = upsert).
 
+    Session attribution is best-effort: the observation attaches to
+    whichever session for this project is currently newest and active.
+    Concurrent active sessions per project are legal (e.g. two Claude Code
+    windows in the same folder, each tagged with its own client_session_id)
+    — a save from one window can attach to the other window's session if
+    that one started more recently. This never affects search, context, or
+    the saved content itself; only the session_id metadata (currently
+    write-only — no query reads it) can point at the wrong window.
+
     Pass occurred_at (ISO 8601, e.g. '2025-08-12T14:00:00Z') ONLY
     when importing historical content that happened in the past —
     e.g. migrating notes from legacy .md files. Ordering by
@@ -646,13 +655,18 @@ def memodi_session_start(ctx: Context, path: str, project: str | None = None) ->
     """Begin tracking a work session — all subsequent
     memodi_save calls auto-attach to this session.
 
-    Closes any previous active session.
+    Closes only the caller's own previous session for this project (an
+    untagged one, since this tool never passes client_session_id).
+    Concurrent active sessions per project are legal: a hook-opened,
+    tagged session for the same project is untouched by this call.
 
     Under the Claude Code plugin, do NOT call this: its SessionStart hook
     already opens the session over plain HTTP, tagged with the Claude Code
-    session id so the SessionEnd hook can close that exact row. Calling this
-    would replace that tagged session with an untagged one no hook can ever
-    close. This tool is for MCP clients that ship no such hook.
+    session id so the SessionEnd hook can close that exact row. Calling
+    this tool instead opens an untagged session that no hook can ever
+    close by id — a harmless but useless extra row (a later memodi_save
+    would then attach to whichever of the two sessions is newest). This
+    tool is for MCP clients that ship no such hook.
     """
     caller = _caller(ctx)
     if isinstance(caller, str):
@@ -662,16 +676,31 @@ def memodi_session_start(ctx: Context, path: str, project: str | None = None) ->
 
 @mcp.tool()
 def memodi_session_end(
-    ctx: Context, path: str, summary: str, project: str | None = None
+    ctx: Context,
+    path: str,
+    summary: str,
+    project: str | None = None,
+    client_session_id: str | None = None,
 ) -> str:
-    """End the current session with a structured summary
+    """End a session with a structured summary
     (Goal / Accomplished / Next Steps).
 
     Call before the conversation ends so the next session can
     pick up where this one left off. Never fails for lack of a
-    session: if no session is active, one is created and closed
+    session: if no matching session is active, one is created and closed
     on the spot (auto_started: true in the response) so the
     summary is always persisted.
+
+    Pass client_session_id when the SessionStart protocol provided one —
+    it targets THIS window's own session instead of whichever session for
+    the project happens to be newest, which matters now that concurrent
+    sessions per project are legal (multiple Claude Code windows in the
+    same folder). OMIT it entirely when you have no id: an empty string is
+    not "no id", it means the untagged session, and a value the server
+    cannot use (over 256 characters, or carrying NUL) is ignored with
+    client_session_id_ignored on the response. Omitted, the behavior is
+    unchanged: the newest active session for the project, or an
+    auto-started one if none is active. A bad id never costs the summary.
 
     summary is required: an empty or whitespace-only one is
     rejected with a validation error, because it would still
@@ -682,7 +711,7 @@ def memodi_session_end(
     if isinstance(caller, str):
         return caller
     return session.session_end(
-        path, caller["user_id"], caller["machine"], summary, project
+        path, caller["user_id"], caller["machine"], summary, project, client_session_id
     )
 
 

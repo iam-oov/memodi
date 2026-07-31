@@ -3,10 +3,16 @@
 #
 # After context compaction, re-injects memory recovery protocol.
 # Claude has lost all prior context — this is the lifeline.
+#
+# Compaction is the event that drops the SessionStart protocol, so this hook
+# must re-inject the session-close instruction too, with this window's own
+# client_session_id: without it the model closes whichever session is
+# newest, which may be another window's still-open row.
 
 # --- Parse stdin JSON ---
 INPUT=$(cat)
 CWD=$(printf '%s' "$INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('cwd',''))" 2>/dev/null)
+SESSION_ID=$(printf '%s' "$INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('session_id',''))" 2>/dev/null)
 CWD="${CWD:-$PWD}"
 
 # --- Server URL (env var or production default) ---
@@ -30,6 +36,18 @@ EOF
   exit 0
 fi
 
+# --- Session-close arguments (same conditionality as session-start.sh) ---
+if [ -n "$SESSION_ID" ]; then
+  CLOSE_ARGS="path: \"${CWD}\", client_session_id: \"${SESSION_ID}\", and a
+structured summary (Goal / Accomplished / Next Steps). Passing
+client_session_id targets THIS window's own session — concurrent windows in
+the same folder each have their own, and leaving it out risks closing
+another window's."
+else
+  CLOSE_ARGS="path: \"${CWD}\" and a structured summary (Goal / Accomplished
+/ Next Steps)."
+fi
+
 # --- Inject recovery protocol ---
 cat <<EOF
 ## Memodi — POST-COMPACTION RECOVERY
@@ -51,6 +69,11 @@ Follow these steps IMMEDIATELY and IN ORDER:
 3. Only THEN continue with the user's task
 
 PROACTIVE SAVE REMINDER: After every decision, bug fix, discovery, convention, or user confirmation — call memodi_save (path: "${CWD}") immediately. Do NOT wait to be asked.
+
+SESSION CLOSE REMINDER (only if the workspace resolved): before the
+conversation ends, call memodi_session_end with ${CLOSE_ARGS} The SessionEnd
+hook that runs on exit can NEVER write a summary, so this call (or the user
+running /memodi:end) is the only way the next session gets a real recap.
 EOF
 
 exit 0

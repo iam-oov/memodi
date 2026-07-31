@@ -283,13 +283,16 @@ Sessions group observations within a work period. Observations are auto-attached
 
 The plugin's `SessionStart` hook opens the memodi session over plain HTTP, tagged with
 this Claude Code session id, so the `SessionEnd` hook can later close that exact row.
-Do NOT call `memodi_session_start`: it would close the hook's tagged session and open an
-untagged one that no hook can ever match, leaking the session open forever.
+Do NOT call `memodi_session_start`: concurrent active sessions per project are legal
+(two windows in the same folder each own one), so it does not replace the hook's tagged
+session — it adds a second, untagged one that no hook can ever close by id. Harmless but
+useless: a later `memodi_save` then attaches to whichever of the two is newest.
 
 ### Ending a session
 Before the user ends the conversation or says "done"/"listo"/"that's it":
 1. `ToolSearch("select:memodi_session_end")`
-2. Call `memodi_session_end` with `path` and a structured summary:
+2. Call `memodi_session_end` with `path`, the `client_session_id` the SessionStart (or
+   post-compaction) protocol gave you — see below — and a structured summary:
 
 ```
 ## Goal
@@ -303,6 +306,16 @@ Before the user ends the conversation or says "done"/"listo"/"that's it":
 ```
 
 `memodi_context` returns the last session summary — the next session starts with context from the previous one.
+
+#### `client_session_id` — which window's session you are closing
+
+Two Claude Code windows open in the same folder each have their own active session, so
+`memodi_session_end` needs to know which one is yours. The hook protocol (SessionStart,
+or the post-compaction one) hands you that id: pass it as `client_session_id` and the
+close targets your own row. If no protocol gave you one, or you cannot tell, leave the
+argument out entirely — memodi then falls back to the project's newest active session.
+An empty string is not the same as leaving it out: it means "the untagged session", so
+never substitute one for the other.
 
 The user can also run `/memodi:end` directly — the explicit, reliable way to close a
 session with this same structured summary; prefer it when the user asks to wrap up.

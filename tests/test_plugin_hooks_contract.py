@@ -8,26 +8,50 @@ memodi_session_start re-opens an untagged session and the hook's close can
 never match it again — the whole feature goes inert.
 """
 
+import http.server
+import json
+import os
+import subprocess
+import threading
 from pathlib import Path
+from types import SimpleNamespace
+from typing import ClassVar
+
+import pytest
 
 PLUGIN = Path(__file__).resolve().parent.parent / "plugin" / "claude-code"
 SKILL = PLUGIN / "skills" / "memory" / "SKILL.md"
 START_COMMAND = PLUGIN / "commands" / "start.md"
+END_COMMAND = PLUGIN / "commands" / "end.md"
 SESSION_START_HOOK = PLUGIN / "scripts" / "session-start.sh"
+POST_COMPACTION_HOOK = PLUGIN / "scripts" / "post-compaction.sh"
 SUBAGENT_STOP_HOOK = PLUGIN / "scripts" / "subagent-stop.sh"
 HOOKS_JSON = PLUGIN / "hooks" / "hooks.json"
 
 _PROHIBITION_MARKERS = ("do not", "never", "not call", "no llames")
 
 
-def _lines_instructing_session_start(text: str) -> list[str]:
-    """Lines naming memodi_session_start without forbidding it."""
+def _lines_instructing(text: str, what: str) -> list[str]:
+    """Lines naming something without forbidding it."""
     return [
         line
         for line in text.splitlines()
-        if "memodi_session_start" in line
+        if what in line
         and not any(marker in line.lower() for marker in _PROHIBITION_MARKERS)
     ]
+
+
+def _lines_forbidding(text: str, what: str) -> list[str]:
+    return [
+        line
+        for line in text.splitlines()
+        if what in line
+        and any(marker in line.lower() for marker in _PROHIBITION_MARKERS)
+    ]
+
+
+def _lines_instructing_session_start(text: str) -> list[str]:
+    return _lines_instructing(text, "memodi_session_start")
 
 
 def test_skill_does_not_instruct_calling_session_start():
@@ -81,3 +105,154 @@ def test_session_start_hook_does_not_assert_the_session_is_open():
     """The POST can fail; the injected protocol must not claim it succeeded."""
     text = SESSION_START_HOOK.read_text()
     assert "already opened" not in text
+
+
+def test_end_command_instructs_passing_client_session_id_when_provided():
+    """/memodi:end step 3 must pass client_session_id when the SessionStart
+    protocol supplied one, so the close targets this window's own session
+    instead of whichever session is newest. Asserts intent, not the mere
+    presence of the word: a line telling the model NEVER to pass it also
+    contains the string."""
+    text = END_COMMAND.read_text()
+    assert _lines_instructing(text, "client_session_id") != []
+    assert _lines_forbidding(text, "client_session_id") == []
+
+
+def test_skill_instructs_passing_client_session_id_on_close():
+    """SKILL.md is what SURVIVES compaction — injected protocol text does
+    not. If the id is only taught in the injected protocol, every compacted
+    session silently falls back to closing whichever session is newest."""
+    text = SKILL.read_text()
+    assert _lines_instructing(text, "client_session_id") != []
+    assert _lines_forbidding(text, "client_session_id") == []
+
+
+def test_skill_does_not_claim_session_start_leaks_a_session_forever():
+    """A stale claim the server contradicts: an extra untagged session is a
+    harmless orphan (summary IS NULL makes it invisible to
+    get_latest_session_summary), not a leak. Documentation that lies about
+    the server teaches the model the wrong model of the system."""
+    assert "leaking the session open forever" not in SKILL.read_text()
+
+
+# --- Rendered hook output (the judges ran the scripts; so do these) ---
+
+
+class _StubHandler(http.server.BaseHTTPRequestHandler):
+    """Answers the hooks' connectivity probe and records what they POST."""
+
+    posts: ClassVar[list[dict]] = []
+
+    def do_GET(self) -> None:
+        self.send_response(200)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def do_POST(self) -> None:
+        raw = self.rfile.read(int(self.headers.get("content-length") or 0))
+        try:
+            self.posts.append(json.loads(raw))
+        except ValueError:
+            self.posts.append({"unparseable": raw.decode(errors="replace")})
+        self.send_response(200)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def log_message(self, *args: object) -> None:
+        pass
+
+
+@pytest.fixture
+def hook_server():
+    posts: list[dict] = []
+    handler = type("_Handler", (_StubHandler,), {"posts": posts})
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield SimpleNamespace(url=f"http://127.0.0.1:{server.server_port}", posts=posts)
+    server.shutdown()
+    server.server_close()
+
+
+def _run_hook(script: Path, payload: dict, url: str) -> str:
+    """Run a shipped hook script for real and return what it injects.
+
+    Rendered output is the only honest contract for these files: reading the
+    source cannot tell a quoted heredoc from an unquoted one, and with
+    <<'EOF' the model would receive the literal ${SESSION_ID} instead of an
+    id.
+    """
+    result = subprocess.run(
+        ["sh", str(script)],
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env={
+            **os.environ,
+            "MEMODI_URL": url,
+            "MEMODI_API_KEY": "test-key",
+            "MEMODI_MACHINE": "test-machine",
+        },
+    )
+    assert result.returncode == 0
+    assert "not reachable" not in result.stdout.lower()
+    return result.stdout
+
+
+def test_session_start_hook_injects_the_real_session_id(hook_server):
+    out = _run_hook(
+        SESSION_START_HOOK,
+        {"cwd": "/tmp/hook-cwd", "session_id": "sid-abc"},
+        hook_server.url,
+    )
+
+    assert "${SESSION_ID}" not in out
+    assert "${CWD}" not in out
+    assert 'client_session_id: "sid-abc"' in out
+    assert '"/tmp/hook-cwd"' in out
+
+
+def test_session_start_hook_posts_the_session_id(hook_server):
+    _run_hook(
+        SESSION_START_HOOK,
+        {"cwd": "/tmp/hook-cwd", "session_id": "sid-abc"},
+        hook_server.url,
+    )
+
+    assert hook_server.posts == [
+        {"path": "/tmp/hook-cwd", "client_session_id": "sid-abc"}
+    ]
+
+
+def test_session_start_hook_omits_client_session_id_when_there_is_none(hook_server):
+    """No session_id on stdin: the protocol must not name client_session_id
+    at all. Instructing the model to pass "" is instructing it into the bug
+    — an empty id is the untagged identity, not this window's session."""
+    out = _run_hook(SESSION_START_HOOK, {"cwd": "/tmp/hook-cwd"}, hook_server.url)
+
+    assert "client_session_id" not in out
+    assert "memodi_session_end" in out
+    assert hook_server.posts == [{"path": "/tmp/hook-cwd"}]
+
+
+def test_post_compaction_hook_reinjects_the_session_close_with_the_id(hook_server):
+    """Compaction is exactly the event that drops the injected protocol, so
+    this hook must restore the session-close instruction WITH the id — or
+    the compacted window closes whichever session is newest, which is
+    another window's still-open row."""
+    out = _run_hook(
+        POST_COMPACTION_HOOK,
+        {"cwd": "/tmp/hook-cwd", "session_id": "sid-abc"},
+        hook_server.url,
+    )
+
+    assert "memodi_session_end" in out
+    assert 'client_session_id: "sid-abc"' in out
+    assert "${SESSION_ID}" not in out
+
+
+def test_post_compaction_hook_omits_client_session_id_when_there_is_none(hook_server):
+    out = _run_hook(POST_COMPACTION_HOOK, {"cwd": "/tmp/hook-cwd"}, hook_server.url)
+
+    assert "memodi_session_end" in out
+    assert "client_session_id" not in out
