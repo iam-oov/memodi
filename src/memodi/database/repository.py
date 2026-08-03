@@ -1085,6 +1085,23 @@ def get_observations_without_embedding(
     return [dict(r) for r in rows]
 
 
+def get_observations_with_wiki_links(project_id: str) -> list[dict]:
+    conn = get_connection()
+    rows = conn.execute(
+        """
+        SELECT id, content, topic_key FROM observations
+        WHERE project_id = %s
+          AND topic_key IS NOT NULL
+          AND deleted_at IS NULL
+          AND superseded_by IS NULL
+          AND content LIKE '%%[[%%'
+        ORDER BY created_at
+        """,
+        (project_id,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def update_observation_embedding(observation_id: str, embedding: list[float]) -> None:
     conn = get_connection()
     conn.execute(

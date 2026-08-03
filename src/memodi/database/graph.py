@@ -19,6 +19,16 @@ def _prepare_connection(conn: psycopg.Connection) -> None:
     allowed' even though AGE is already available — we swallow that specific
     error and continue. In local Docker dev the memodi user IS superuser, so
     LOAD succeeds normally.
+
+    The search_path is SET LOCAL, so it dies with the transaction that the
+    caller commits or rolls back and never follows the shared connection
+    into unrelated SQL. `"$user"` is deliberately absent: the DB role is
+    named 'memodi' and so is the graph, so it would resolve to the graph's
+    own schema and shadow the app's tables. public stays ahead of
+    ag_catalog for the same reason — app SQL interleaved with graph reads
+    runs inside this transaction (tools.graph.dependencies does exactly
+    that), and only cypher() and agtype need ag_catalog at all. LOAD is
+    session-level and unaffected by either.
     """
     try:
         conn.execute("LOAD 'age';")
@@ -27,7 +37,7 @@ def _prepare_connection(conn: psycopg.Connection) -> None:
         # is redundant and denied. Rollback the aborted transaction so
         # subsequent statements can execute.
         conn.rollback()
-    conn.execute('SET search_path = ag_catalog, "$user", public;')
+    conn.execute("SET LOCAL search_path = public, ag_catalog;")
 
 
 def ensure_graph() -> None:
@@ -38,11 +48,11 @@ def ensure_graph() -> None:
     _prepare_connection(conn)
     # Check if graph exists
     row = conn.execute(
-        "SELECT count(*) as cnt FROM ag_graph WHERE name = %s",
+        "SELECT count(*) as cnt FROM ag_catalog.ag_graph WHERE name = %s",
         (GRAPH_NAME,),
     ).fetchone()
     if row["cnt"] == 0:
-        conn.execute("SELECT create_graph(%s);", (GRAPH_NAME,))
+        conn.execute("SELECT ag_catalog.create_graph(%s);", (GRAPH_NAME,))
     conn.commit()
     _graph_ensured = True
 

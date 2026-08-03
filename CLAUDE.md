@@ -104,7 +104,7 @@ The skill tells Claude WHEN and WHY to use memory. The MCP server handles HOW.
 
 ## Apache AGE Gotchas
 
-- Every connection needs `LOAD 'age'` + `SET search_path = ag_catalog, "$user", public` before graph ops
+- Every graph op needs `LOAD 'age'` + a transaction-scoped `SET LOCAL search_path = public, ag_catalog`. Never a session-level SET, and never `"$user"`: the AGE graph is a schema named `memodi` — same as the DB role — so `"$user"` resolves to it ahead of `public` and unqualified DDL (like migrations) lands in the wrong schema
 - AGE does NOT support parameterized Cypher ($1, $2) — values are interpolated
 - AGE does NOT support `|` union in variable-length paths (e.g. `[:A|B*1..5]`)
 - `agtype` results must be cast to JSON/text for Python consumption

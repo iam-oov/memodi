@@ -10,7 +10,7 @@ This protocol is MANDATORY and ALWAYS ACTIVE — not something you activate on d
 
 ## TOOL LOADING
 
-Memodi has **6 core tools** always in your context and **29 deferred tools** available via ToolSearch.
+Memodi has **6 core tools** always in your context and **30 deferred tools** available via ToolSearch.
 
 - **Core tools** — ready to use immediately, no extra steps needed
 - **Deferred tools** — call `ToolSearch("select:memodi_toolname")` to load them first
@@ -44,8 +44,8 @@ Memodi has **6 core tools** always in your context and **29 deferred tools** ava
 - `memodi_purge_workspace` — wipe workspace data for dev-loop resets (destructive, dry_run default)
 
 **Graph queries** — `ToolSearch("select:memodi_dependencies,memodi_impact,memodi_graph_overview,memodi_remove_relation,memodi_delete_relation")`
-- `memodi_dependencies` — show what depends on what (current relationships only)
-- `memodi_impact` — transitive impact analysis: "what breaks if I change X?"
+- `memodi_dependencies` — show what depends on what (current relationships only). Pass `path` to also see `links_to`/`linked_from` — the LINKS_TO edges auto-created from `[[topic-key]]` wiki-links, scoped to that workspace. Omit `path` for DEPENDS_ON only, same as before.
+- `memodi_impact` — transitive impact analysis: "what breaks if I change X?" Pass `path` to also traverse LINKS_TO edges alongside DEPENDS_ON.
 - `memodi_graph_overview` — summary of all nodes and relationships (includes valid_at)
 - `memodi_remove_relation` — invalidate a relationship (soft delete, preserves history)
 - `memodi_delete_relation` — permanently remove a relationship (hard delete)
@@ -68,8 +68,9 @@ Memodi has **6 core tools** always in your context and **29 deferred tools** ava
 - `memodi_status` — check database health and extensions
 - `memodi_version` — return server version
 
-**Maintenance** — `ToolSearch("select:memodi_backfill")`
+**Maintenance** — `ToolSearch("select:memodi_backfill,memodi_backfill_links")`
 - `memodi_backfill` — generate embeddings for old observations without them
+- `memodi_backfill_links` — catch up LINKS_TO edges for observations saved before [[topic-key]] auto-linking existed. Idempotent — re-running reports edges_created: 0 once caught up.
 
 **Correcting memory** — `ToolSearch("select:memodi_delete,memodi_get_observation")`
 - `memodi_delete` — for junk, test, or wrong observations only
@@ -175,11 +176,18 @@ Call `memodi_save` IMMEDIATELY and WITHOUT BEING ASKED after any of these:
 - Gotcha, edge case, or unexpected behavior found
 - Pattern established (naming, structure, convention)
 - User preference or constraint learned
-- Cross-repo or cross-module dependency discovered → also call `memodi_relate`
+- Cross-repo or cross-module dependency discovered (Repo/Module structural coupling)
+  → call `memodi_relate`. A reference to another SAME-workspace topic_key needs no
+  tool call at all — write `[[that-topic-key]]` in content (see FORMAT below), which
+  auto-links on save. Do NOT call `memodi_relate` with a "Topic" label for this: it
+  would create a name-only node distinct from the workspace-scoped ones `[[...]]`
+  creates.
 
 ### After discovering dependencies (use memodi_relate)
 Relationships are **temporal** — they automatically track when they were created (valid_at).
 Re-creating the same relationship invalidates the old version and creates a new one.
+This is for structural Repo/Module coupling — for linking one observation's topic_key
+to another, write `[[topic-key]]` in content instead (see FORMAT below).
 
 - Repo A imports/calls Repo B → `memodi_relate("Repo", "repo-a", "Repo", "repo-b", "DEPENDS_ON")`
 - Repo contains a module → `memodi_relate("Repo", "repo-a", "Module", "auth", "CONTAINS")`
@@ -208,6 +216,11 @@ Re-creating the same relationship invalidates the old version and creates a new 
   - **Why**: What motivated it
   - **Where**: Files or paths affected
   - **Learned**: Gotchas, edge cases (omit if none)
+  - Reference another topic anywhere in content by writing `[[that-topic-key]]` — it
+    auto-links in the knowledge graph on save, no extra tool call. Only takes effect
+    when THIS save also has its own `topic_key`. Keys allow letters, digits, `.`,
+    `_`, `/`, `-` (no spaces or quotes), up to 128 characters and 20 links per save;
+    anything outside that is silently skipped rather than failing the save.
 
 ### Topic update rules
 - Different topics MUST NOT overwrite each other
@@ -271,6 +284,26 @@ entry's `project`:
   projects, when you are genuinely replacing it. Otherwise leave it alone and
   name its id in your own content.
 - **Not the same ground after all** — it is just useful context. No action.
+
+### When save returns `links`
+
+`memodi_save`'s response may include a `links` object when this save had its own
+`topic_key` and content referencing `[[other-topic-key]]`. Shapes:
+
+- `{"created": [...], "invalidated": [...], "skipped_invalid": N}` — the normal case:
+  `created` lists newly-linked topic keys, `invalidated` lists ones a previous
+  version linked that this content no longer references, `skipped_invalid` counts
+  `[[...]]` matches that failed the key charset (never fails the save).
+- `{"skipped": "no_topic_key"}` — content has `[[...]]` links but this save has no
+  `topic_key` of its own to attach them to.
+- `{"skipped": "invalid_topic_key"}` — content has `[[...]]` links but this save's
+  own `topic_key` fails the key charset, so it cannot be a link source.
+- No `links` key at all — nothing to report (no `[[` in content and no change).
+
+`created`/`invalidated` targets are dangling by design: linking to a topic_key that
+doesn't exist yet still creates the graph node, marking something worth writing
+later. Query the resulting edges with `memodi_dependencies`/`memodi_impact` passing
+`path` (load via `ToolSearch("select:memodi_dependencies,memodi_impact")` first).
 
 ## WHEN TO SEARCH MEMORY
 

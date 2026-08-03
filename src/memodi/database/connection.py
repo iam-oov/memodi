@@ -13,6 +13,15 @@ MIGRATIONS_DIR = Path(__file__).parent.parent / "migrations"
 
 
 def get_connection() -> psycopg.Connection:
+    """The shared connection, reconnecting when the held one is dead.
+
+    search_path is pinned to public instead of PostgreSQL's default
+    `"$user", public`: the AGE graph is named 'memodi' and so is the DB
+    role, so create_graph's schema is exactly what `"$user"` resolves to.
+    Left unpinned, every unqualified statement — ensure_schema's own
+    CREATE TABLE included — would build and read shadow copies of the
+    app's tables inside the graph's schema.
+    """
     global _conn
     if _conn is not None and not _conn.closed:
         try:
@@ -25,7 +34,7 @@ def get_connection() -> psycopg.Connection:
     _conn = psycopg.connect(
         settings.db_url,
         row_factory=dict_row,
-        options="-c idle_in_transaction_session_timeout=30s",
+        options="-c idle_in_transaction_session_timeout=30s -c search_path=public",
     )
     return _conn
 

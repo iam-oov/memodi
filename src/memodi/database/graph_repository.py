@@ -1,10 +1,36 @@
+import re
+import uuid
 from datetime import UTC, datetime
 
 from memodi.database.graph import cypher_query, cypher_write, ensure_graph
 
+TOPIC_LINK_KEY_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._/\-]{0,127}\Z")
+
 
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _link_workspace(workspace_id: str) -> str:
+    """Canonical uuid string for a workspace_id interpolated into Cypher.
+
+    AGE has no parameterized Cypher, so every value reaching the driver
+    must be validated first; raises ValueError on anything that isn't a
+    real uuid.
+    """
+    return str(uuid.UUID(str(workspace_id)))
+
+
+def _require_link_keys(keys: list[str]) -> None:
+    """Raise ValueError if any topic link key fails the charset invariant.
+
+    Defense in depth: callers already filter invalid keys before reaching
+    here (memory.parse_links), but this is the layer that interpolates
+    them into Cypher, so it re-validates everything itself.
+    """
+    for key in keys:
+        if not TOPIC_LINK_KEY_RE.match(key):
+            raise ValueError(f"invalid topic link key: {key!r}")
 
 
 def add_node(label: str, name: str, properties: dict | None = None) -> dict:
@@ -88,14 +114,23 @@ def get_dependents(name: str) -> list[dict]:
     )
 
 
-def get_impact(name: str, max_depth: int = 5) -> list[dict]:
+def get_impact(
+    name: str, max_depth: int = 5, workspace_id: str | None = None
+) -> list[dict]:
     """Transitive impact analysis: what is affected if this changes?
 
     BFS traversal that only follows current edges (invalid_at IS NULL).
     AGE does not support ALL() predicates on variable-length paths,
     so we walk one hop at a time and filter in each step.
+
+    When workspace_id is given, reverse LINKS_TO edges (workspace-scoped
+    Topic nodes) feed the same frontier alongside the reverse DEPENDS_ON
+    query, so a name reachable through either edge kind is found in one
+    BFS. Frontier names failing the topic link key regex skip the
+    LINKS_TO sub-query.
     """
     ensure_graph()
+    ws = _link_workspace(workspace_id) if workspace_id is not None else None
     visited: set[str] = set()
     frontier: set[str] = {name}
 
@@ -113,10 +148,92 @@ def get_impact(name: str, max_depth: int = 5) -> list[dict]:
             for r in results:
                 if r["name"] not in visited and r["name"] != name:
                     next_frontier.add(r["name"])
+            if ws is not None and TOPIC_LINK_KEY_RE.match(node):
+                for r in get_topic_links_in(ws, node):
+                    if r["name"] not in visited and r["name"] != name:
+                        next_frontier.add(r["name"])
         visited.update(next_frontier)
         frontier = next_frontier
 
     return [{"name": n} for n in visited]
+
+
+def get_topic_links_out(workspace_id: str, name: str) -> list[dict]:
+    """Topics this workspace-scoped Topic node currently links to."""
+    ensure_graph()
+    if not TOPIC_LINK_KEY_RE.match(name):
+        return []
+    ws = _link_workspace(workspace_id)
+    return cypher_query(
+        f"MATCH (a:Topic {{name: '{name}', workspace_id: '{ws}'}})"
+        f"-[r:LINKS_TO]->(b:Topic {{workspace_id: '{ws}'}})"
+        " WHERE r.invalid_at IS NULL"
+        " RETURN b.name AS name",
+        "name agtype",
+    )
+
+
+def get_topic_links_in(workspace_id: str, name: str) -> list[dict]:
+    """Topics that currently link to this workspace-scoped Topic node."""
+    ensure_graph()
+    if not TOPIC_LINK_KEY_RE.match(name):
+        return []
+    ws = _link_workspace(workspace_id)
+    return cypher_query(
+        f"MATCH (a:Topic {{workspace_id: '{ws}'}})"
+        f"-[r:LINKS_TO]->(b:Topic {{name: '{name}', workspace_id: '{ws}'}})"
+        " WHERE r.invalid_at IS NULL"
+        " RETURN a.name AS name",
+        "name agtype",
+    )
+
+
+def sync_topic_links(workspace_id: str, from_key: str, to_keys: list[str]) -> dict:
+    """Reconcile from_key's outgoing LINKS_TO edges to exactly to_keys.
+
+    Diffs desired-vs-current instead of invalidate+recreate on every call:
+    an unchanged re-save costs one read and zero writes. Removed links get
+    invalid_at (history kept); new ones MERGE both Topic nodes and CREATE
+    the edge. Raises ValueError (defense in depth) if workspace_id or any
+    key fails validation — callers must have already filtered invalid keys.
+    """
+    ensure_graph()
+    ws = _link_workspace(workspace_id)
+    _require_link_keys([from_key, *to_keys])
+
+    current = {row["name"] for row in get_topic_links_out(ws, from_key)}
+    desired = set(to_keys)
+    to_create = desired - current
+    to_invalidate = current - desired
+
+    if not to_create and not to_invalidate:
+        return {"created": [], "invalidated": []}
+
+    now = _now_iso()
+    if to_create:
+        cypher_write(
+            f"MERGE (a:Topic {{name: '{from_key}', workspace_id: '{ws}'}})",
+            "a agtype",
+        )
+        for key in to_create:
+            cypher_write(
+                f"MERGE (a:Topic {{name: '{from_key}', workspace_id: '{ws}'}}) "
+                f"MERGE (b:Topic {{name: '{key}', workspace_id: '{ws}'}}) "
+                f"CREATE (a)-[r:LINKS_TO {{valid_at: '{now}'}}]->(b) "
+                "RETURN r",
+                "r agtype",
+            )
+    for key in to_invalidate:
+        cypher_write(
+            f"MATCH (a:Topic {{name: '{from_key}', workspace_id: '{ws}'}})"
+            f"-[r:LINKS_TO]->(b:Topic {{name: '{key}', workspace_id: '{ws}'}})"
+            " WHERE r.invalid_at IS NULL"
+            f" SET r.invalid_at = '{now}'"
+            " RETURN r",
+            "r agtype",
+        )
+
+    return {"created": sorted(to_create), "invalidated": sorted(to_invalidate)}
 
 
 def get_modules(repo_name: str) -> list[dict]:

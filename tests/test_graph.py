@@ -1,7 +1,9 @@
 import json
+import uuid
 
 import pytest
 
+from memodi.database import graph_repository, repository
 from memodi.database.connection import ensure_schema, get_connection
 from memodi.database.graph import _prepare_connection, ensure_graph
 from memodi.tools.graph import (
@@ -12,6 +14,7 @@ from memodi.tools.graph import (
     relate,
     remove_relation,
 )
+from tests.conftest import _path
 
 
 @pytest.fixture(autouse=True)
@@ -165,3 +168,177 @@ def test_invalidated_edges_hidden_from_impact():
     # repo-b no longer depends on repo-a (invalidated)
     assert "repo-b" not in affected_names
     assert "repo-c" not in affected_names
+
+
+# --- Topic auto-linking (LINKS_TO) ---
+
+
+def _extra_workspace(user_id: str) -> dict:
+    """A second workspace owned by the given user, for cross-workspace tests."""
+    machine = f"test-machine-{uuid.uuid4()}"
+    root = f"/tmp/test-extra-{uuid.uuid4()}"
+    name = f"test-extra-ws-{uuid.uuid4()}"
+    workspace = repository.workspace_start(user_id, machine, root, name)
+    return {
+        "user_id": user_id,
+        "machine": machine,
+        "root": root,
+        "workspace": workspace,
+    }
+
+
+def test_sync_topic_links_creates_workspace_scoped_edges(registered_workspace):
+    ws = registered_workspace["workspace"]["id"]
+    result = graph_repository.sync_topic_links(ws, "source/key", ["target/key"])
+
+    assert result == {"created": ["target/key"], "invalidated": []}
+    assert graph_repository.get_topic_links_out(ws, "source/key") == [
+        {"name": "target/key"}
+    ]
+    assert graph_repository.get_topic_links_in(ws, "target/key") == [
+        {"name": "source/key"}
+    ]
+
+
+def test_sync_topic_links_idempotent_on_unchanged_links(registered_workspace):
+    ws = registered_workspace["workspace"]["id"]
+    graph_repository.sync_topic_links(ws, "source/key", ["a/one", "a/two"])
+
+    result = graph_repository.sync_topic_links(ws, "source/key", ["a/one", "a/two"])
+
+    assert result == {"created": [], "invalidated": []}
+    assert len(graph_repository.get_topic_links_out(ws, "source/key")) == 2
+
+
+def test_sync_topic_links_invalidates_removed_links(registered_workspace):
+    ws = registered_workspace["workspace"]["id"]
+    graph_repository.sync_topic_links(ws, "source/key", ["a/one", "a/two"])
+
+    result = graph_repository.sync_topic_links(ws, "source/key", ["a/one"])
+
+    assert result == {"created": [], "invalidated": ["a/two"]}
+    links = graph_repository.get_topic_links_out(ws, "source/key")
+    assert [row["name"] for row in links] == ["a/one"]
+
+
+def test_sync_topic_links_raises_on_invalid_key(registered_workspace):
+    ws = registered_workspace["workspace"]["id"]
+    with pytest.raises(ValueError):
+        graph_repository.sync_topic_links(ws, "bad'key", ["a/one"])
+
+
+def test_sync_topic_links_raises_on_invalid_workspace():
+    with pytest.raises(ValueError):
+        graph_repository.sync_topic_links("not-a-uuid", "source/key", ["a/one"])
+
+
+def test_topic_links_not_visible_across_workspaces(registered_workspace):
+    ws_a = registered_workspace["workspace"]["id"]
+    other = _extra_workspace(registered_workspace["user_id"])
+    ws_b = other["workspace"]["id"]
+    try:
+        graph_repository.sync_topic_links(ws_a, "shared/key", ["target/only-in-a"])
+        graph_repository.sync_topic_links(ws_b, "shared/key", ["target/only-in-b"])
+
+        out_a = graph_repository.get_topic_links_out(ws_a, "shared/key")
+        out_b = graph_repository.get_topic_links_out(ws_b, "shared/key")
+        links_a = [r["name"] for r in out_a]
+        links_b = [r["name"] for r in out_b]
+
+        assert links_a == ["target/only-in-a"]
+        assert links_b == ["target/only-in-b"]
+    finally:
+        repository.delete_workspace(
+            other["workspace"]["name"], registered_workspace["user_id"]
+        )
+
+
+def test_topic_link_reads_reject_an_invalid_name(registered_workspace):
+    """`name` arrives unvalidated from the MCP caller — memodi_dependencies
+    with a path hands it straight through — and these two guards are all
+    that stands between it and an interpolated Cypher string. A rejected
+    name yields no links and leaves the shared connection able to answer
+    the next query."""
+    ws = registered_workspace["workspace"]["id"]
+    conn = get_connection()
+
+    assert graph_repository.get_topic_links_out(ws, "bad'key") == []
+    assert graph_repository.get_topic_links_in(ws, "bad'key") == []
+
+    assert conn.execute("SELECT 1 AS ok").fetchone()["ok"] == 1
+    conn.rollback()
+
+
+def test_dependencies_includes_links_only_with_path(registered_workspace):
+    ws = registered_workspace["workspace"]["id"]
+    graph_repository.sync_topic_links(ws, "source/key", ["target/key"])
+
+    without_path = json.loads(dependencies("source/key"))
+    assert "links_to" not in without_path
+    assert "linked_from" not in without_path
+
+    with_path = json.loads(
+        dependencies(
+            "source/key",
+            user_id=registered_workspace["user_id"],
+            machine=registered_workspace["machine"],
+            path=_path(registered_workspace, "test-project"),
+        )
+    )
+    assert with_path["links_to"] == [{"name": "target/key"}]
+    assert with_path["linked_from"] == []
+
+
+def test_impact_traverses_links_to_only_when_scoped(registered_workspace):
+    ws = registered_workspace["workspace"]["id"]
+    graph_repository.sync_topic_links(ws, "consumer/key", ["provider/key"])
+
+    scoped = json.loads(
+        impact_analysis(
+            "provider/key",
+            user_id=registered_workspace["user_id"],
+            machine=registered_workspace["machine"],
+            path=_path(registered_workspace, "test-project"),
+        )
+    )
+    assert "consumer/key" in [a["name"] for a in scoped["affected"]]
+
+    unscoped = json.loads(impact_analysis("provider/key"))
+    assert unscoped["affected"] == []
+
+
+def test_impact_bridges_links_to_and_depends_on_by_name(registered_workspace):
+    """A BFS frontier name is shared across edge kinds: a Repo DEPENDS_ON
+    node and a workspace-scoped Topic LINKS_TO node with the same `name`
+    both feed the same next_frontier."""
+    ws = registered_workspace["workspace"]["id"]
+    relate("Repo", "repo-x", "Repo", "shared/topic", "DEPENDS_ON")
+    graph_repository.sync_topic_links(ws, "doc/note", ["shared/topic"])
+
+    result = json.loads(
+        impact_analysis(
+            "shared/topic",
+            user_id=registered_workspace["user_id"],
+            machine=registered_workspace["machine"],
+            path=_path(registered_workspace, "test-project"),
+        )
+    )
+    affected_names = [a["name"] for a in result["affected"]]
+    assert "repo-x" in affected_names
+    assert "doc/note" in affected_names
+
+
+def test_impact_hides_invalidated_links(registered_workspace):
+    ws = registered_workspace["workspace"]["id"]
+    graph_repository.sync_topic_links(ws, "consumer/key", ["provider/key"])
+    graph_repository.sync_topic_links(ws, "consumer/key", [])
+
+    result = json.loads(
+        impact_analysis(
+            "provider/key",
+            user_id=registered_workspace["user_id"],
+            machine=registered_workspace["machine"],
+            path=_path(registered_workspace, "test-project"),
+        )
+    )
+    assert result["affected"] == []

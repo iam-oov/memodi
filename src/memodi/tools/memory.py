@@ -1,4 +1,5 @@
 import json
+import re
 import uuid
 
 from memodi.database import graph_repository, repository
@@ -19,9 +20,36 @@ MAX_SUPERSEDES = 20
 
 MAX_SUPERSEDES_KEY = 64
 
+MAX_LINKS = 20
+
+_LINK_RE = re.compile(r"\[\[([^\[\]]{1,256})\]\]")
+
 
 def _ensure() -> None:
     ensure_schema()
+
+
+def parse_links(content: str, own_topic_key: str | None) -> tuple[list[str], int]:
+    """Extract [[topic-key]] wiki-links from content.
+
+    Returns the deduped, capped list of valid keys (self-links and repeats
+    dropped, first occurrence wins) plus a count of matches that failed the
+    key charset — invalid links never fail the save, they only show up as
+    skipped_invalid on the ack.
+    """
+    links: list[str] = []
+    seen: set[str] = set()
+    skipped_invalid = 0
+    for match in _LINK_RE.finditer(content):
+        key = match.group(1).strip()
+        if not graph_repository.TOPIC_LINK_KEY_RE.match(key):
+            skipped_invalid += 1
+            continue
+        if key == own_topic_key or key in seen:
+            continue
+        seen.add(key)
+        links.append(key)
+    return links[:MAX_LINKS], skipped_invalid
 
 
 def _observation_id(value: object) -> str | None:
@@ -167,6 +195,47 @@ def _attach_related(
         rollback()
 
 
+def _attach_links(
+    ack: dict, content: str, topic_key: str | None, workspace_id: str
+) -> None:
+    """Parse [[topic-key]] wiki-links from content and reconcile this
+    topic_key's outgoing LINKS_TO edges in the knowledge graph.
+
+    Nothing here may raise: the save is done, so a graph failure must
+    never turn into an error the client would retry — it just leaves the
+    ack without a `links` key. Runs last in save(): nothing after this
+    step issues SQL, so the shared connection is never handed back idle
+    in transaction because of the read this opens.
+
+    The sync runs whenever topic_key is present and valid, even for
+    linkless content — otherwise removing the last [[link]] would never
+    invalidate the stale edge. The `links` key itself is only added when
+    there is something to say: unlinkable content, or a sync that found
+    or changed something.
+    """
+    try:
+        has_link_syntax = _LINK_RE.search(content) is not None
+        if not topic_key:
+            if has_link_syntax:
+                ack["links"] = {"skipped": "no_topic_key"}
+            return
+        if not graph_repository.TOPIC_LINK_KEY_RE.match(topic_key):
+            if has_link_syntax:
+                ack["links"] = {"skipped": "invalid_topic_key"}
+            return
+        links, skipped_invalid = parse_links(content, topic_key)
+        result = graph_repository.sync_topic_links(workspace_id, topic_key, links)
+        rollback()
+        if has_link_syntax or result["created"] or result["invalidated"]:
+            ack["links"] = {
+                "created": result["created"],
+                "invalidated": result["invalidated"],
+                "skipped_invalid": skipped_invalid,
+            }
+    except Exception:
+        rollback()
+
+
 @handle_errors
 def save(
     path: str,
@@ -204,6 +273,7 @@ def save(
     if supersedes is not None:
         _apply_supersedes(ack, supersedes, str(obs["id"]), proj["workspace_id"])
     _attach_related(ack, embedding, str(obs["id"]), proj["workspace_id"])
+    _attach_links(ack, obs["content"], obs.get("topic_key"), proj["workspace_id"])
     return json.dumps(ack, default=str)
 
 
@@ -529,3 +599,52 @@ def backfill_embeddings(
         repository.update_observation_embedding(obs["id"], embedding)
         count += 1
     return json.dumps({"backfilled": count, "project": proj["name"]})
+
+
+@handle_errors
+def backfill_links(
+    path: str, user_id: str, machine: str, project: str | None = None
+) -> str:
+    """Catch up LINKS_TO edges for observations saved before this feature
+    existed. Idempotent: re-running costs one read per row via
+    sync_topic_links's diffing, so a second run reports edges_created: 0.
+
+    A row whose sync fails is counted in `failed` and skipped instead of
+    aborting the scan: this walks a whole project's history, so one
+    poisoned row must not cost the operator every other row's edges — and
+    the rollback that isolates it also keeps the next row from running
+    inside an aborted transaction.
+    """
+    _ensure()
+    proj = resolve_project(user_id, machine, path, project)
+    observations = repository.get_observations_with_wiki_links(proj["id"])
+    scanned = 0
+    failed = 0
+    edges_created = 0
+    edges_invalidated = 0
+    for obs in observations:
+        topic_key = obs["topic_key"]
+        if not graph_repository.TOPIC_LINK_KEY_RE.match(topic_key):
+            continue
+        links, _skipped_invalid = parse_links(obs["content"], topic_key)
+        try:
+            result = graph_repository.sync_topic_links(
+                proj["workspace_id"], topic_key, links
+            )
+        except Exception:
+            rollback()
+            failed += 1
+            continue
+        scanned += 1
+        edges_created += len(result["created"])
+        edges_invalidated += len(result["invalidated"])
+    rollback()
+    return json.dumps(
+        {
+            "scanned": scanned,
+            "failed": failed,
+            "edges_created": edges_created,
+            "edges_invalidated": edges_invalidated,
+            "project": proj["name"],
+        }
+    )

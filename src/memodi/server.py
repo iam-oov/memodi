@@ -171,6 +171,22 @@ def memodi_save(
     correcting it, and reuse its topic_key only if its project is
     yours — upsert is project-scoped, so a reused key forks the
     knowledge instead of correcting it.
+
+    Write [[other-topic-key]] anywhere in content to link this
+    observation to another one in the knowledge graph — no separate
+    tool call needed. Only takes effect when THIS save also has its own
+    topic_key: the link is stored as topic_key -> other-topic-key, so an
+    observation with no topic_key has nothing to attach it to. A key may
+    contain letters, digits, `.`, `_`, `/`, `-` (no spaces or quotes) and
+    up to 128 characters; anything else is silently skipped rather than
+    failing the save. Up to 20 links per save; a link to yourself is
+    dropped. The response may carry a `links` object: `{"created":
+    [...], "invalidated": [...], "skipped_invalid": N}` when something
+    was found or changed, `{"skipped": "no_topic_key"}` /
+    `{"skipped": "invalid_topic_key"}` when [[...]] syntax is present
+    but unusable, or the key absent entirely when there was nothing to
+    report. Use memodi_dependencies or memodi_impact with path to query
+    these edges later.
     """
     caller = _caller(ctx)
     if isinstance(caller, str):
@@ -470,6 +486,23 @@ def memodi_backfill(ctx: Context, path: str, project: str | None = None) -> str:
     )
 
 
+@mcp.tool()
+def memodi_backfill_links(ctx: Context, path: str, project: str | None = None) -> str:
+    """Catch up LINKS_TO edges for observations saved before the
+    [[topic-key]] auto-linking feature existed.
+
+    Scans this project for topic_key'd observations whose content
+    contains [[topic-key]] wiki-links and reconciles their edges in the
+    knowledge graph — the same sync memodi_save runs on every save.
+    Idempotent: re-running reports edges_created: 0 once everything is
+    caught up.
+    """
+    caller = _caller(ctx)
+    if isinstance(caller, str):
+        return caller
+    return memory.backfill_links(path, caller["user_id"], caller["machine"], project)
+
+
 # --- Workflow ---
 
 
@@ -618,23 +651,47 @@ def memodi_relate(
 
 
 @mcp.tool()
-def memodi_dependencies(name: str) -> str:
+def memodi_dependencies(ctx: Context, name: str, path: str | None = None) -> str:
     """Show upstream and downstream dependencies for a node.
 
     Use when the user asks 'what does X depend on?' or 'what
     uses X?' to understand coupling.
+
+    Pass path (the caller's cwd) to also get links_to/linked_from — LINKS_TO
+    edges auto-created from [[topic-key]] wiki-links in saved content,
+    scoped to that workspace. Omit path for the exact payload this tool
+    always returned (DEPENDS_ON only).
     """
-    return graph.dependencies(name)
+    if path is None:
+        return graph.dependencies(name)
+    caller = _caller(ctx)
+    if isinstance(caller, str):
+        return caller
+    return graph.dependencies(name, caller["user_id"], caller["machine"], path)
 
 
 @mcp.tool()
-def memodi_impact(name: str, max_depth: int = 5) -> str:
+def memodi_impact(
+    ctx: Context, name: str, max_depth: int = 5, path: str | None = None
+) -> str:
     """Transitive impact analysis — 'what breaks if I change X?'
 
     Walks the dependency graph up to max_depth. Use before
     refactors, breaking changes, or to assess blast radius.
+
+    Pass path (the caller's cwd) to also traverse LINKS_TO edges
+    (workspace-scoped Topic nodes auto-created from [[topic-key]]
+    wiki-links) alongside DEPENDS_ON. Omit path for the exact behavior
+    this tool always had.
     """
-    return graph.impact_analysis(name, max_depth)
+    if path is None:
+        return graph.impact_analysis(name, max_depth)
+    caller = _caller(ctx)
+    if isinstance(caller, str):
+        return caller
+    return graph.impact_analysis(
+        name, max_depth, caller["user_id"], caller["machine"], path
+    )
 
 
 @mcp.tool()

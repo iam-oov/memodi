@@ -4,6 +4,7 @@ from memodi.database import graph_repository
 from memodi.database.connection import ensure_schema
 from memodi.database.graph import ensure_graph
 from memodi.tools.errors import handle_errors
+from memodi.tools.scope import require_workspace
 
 
 def _ensure() -> None:
@@ -38,17 +39,40 @@ def relate(
 
 
 @handle_errors
-def dependencies(name: str) -> str:
+def dependencies(
+    name: str,
+    user_id: str | None = None,
+    machine: str | None = None,
+    path: str | None = None,
+) -> str:
     _ensure()
     deps = graph_repository.get_dependencies(name)
     dependents = graph_repository.get_dependents(name)
-    return json.dumps({"depends_on": deps, "depended_by": dependents}, default=str)
+    result = {"depends_on": deps, "depended_by": dependents}
+    if path is not None:
+        workspace = require_workspace(user_id, machine, path)
+        result["links_to"] = graph_repository.get_topic_links_out(
+            workspace["id"], name
+        )
+        result["linked_from"] = graph_repository.get_topic_links_in(
+            workspace["id"], name
+        )
+    return json.dumps(result, default=str)
 
 
 @handle_errors
-def impact_analysis(name: str, max_depth: int = 5) -> str:
+def impact_analysis(
+    name: str,
+    max_depth: int = 5,
+    user_id: str | None = None,
+    machine: str | None = None,
+    path: str | None = None,
+) -> str:
     _ensure()
-    affected = graph_repository.get_impact(name, max_depth)
+    workspace_id = None
+    if path is not None:
+        workspace_id = require_workspace(user_id, machine, path)["id"]
+    affected = graph_repository.get_impact(name, max_depth, workspace_id=workspace_id)
     return json.dumps(
         {"target": name, "affected": affected, "depth": max_depth}, default=str
     )

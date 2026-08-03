@@ -128,7 +128,7 @@ claude plugin uninstall memodi@memodi --scope user
 claude plugin marketplace remove memodi
 ```
 
-## Tools MCP (35 tools)
+## Tools MCP (36 tools)
 
 Todas las tools de proyecto (memoria, workflow, sesiones) reciben `path` (el cwd del
 caller) y lo resuelven contra un workspace registrado — ver Modelo de autenticacion.
@@ -150,6 +150,7 @@ caller) y lo resuelven contra un workspace registrado — ver Modelo de autentic
 | `memodi_context` | Cargar contexto reciente de un proyecto |
 | `memodi_search_global` | Buscar keywords en TODOS tus propios proyectos (scoped al usuario, no cruza cuentas) |
 | `memodi_backfill` | Generar embeddings para observaciones viejas |
+| `memodi_backfill_links` | Reconciliar LINKS_TO para observaciones guardadas antes del auto-linking `[[topic-key]]` (idempotente) |
 | `memodi_list_projects` | Listar tus proyectos conocidos y su workspace |
 | `memodi_delete` | Soft-delete de una observacion junk/test/incorrecta (reversible a nivel DB) |
 | `memodi_get_observation` | Leer una observacion por id, incluidas las superseded (path de auditoria) |
@@ -158,8 +159,8 @@ caller) y lo resuelven contra un workspace registrado — ver Modelo de autentic
 | Tool | Descripcion |
 |------|-------------|
 | `memodi_relate` | Crear relacion (ej: repo-a DEPENDS_ON repo-b) |
-| `memodi_dependencies` | Que depende de que |
-| `memodi_impact` | Analisis de impacto transitivo: "que se rompe si cambio X?" |
+| `memodi_dependencies` | Que depende de que. Con `path` (opcional) tambien devuelve `links_to`/`linked_from`, los LINKS_TO auto-creados desde `[[topic-key]]` en el contenido, scoped a ese workspace |
+| `memodi_impact` | Analisis de impacto transitivo: "que se rompe si cambio X?". Con `path` (opcional) tambien recorre LINKS_TO ademas de DEPENDS_ON |
 | `memodi_graph_overview` | Resumen de todos los nodos y relaciones |
 | `memodi_remove_relation` | Invalidar una relacion (soft delete, conserva historial) |
 | `memodi_delete_relation` | Eliminar una relacion permanentemente (hard delete) |
@@ -198,18 +199,26 @@ caller) y lo resuelven contra un workspace registrado — ver Modelo de autentic
 Repo ──DEPENDS_ON──► Repo
 Repo ──CONTAINS────► Module
 Module ──AFFECTS───► Module
+Topic ──LINKS_TO───► Topic
 ```
 
 | Nodo | Propiedades | Ejemplo |
 |------|-------------|---------|
 | Repo | name, language, description | repo-a, Python |
 | Module | name, description | auth, database |
+| Topic | name, workspace_id | architecture/auth-model |
 
 | Relacion | De → A | Ejemplo |
 |----------|--------|---------|
 | DEPENDS_ON | Repo → Repo | repo-c depende de repo-a |
 | CONTAINS | Repo → Module | repo-a contiene auth |
 | AFFECTS | Module → Module | auth afecta a api |
+| LINKS_TO | Topic → Topic | auto-creado al escribir `[[topic-key]]` en el contenido de un `memodi_save` con `topic_key` propio |
+
+`Topic` es el unico nodo scoped por workspace (identidad = name + workspace_id): dos
+workspaces distintos pueden tener cada uno su propio `architecture/auth-model` sin
+pisarse. El resto de los nodos (`Repo`, `Module`) siguen siendo globales, creados solo
+via `memodi_relate`.
 
 ### Limitaciones conocidas de Apache AGE
 
