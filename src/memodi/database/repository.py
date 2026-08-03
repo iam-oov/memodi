@@ -621,6 +621,29 @@ def search_observations_global(
     return [dict(r) for r in rows]
 
 
+def search_observations_by_workspace(
+    workspace_id: str,
+    query: str,
+    limit: int = 5,
+) -> list[dict]:
+    conn = get_connection()
+    rows = conn.execute(
+        """
+        SELECT o.*, p.name AS project, ts_rank(o.search_vector, q) AS rank
+        FROM observations o
+        JOIN projects p ON p.id = o.project_id,
+        plainto_tsquery('simple', %s) q
+        WHERE p.workspace_id = %s
+          AND o.deleted_at IS NULL
+          AND o.superseded_by IS NULL
+          AND o.search_vector @@ q
+        ORDER BY rank DESC LIMIT %s
+        """,
+        [query, workspace_id, limit],
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def get_recent_observations(
     project_id: str,
     limit: int = 20,

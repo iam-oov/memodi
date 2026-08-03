@@ -324,6 +324,17 @@ Also search memory PROACTIVELY when:
 - `memodi_search_similar` — when searching by concept (load via ToolSearch first)
 - `memodi_search_global` — cross-project results across the caller's OWN projects (load via ToolSearch first)
 
+## Automatic context on your prompts
+
+A `UserPromptSubmit` hook runs a keyword search across the whole workspace on
+every prompt and, when something matches, injects a `## Related memory
+(memodi — keyword match)` block above the prompt with compact pointers
+(id/type/title/topic_key/project) — never content. Treat it as a lexical
+hint, not a semantic or exhaustive one: call `memodi_get_observation(id)`
+before relying on any entry. Its absence means nothing lexically matched
+this exact prompt — it does NOT mean memodi has no relevant history; still
+search proactively per WHEN TO SEARCH MEMORY above.
+
 ## WORKFLOW PROTOCOL (only when user requests it)
 
 The workflow tools implement a Plan → Apply → Verify → Unify cycle. Use them ONLY when the user explicitly asks for structured planning or says things like "planifiquemos", "hagamos un plan", "let's plan this".

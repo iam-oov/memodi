@@ -48,6 +48,15 @@ _RELATED_FIELDS = {
     "similarity",
 }
 
+_PROMPT_SEARCH_FIELDS = {
+    "id",
+    "type",
+    "title",
+    "topic_key",
+    "project",
+    "rank",
+}
+
 _SESSION_SUMMARY_FIELDS = {
     "id",
     "started_at",
@@ -100,6 +109,14 @@ def serialize_related(observations: list[dict]) -> list[dict]:
     slim = [_allow(obs, _RELATED_FIELDS) for obs in observations]
     for entry in slim:
         entry["similarity"] = round(entry["similarity"], 3)
+        if not entry.get("topic_key"):
+            entry.pop("topic_key", None)
+    return slim
+
+
+def serialize_prompt_search(observations: list[dict]) -> list[dict]:
+    slim = [_allow(obs, _PROMPT_SEARCH_FIELDS) for obs in observations]
+    for entry in slim:
         if not entry.get("topic_key"):
             entry.pop("topic_key", None)
     return slim

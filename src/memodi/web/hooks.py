@@ -30,6 +30,7 @@ MAX_CLIENT_SESSION_ID = session.MAX_CLIENT_SESSION_ID
 MAX_TITLE = 512
 MAX_CONTENT = 48 * 1024
 MAX_TOPIC_KEY = 512
+MAX_QUERY = 4 * 1024
 
 CAPTURE_TYPE = "discovery"
 
@@ -208,4 +209,24 @@ async def post_capture(request: Request) -> JSONResponse:
         CAPTURE_TYPE,
         topic_key=topic_key or None,
     )
+    return _response(result)
+
+
+async def post_prompt_search(request: Request) -> JSONResponse:
+    """Keyword search over the caller's workspace — the UserPromptSubmit hook's
+    counterpart to /hooks/capture.
+    """
+    caller = _caller(request)
+    if isinstance(caller, JSONResponse):
+        return caller
+    body = await _body(request, MAX_SESSION_BODY)
+    if isinstance(body, JSONResponse):
+        return body
+    try:
+        path = _field(body, "path", MAX_PATH, required=True)
+        query = _field(body, "query", MAX_QUERY, required=True)
+    except _InvalidFieldError as e:
+        return _error(str(e), "validation")
+
+    result = memory.search_for_prompt(path, caller["user_id"], caller["machine"], query)
     return _response(result)

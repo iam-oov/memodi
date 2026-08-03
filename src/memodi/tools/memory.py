@@ -10,6 +10,7 @@ from memodi.tools.serialization import (
     serialize_observation,
     serialize_observation_save,
     serialize_observations,
+    serialize_prompt_search,
     serialize_related,
     serialize_session_summary,
 )
@@ -297,6 +298,19 @@ def search(
         workspace_id=proj["workspace_id"],
     )
     return json.dumps(serialize_observations(results), default=str)
+
+
+@handle_errors
+def search_for_prompt(
+    path: str, user_id: str, machine: str, query: str, limit: int = 5
+) -> str:
+    _ensure()
+    query = query.strip()
+    if not query:
+        return json.dumps([])
+    workspace = require_workspace(user_id, machine, path)
+    results = repository.search_observations_by_workspace(workspace["id"], query, limit)
+    return json.dumps(serialize_prompt_search(results), default=str)
 
 
 @handle_errors

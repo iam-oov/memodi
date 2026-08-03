@@ -15,8 +15,10 @@ from memodi.tools.memory import (
 )
 from memodi.tools.serialization import (
     _OBSERVATION_READ_FIELDS,
+    _PROMPT_SEARCH_FIELDS,
     _RELATED_FIELDS,
     serialize_observation,
+    serialize_prompt_search,
     serialize_related,
 )
 from memodi.tools.session import session_end, session_start
@@ -222,6 +224,61 @@ def test_read_allowlist_is_pinned():
 
 def test_related_fields_allowlist_is_pinned():
     assert {"id", "title", "topic_key", "project", "similarity"} == _RELATED_FIELDS
+
+
+def test_prompt_search_fields_allowlist_is_pinned():
+    assert {
+        "id",
+        "type",
+        "title",
+        "topic_key",
+        "project",
+        "rank",
+    } == _PROMPT_SEARCH_FIELDS
+
+
+def test_serialize_prompt_search_omits_topic_key_when_null():
+    rows = [
+        {
+            "id": "a",
+            "type": "discovery",
+            "title": "t",
+            "topic_key": None,
+            "project": "p",
+            "rank": 0.5,
+        },
+        {
+            "id": "b",
+            "type": "discovery",
+            "title": "t",
+            "topic_key": "k",
+            "project": "p",
+            "rank": 0.4,
+        },
+    ]
+    entries = serialize_prompt_search(rows)
+    assert "topic_key" not in entries[0]
+    assert entries[1]["topic_key"] == "k"
+
+
+def test_serialize_prompt_search_never_leaks_forbidden_keys():
+    rows = [
+        {
+            "id": "a",
+            "type": "discovery",
+            "title": "t",
+            "topic_key": "k",
+            "project": "p",
+            "rank": 0.5,
+            "content": "must never leak",
+            "embedding": [0.1, 0.2],
+            "search_vector": "should not leak either",
+        }
+    ]
+    entries = serialize_prompt_search(rows)
+    assert set(entries[0].keys()) <= _PROMPT_SEARCH_FIELDS
+    leaked = _collect_keys(entries) & FORBIDDEN_KEYS
+    assert not leaked
 
 
 def test_save_ack_includes_related_only_when_present(

@@ -114,6 +114,8 @@ Una sola vez por (maquina, carpeta). Despues de eso la memoria se carga **sola y
 
 Para cerrar una sesion de forma explicita corre `/memodi:end`: arma un resumen estructurado (Goal / Accomplished / Next Steps) y lo guarda con `memodi_session_end`, para que la proxima sesion arranque con ese contexto. Un hook `SessionEnd` corre igual en cada salida como red de contencion, por HTTP plano (no MCP), pero solo cierra la sesion que coincide exactamente con el session id de Claude Code y siempre con resumen NULL — nunca reemplaza el resumen real.
 
+Un hook `UserPromptSubmit` corre en cada prompt: busca por keyword (sin embeddings) en todo el workspace via `POST /hooks/prompt-search` e inyecta punteros compactos (id/type/title/topic_key/project) a observaciones previas relacionadas — nunca el contenido. Un prompt corto o sin coincidencias lexicas no inyecta nada; nunca bloquea el turno (falla en silencio si el server no responde).
+
 ### Desinstalar
 
 ```bash
@@ -259,12 +261,12 @@ Verificar antes del primer deploy:
 - Una regla de **rate limiting en Cloudflare** sobre `memodi.valdoh.com/signup` — configurala en el dashboard (sugerido: 5 requests por minuto por IP). No hay throttling a nivel app.
 - `/mcp` requiere una api key valida por usuario (`X-Memodi-Api-Key`); sin key o con key invalida responde `not_authenticated`
 
-Ademas de `/mcp` hay **tres rutas HTTP planas** para los hooks del plugin, con el mismo
+Ademas de `/mcp` hay **cuatro rutas HTTP planas** para los hooks del plugin, con el mismo
 contrato de auth (`X-Memodi-Api-Key` + `X-Memodi-Machine`) y sin ninguna otra puerta
-delante: `POST /hooks/session-start`, `POST /hooks/session-close` y `POST /hooks/capture`.
-Quien configure el WAF tiene que saber que existen:
+delante: `POST /hooks/session-start`, `POST /hooks/session-close`, `POST /hooks/capture`
+y `POST /hooks/prompt-search`. Quien configure el WAF tiene que saber que existen:
 
-- Cada ruta valida y acota sus campos, y limita el body a nivel app (4KB las de sesion, 64KB `capture`)
+- Cada ruta valida y acota sus campos, y limita el body a nivel app (4KB las de sesion y `prompt-search`, 64KB `capture`)
 - Igual que `/signup`, no hay throttling a nivel app — una regla de **rate limiting en Cloudflare** sobre `/hooks/*` queda como accion de operador
 
 ### Pipeline CI/CD

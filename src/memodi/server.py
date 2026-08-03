@@ -10,7 +10,12 @@ from memodi.tools.context import client_context
 from memodi.tools.errors import NotAuthenticatedError
 from memodi.tools.scope import require_user
 from memodi.tools.system import ping, status, version
-from memodi.web.hooks import post_capture, post_session_close, post_session_start
+from memodi.web.hooks import (
+    post_capture,
+    post_prompt_search,
+    post_session_close,
+    post_session_start,
+)
 from memodi.web.signup import get_signup, post_signup
 
 # Tools always loaded into Claude's context. All others are deferred
@@ -49,6 +54,7 @@ mcp.custom_route("/signup", methods=["POST"])(post_signup)
 mcp.custom_route("/hooks/session-start", methods=["POST"])(post_session_start)
 mcp.custom_route("/hooks/session-close", methods=["POST"])(post_session_close)
 mcp.custom_route("/hooks/capture", methods=["POST"])(post_capture)
+mcp.custom_route("/hooks/prompt-search", methods=["POST"])(post_prompt_search)
 
 
 def _caller(ctx: Context) -> dict | str:

@@ -1,5 +1,5 @@
 {
-  "description": "Memodi persistent memory hooks — connectivity, context injection, compaction recovery, subagent capture, and session-end hygiene close",
+  "description": "Memodi persistent memory hooks — connectivity, context injection, compaction recovery, keyword-context injection on every prompt, subagent capture, and session-end hygiene close",
   "hooks": {
     "SessionStart": [
       {
@@ -21,6 +21,17 @@
             "command": "${CLAUDE_PLUGIN_ROOT}/scripts/post-compaction.sh",
             "timeout": 5,
             "statusMessage": "Recovering memodi context after compaction..."
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/prompt-search.sh",
+            "timeout": 10
           }
         ]
       }

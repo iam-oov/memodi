@@ -26,6 +26,7 @@ END_COMMAND = PLUGIN / "commands" / "end.md"
 SESSION_START_HOOK = PLUGIN / "scripts" / "session-start.sh"
 POST_COMPACTION_HOOK = PLUGIN / "scripts" / "post-compaction.sh"
 SUBAGENT_STOP_HOOK = PLUGIN / "scripts" / "subagent-stop.sh"
+PROMPT_SEARCH_HOOK = PLUGIN / "scripts" / "prompt-search.sh"
 HOOKS_JSON = PLUGIN / "hooks" / "hooks.json"
 
 _PROHIBITION_MARKERS = ("do not", "never", "not call", "no llames")
@@ -256,3 +257,130 @@ def test_post_compaction_hook_omits_client_session_id_when_there_is_none(hook_se
 
     assert "memodi_session_end" in out
     assert "client_session_id" not in out
+
+
+# --- prompt-search.sh (UserPromptSubmit) ---
+
+
+def _run_hook_with_response(script: Path, payload: dict, response_body: bytes) -> str:
+    """Run a shipped hook script against a stub server that answers every
+    POST with response_body — the counterpart to hook_server for hooks that
+    read the server's response instead of only sending a fire-and-forget
+    POST."""
+
+    class _Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            self.send_response(200)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def do_POST(self) -> None:
+            self.rfile.read(int(self.headers.get("content-length") or 0))
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(response_body)))
+            self.end_headers()
+            self.wfile.write(response_body)
+
+        def log_message(self, *args: object) -> None:
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        return _run_hook(script, payload, f"http://127.0.0.1:{server.server_port}")
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_prompt_search_hook_prints_markdown_block_with_topic_key():
+    body = json.dumps(
+        [
+            {
+                "id": "abc-123",
+                "type": "decision",
+                "title": "Use JWT",
+                "topic_key": "auth/model",
+                "project": "memodi",
+                "rank": 0.5,
+            }
+        ]
+    ).encode()
+
+    out = _run_hook_with_response(
+        PROMPT_SEARCH_HOOK, {"cwd": "/tmp/x", "prompt": "auth jwt"}, body
+    )
+
+    assert "## Related memory (memodi — keyword match)" in out
+    assert "memodi_get_observation" in out
+    assert "[decision] Use JWT" in out
+    assert "topic: auth/model" in out
+    assert "project: memodi" in out
+    assert "(id: abc-123)" in out
+
+
+def test_prompt_search_hook_drops_topic_segment_when_absent():
+    body = json.dumps(
+        [{"id": "x", "type": "discovery", "title": "T", "project": "p", "rank": 0.1}]
+    ).encode()
+
+    out = _run_hook_with_response(
+        PROMPT_SEARCH_HOOK, {"cwd": "/tmp/x", "prompt": "q"}, body
+    )
+
+    assert "topic:" not in out
+    assert "project: p (id: x)" in out
+
+
+def test_prompt_search_hook_prints_nothing_for_empty_list_response():
+    out = _run_hook_with_response(
+        PROMPT_SEARCH_HOOK, {"cwd": "/tmp/x", "prompt": "q"}, b"[]"
+    )
+
+    assert out == ""
+
+
+def test_prompt_search_hook_prints_nothing_for_error_object_response():
+    body = json.dumps({"error": "not started", "type": "not_started"}).encode()
+
+    out = _run_hook_with_response(
+        PROMPT_SEARCH_HOOK, {"cwd": "/tmp/x", "prompt": "q"}, body
+    )
+
+    assert out == ""
+
+
+def test_prompt_search_hook_exits_0_when_server_unreachable():
+    result = subprocess.run(
+        ["sh", str(PROMPT_SEARCH_HOOK)],
+        input=json.dumps({"cwd": "/tmp/x", "prompt": "q"}),
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env={
+            **os.environ,
+            "MEMODI_URL": "http://127.0.0.1:1",
+            "MEMODI_API_KEY": "test-key",
+            "MEMODI_MACHINE": "test-machine",
+        },
+    )
+
+    assert result.returncode == 0
+    assert result.stdout == ""
+
+
+def test_prompt_search_hook_posts_path_and_truncated_prompt(hook_server):
+    long_prompt = "x" * 3000
+
+    payload = {"cwd": "/tmp/hook-cwd", "prompt": long_prompt}
+    _run_hook(PROMPT_SEARCH_HOOK, payload, hook_server.url)
+
+    assert hook_server.posts[0]["path"] == "/tmp/hook-cwd"
+    assert len(hook_server.posts[0]["query"]) <= 2000
+
+
+def test_prompt_search_hook_exits_0_silently_when_prompt_is_absent(hook_server):
+    out = _run_hook(PROMPT_SEARCH_HOOK, {"cwd": "/tmp/hook-cwd"}, hook_server.url)
+
+    assert out == ""
+    assert hook_server.posts == []

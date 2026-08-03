@@ -280,6 +280,105 @@ def test_session_close_missing_api_key_returns_not_authenticated(
     assert response.json()["type"] == "not_authenticated"
 
 
+def test_prompt_search_returns_matching_observation(client, registered_workspace):
+    project_name = f"test-hooks-{uuid.uuid4()}"
+    path = _path(registered_workspace, project_name)
+    headers = _headers(registered_workspace)
+
+    client.post(
+        "/hooks/capture",
+        json={
+            "path": path,
+            "title": "Otter architecture decision",
+            "content": "Otter service adopted hexagonal architecture",
+        },
+        headers=headers,
+    )
+
+    response = client.post(
+        "/hooks/prompt-search",
+        json={"path": path, "query": "otter hexagonal architecture"},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert any(r["title"] == "Otter architecture decision" for r in body)
+    assert all("content" not in r for r in body)
+
+
+def test_prompt_search_no_match_returns_empty_list(client, registered_workspace):
+    project_name = f"test-hooks-{uuid.uuid4()}"
+    path = _path(registered_workspace, project_name)
+
+    response = client.post(
+        "/hooks/prompt-search",
+        json={"path": path, "query": "no-such-lexeme-anywhere"},
+        headers=_headers(registered_workspace),
+    )
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_prompt_search_missing_api_key_returns_not_authenticated(
+    client, registered_workspace
+):
+    project_name = f"test-hooks-{uuid.uuid4()}"
+    path = _path(registered_workspace, project_name)
+
+    response = client.post(
+        "/hooks/prompt-search",
+        json={"path": path, "query": "anything"},
+        headers={MACHINE_HEADER: registered_workspace["machine"]},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["type"] == "not_authenticated"
+
+
+def test_prompt_search_unregistered_path_returns_not_started(
+    client, registered_workspace
+):
+    response = client.post(
+        "/hooks/prompt-search",
+        json={"path": f"/tmp/unregistered-hooks-{uuid.uuid4()}", "query": "anything"},
+        headers=_headers(registered_workspace),
+    )
+
+    assert response.status_code == 404
+    assert response.json()["type"] == "not_started"
+
+
+def test_prompt_search_missing_query_returns_clean_validation(
+    client, registered_workspace
+):
+    project_name = f"test-hooks-{uuid.uuid4()}"
+    path = _path(registered_workspace, project_name)
+
+    response = client.post(
+        "/hooks/prompt-search",
+        json={"path": path},
+        headers=_headers(registered_workspace),
+    )
+
+    _assert_clean_validation(response)
+
+
+def test_prompt_search_rejects_oversized_body(client, registered_workspace):
+    response = client.post(
+        "/hooks/prompt-search",
+        json={
+            "path": _path(registered_workspace, f"test-hooks-{uuid.uuid4()}"),
+            "query": "y" * 8192,
+        },
+        headers=_headers(registered_workspace),
+    )
+
+    assert response.status_code == 413
+    assert response.json()["type"] == "payload_too_large"
+
+
 def test_capture_saves_an_observation(client, registered_workspace):
     project_name = f"test-hooks-{uuid.uuid4()}"
     path = _path(registered_workspace, project_name)
