@@ -329,11 +329,13 @@ Also search memory PROACTIVELY when:
 A `UserPromptSubmit` hook runs a keyword search across the whole workspace on
 every prompt and, when something matches, injects a `## Related memory
 (memodi — keyword match)` block above the prompt with compact pointers
-(id/type/title/topic_key/project) — never content. Treat it as a lexical
-hint, not a semantic or exhaustive one: call `memodi_get_observation(id)`
-before relying on any entry. Its absence means nothing lexically matched
-this exact prompt — it does NOT mean memodi has no relevant history; still
-search proactively per WHEN TO SEARCH MEMORY above.
+(id/type/title/topic_key/project) — never content. The match is by
+significant keywords (OR'd, stopwords ignored), so it fires on natural
+prompts, not only bare keywords — but it's still a lexical hint, not a
+semantic or exhaustive one: call `memodi_get_observation(id)` before relying
+on any entry. Its absence means nothing lexically matched this exact
+prompt — it does NOT mean memodi has no relevant history; still search
+proactively per WHEN TO SEARCH MEMORY above.
 
 ## WORKFLOW PROTOCOL (only when user requests it)
 

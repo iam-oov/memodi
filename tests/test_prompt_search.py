@@ -234,6 +234,95 @@ def test_search_observations_by_workspace_is_keyword_not_semantic(
     assert rows == []
 
 
+def test_natural_language_prompt_matches_by_significant_terms(
+    registered_workspace, project_name
+):
+    save(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+        title="Ports and adapters note",
+        content="hexagonal architecture ports adapters",
+        type="architecture",
+    )
+
+    rows = repository.search_observations_by_workspace(
+        registered_workspace["workspace"]["id"],
+        "contame cómo quedó lo de la hexagonal architecture",
+    )
+    titles = [r["title"] for r in rows]
+    assert "Ports and adapters note" in titles
+
+
+def test_or_semantics_matches_any_significant_term(registered_workspace, project_name):
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    save(
+        **common,
+        title="Penguin colony note",
+        content="penguin colony",
+        type="discovery",
+    )
+    save(
+        **common,
+        title="Hexagonal architecture note",
+        content="hexagonal architecture",
+        type="architecture",
+    )
+
+    rows = repository.search_observations_by_workspace(
+        registered_workspace["workspace"]["id"], "penguin architecture"
+    )
+    titles = [r["title"] for r in rows]
+    assert "Penguin colony note" in titles
+    assert "Hexagonal architecture note" in titles
+
+
+def test_stopword_or_short_only_query_returns_empty(registered_workspace, project_name):
+    save(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+        title="Unrelated note",
+        content="qué es esto y lo otro",
+        type="discovery",
+    )
+
+    rows = repository.search_observations_by_workspace(
+        registered_workspace["workspace"]["id"], "qué es esto y lo otro"
+    )
+    assert rows == []
+
+
+def test_ranks_more_matching_terms_higher(registered_workspace, project_name):
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    save(
+        **common,
+        title="Both terms note",
+        content="hexagonal architecture with ports and adapters",
+        type="architecture",
+    )
+    save(
+        **common,
+        title="One term note",
+        content="hexagonal design without the other word",
+        type="architecture",
+    )
+
+    rows = repository.search_observations_by_workspace(
+        registered_workspace["workspace"]["id"], "hexagonal adapters"
+    )
+    titles = [r["title"] for r in rows]
+    assert titles.index("Both terms note") < titles.index("One term note")
+
+
 def test_search_for_prompt_returns_serialized_list(registered_workspace, project_name):
     save(
         path=_path(registered_workspace, project_name),

@@ -621,6 +621,102 @@ def search_observations_global(
     return [dict(r) for r in rows]
 
 
+PROMPT_STOPWORDS: frozenset[str] = frozenset(
+    {
+        "the",
+        "and",
+        "for",
+        "with",
+        "that",
+        "what",
+        "about",
+        "this",
+        "from",
+        "have",
+        "your",
+        "our",
+        "but",
+        "not",
+        "all",
+        "can",
+        "how",
+        "when",
+        "where",
+        "why",
+        "who",
+        "which",
+        "there",
+        "here",
+        "than",
+        "them",
+        "they",
+        "these",
+        "those",
+        "some",
+        "more",
+        "most",
+        "very",
+        "just",
+        "also",
+        "only",
+        "same",
+        "such",
+        "both",
+        "each",
+        "que",
+        "para",
+        "con",
+        "los",
+        "las",
+        "del",
+        "sobre",
+        "como",
+        "cómo",
+        "qué",
+        "más",
+        "mas",
+        "por",
+        "esto",
+        "esta",
+        "está",
+        "esa",
+        "ese",
+        "eso",
+        "otro",
+        "otra",
+        "otros",
+        "otras",
+        "una",
+        "uno",
+        "unos",
+        "unas",
+        "les",
+        "sus",
+        "muy",
+        "todo",
+        "toda",
+        "todos",
+        "todas",
+        "hay",
+        "fue",
+        "ser",
+        "son",
+        "desde",
+        "hasta",
+        "entre",
+        "sin",
+        "porque",
+        "pero",
+        "cual",
+        "cuales",
+        "quien",
+        "quienes",
+        "cuando",
+        "donde",
+    }
+)
+
+
 def search_observations_by_workspace(
     workspace_id: str,
     query: str,
@@ -629,17 +725,23 @@ def search_observations_by_workspace(
     conn = get_connection()
     rows = conn.execute(
         """
-        SELECT o.*, p.name AS project, ts_rank(o.search_vector, q) AS rank
+        WITH q AS (
+            SELECT string_agg(lexeme, ' | ') AS tsq
+            FROM unnest(tsvector_to_array(to_tsvector('simple', %s))) AS lexeme
+            WHERE char_length(lexeme) >= 3 AND lexeme <> ALL(%s)
+        )
+        SELECT o.*, p.name AS project,
+               ts_rank(o.search_vector, to_tsquery('simple', q.tsq)) AS rank
         FROM observations o
-        JOIN projects p ON p.id = o.project_id,
-        plainto_tsquery('simple', %s) q
-        WHERE p.workspace_id = %s
-          AND o.deleted_at IS NULL
-          AND o.superseded_by IS NULL
-          AND o.search_vector @@ q
+        JOIN projects p ON p.id = o.project_id
+        CROSS JOIN q
+        WHERE q.tsq IS NOT NULL AND q.tsq <> ''
+          AND p.workspace_id = %s
+          AND o.deleted_at IS NULL AND o.superseded_by IS NULL
+          AND o.search_vector @@ to_tsquery('simple', q.tsq)
         ORDER BY rank DESC LIMIT %s
         """,
-        [query, workspace_id, limit],
+        [query, list(PROMPT_STOPWORDS), workspace_id, limit],
     ).fetchall()
     return [dict(r) for r in rows]
 
