@@ -509,6 +509,39 @@ def memodi_backfill_links(ctx: Context, path: str, project: str | None = None) -
     return memory.backfill_links(path, caller["user_id"], caller["machine"], project)
 
 
+@mcp.tool()
+def memodi_find_consolidation_clusters(
+    ctx: Context,
+    path: str,
+    min_age_days: int = 30,
+    min_cluster_size: int = 3,
+    similarity_threshold: float = 0.75,
+    theme: str | None = None,
+) -> str:
+    """Mechanically detect clusters of similar, aged, live observations
+    ripe for a compressed-logbook rollup ("breadcrumbs").
+
+    Read-only and deterministic: reuses the stored embeddings and the
+    idx_obs_embedding HNSW index, never re-embeds. Returns evidence
+    (members, confidence, reason codes) for the agent to vet before
+    writing a compressed observation and superseding the members — it
+    never writes anything itself. theme narrows the eligible set via
+    keyword search; omit it to see every workspace-wide cluster.
+    """
+    caller = _caller(ctx)
+    if isinstance(caller, str):
+        return caller
+    return memory.find_consolidation_clusters(
+        path,
+        caller["user_id"],
+        caller["machine"],
+        min_age_days,
+        min_cluster_size,
+        similarity_threshold,
+        theme,
+    )
+
+
 # --- Workflow ---
 
 

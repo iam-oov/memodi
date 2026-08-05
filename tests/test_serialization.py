@@ -14,9 +14,11 @@ from memodi.tools.memory import (
     search_similar,
 )
 from memodi.tools.serialization import (
+    _CLUSTER_MEMBER_FIELDS,
     _OBSERVATION_READ_FIELDS,
     _PROMPT_SEARCH_FIELDS,
     _RELATED_FIELDS,
+    serialize_clusters,
     serialize_observation,
     serialize_prompt_search,
     serialize_related,
@@ -557,3 +559,76 @@ def test_context_observation_exact_field_set(registered_workspace, project_name)
     assert set(row.keys()) == OBSERVATION_ROW_FIELDS | {"project"}
     assert row["content"]
     assert row["title"]
+
+
+def test_cluster_member_fields_allowlist_is_pinned():
+    assert {"id", "title", "topic_key", "type", "created_at"} == _CLUSTER_MEMBER_FIELDS
+
+
+def test_serialize_clusters_never_leaks_forbidden_keys():
+    clusters = [
+        {
+            "members": [
+                {
+                    "id": "a",
+                    "title": "t",
+                    "topic_key": "k",
+                    "type": "decision",
+                    "created_at": "2026-01-01",
+                    "chars": 42,
+                    "content": "must never leak",
+                    "embedding": [0.1, 0.2],
+                }
+            ],
+            "confidence": 0.9123456,
+            "reason": ["high_cohesion"],
+            "member_count": 1,
+            "total_chars": 42,
+            "estimated_gain": 0.5,
+        }
+    ]
+
+    slim = serialize_clusters(clusters)
+    assert len(slim) == 1
+    member = slim[0]["members"][0]
+    assert set(member.keys()) <= _CLUSTER_MEMBER_FIELDS
+    leaked = _collect_keys(slim) & FORBIDDEN_KEYS
+    assert not leaked
+    assert "content" not in member
+    assert "embedding" not in member
+    assert "chars" not in member
+
+
+def test_serialize_clusters_omits_topic_key_when_null():
+    clusters = [
+        {
+            "members": [
+                {
+                    "id": "a",
+                    "title": "t",
+                    "topic_key": None,
+                    "type": "decision",
+                    "created_at": "2026-01-01",
+                    "chars": 10,
+                },
+                {
+                    "id": "b",
+                    "title": "t",
+                    "topic_key": "k",
+                    "type": "decision",
+                    "created_at": "2026-01-01",
+                    "chars": 10,
+                },
+            ],
+            "confidence": 0.9,
+            "reason": ["high_cohesion"],
+            "member_count": 2,
+            "total_chars": 20,
+            "estimated_gain": 0.5,
+        }
+    ]
+
+    slim = serialize_clusters(clusters)
+    members = slim[0]["members"]
+    assert "topic_key" not in members[0]
+    assert members[1]["topic_key"] == "k"

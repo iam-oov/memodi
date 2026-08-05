@@ -7,6 +7,7 @@ from memodi.database.connection import ensure_schema, rollback
 from memodi.tools.errors import handle_errors
 from memodi.tools.scope import require_workspace, resolve_project
 from memodi.tools.serialization import (
+    serialize_clusters,
     serialize_observation,
     serialize_observation_save,
     serialize_observations,
@@ -311,6 +312,35 @@ def search_for_prompt(
     workspace = require_workspace(user_id, machine, path)
     results = repository.search_observations_by_workspace(workspace["id"], query, limit)
     return json.dumps(serialize_prompt_search(results), default=str)
+
+
+@handle_errors
+def find_consolidation_clusters(
+    path: str,
+    user_id: str,
+    machine: str,
+    min_age_days: int = 30,
+    min_cluster_size: int = 3,
+    similarity_threshold: float = 0.75,
+    theme: str | None = None,
+) -> str:
+    """Mechanically detect clusters of similar, aged, live observations
+    ripe for a compressed-logbook rollup.
+
+    Read-only and deterministic: reuses the stored embeddings and the
+    idx_obs_embedding index, never re-embeds. Returns evidence for the
+    agent to vet — memodi recommends, it never writes anything itself.
+    """
+    _ensure()
+    workspace = require_workspace(user_id, machine, path)
+    clusters = repository.find_consolidation_clusters(
+        workspace_id=workspace["id"],
+        min_age_days=min_age_days,
+        min_cluster_size=min_cluster_size,
+        similarity_threshold=similarity_threshold,
+        theme=theme,
+    )
+    return json.dumps({"clusters": serialize_clusters(clusters)}, default=str)
 
 
 @handle_errors

@@ -57,6 +57,14 @@ _PROMPT_SEARCH_FIELDS = {
     "rank",
 }
 
+_CLUSTER_MEMBER_FIELDS = {
+    "id",
+    "title",
+    "topic_key",
+    "type",
+    "created_at",
+}
+
 _SESSION_SUMMARY_FIELDS = {
     "id",
     "started_at",
@@ -119,6 +127,28 @@ def serialize_prompt_search(observations: list[dict]) -> list[dict]:
     for entry in slim:
         if not entry.get("topic_key"):
             entry.pop("topic_key", None)
+    return slim
+
+
+def serialize_clusters(clusters: list[dict]) -> list[dict]:
+    slim = []
+    for cluster in clusters:
+        members = [
+            _allow(member, _CLUSTER_MEMBER_FIELDS) for member in cluster["members"]
+        ]
+        for member in members:
+            if not member.get("topic_key"):
+                member.pop("topic_key", None)
+        slim.append(
+            {
+                "members": members,
+                "confidence": round(cluster["confidence"], 3),
+                "reason": cluster["reason"],
+                "member_count": cluster["member_count"],
+                "total_chars": cluster["total_chars"],
+                "estimated_gain": round(cluster["estimated_gain"], 3),
+            }
+        )
     return slim
 
 

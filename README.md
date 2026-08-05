@@ -130,7 +130,7 @@ claude plugin uninstall memodi@memodi --scope user
 claude plugin marketplace remove memodi
 ```
 
-## Tools MCP (36 tools)
+## Tools MCP (37 tools)
 
 Todas las tools de proyecto (memoria, workflow, sesiones) reciben `path` (el cwd del
 caller) y lo resuelven contra un workspace registrado — ver Modelo de autenticacion.
@@ -153,6 +153,7 @@ caller) y lo resuelven contra un workspace registrado — ver Modelo de autentic
 | `memodi_search_global` | Buscar keywords en TODOS tus propios proyectos (scoped al usuario, no cruza cuentas) |
 | `memodi_backfill` | Generar embeddings para observaciones viejas |
 | `memodi_backfill_links` | Reconciliar LINKS_TO para observaciones guardadas antes del auto-linking `[[topic-key]]` (idempotente) |
+| `memodi_find_consolidation_clusters` | Detectar mecanicamente clusters de observaciones similares, viejas y vigentes ("migas") listas para comprimir en una sola. Solo lectura: recomienda evidencia, nunca escribe |
 | `memodi_list_projects` | Listar tus proyectos conocidos y su workspace |
 | `memodi_delete` | Soft-delete de una observacion junk/test/incorrecta (reversible a nivel DB) |
 | `memodi_get_observation` | Leer una observacion por id, incluidas las superseded (path de auditoria) |

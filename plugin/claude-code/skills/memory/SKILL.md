@@ -10,7 +10,7 @@ This protocol is MANDATORY and ALWAYS ACTIVE — not something you activate on d
 
 ## TOOL LOADING
 
-Memodi has **6 core tools** always in your context and **30 deferred tools** available via ToolSearch.
+Memodi has **6 core tools** always in your context and **31 deferred tools** available via ToolSearch.
 
 - **Core tools** — ready to use immediately, no extra steps needed
 - **Deferred tools** — call `ToolSearch("select:memodi_toolname")` to load them first
@@ -68,9 +68,10 @@ Memodi has **6 core tools** always in your context and **30 deferred tools** ava
 - `memodi_status` — check database health and extensions
 - `memodi_version` — return server version
 
-**Maintenance** — `ToolSearch("select:memodi_backfill,memodi_backfill_links")`
+**Maintenance** — `ToolSearch("select:memodi_backfill,memodi_backfill_links,memodi_find_consolidation_clusters")`
 - `memodi_backfill` — generate embeddings for old observations without them
 - `memodi_backfill_links` — catch up LINKS_TO edges for observations saved before [[topic-key]] auto-linking existed. Idempotent — re-running reports edges_created: 0 once caught up.
+- `memodi_find_consolidation_clusters` — mechanically detect clusters of similar, aged, live observations ("breadcrumbs") ripe for a compressed-logbook rollup. Read-only: recommends, never writes. See BREADCRUMB COMPRESSION below.
 
 **Correcting memory** — `ToolSearch("select:memodi_delete,memodi_get_observation")`
 - `memodi_delete` — for junk, test, or wrong observations only
@@ -304,6 +305,31 @@ entry's `project`:
 doesn't exist yet still creates the graph node, marking something worth writing
 later. Query the resulting edges with `memodi_dependencies`/`memodi_impact` passing
 `path` (load via `ToolSearch("select:memodi_dependencies,memodi_impact")` first).
+
+## BREADCRUMB COMPRESSION (pull-only — never proactive)
+
+memodi never forgets, so scattered near-duplicate notes about the same thing pile up
+over time. memodi leaves "breadcrumbs" — mechanically-detected clusters of similar,
+aged, still-live notes worth rolling up into one compressed observation. **memodi
+RECOMMENDS the cluster, the agent COMPRESSES it, the user's supersede accepts it** —
+memodi never auto-consolidates anything.
+
+When the user says "comprimí/consolidá las notas de X", "resumen de la funcionalidad
+X", or "comprimí las migas":
+
+1. Load `ToolSearch("select:memodi_find_consolidation_clusters")` and call it — pass
+   `theme` for a specific topic, omit it to see every workspace-wide cluster.
+2. **VET every cluster before compressing** — memodi flags evidence, it does not
+   verdict. Reject a cluster that is too broad (a connected-components chain can pull
+   in only loosely related notes) or that carries `recent_similar_activity`: that code
+   means something recent touches this topic and might have superseded it in a way
+   memodi cannot read semantically (e.g. "migrated away" vs. "still uses") — read the
+   fresh note first and decide whether it belongs in the rollup or contradicts it.
+3. Call `memodi_get_observation` on each member to read the full content.
+4. Write ONE compressed observation preserving the specific gotchas from each member —
+   this is LLM judgment, not something memodi can generate.
+5. `memodi_save(topic_key=..., supersedes=[member ids])` — the compress+reference step
+   that already exists; this closes the loop the cluster opened.
 
 ## WHEN TO SEARCH MEMORY
 

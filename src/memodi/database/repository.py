@@ -1,5 +1,6 @@
 import hashlib
 import json
+from datetime import UTC, datetime
 
 from psycopg.errors import InvalidTextRepresentation, UniqueViolation
 
@@ -1100,6 +1101,216 @@ def find_related_observations(
         ),
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+CLUSTER_CANDIDATES = 10
+
+RECENT_ACTIVITY_CANDIDATES = 5
+
+
+def _has_recent_similar_activity(
+    workspace_id: str,
+    member_ids: list[str],
+    min_age_days: int,
+    similarity_threshold: float,
+) -> bool:
+    """One cheap per-cluster check: does any member have a fresher
+    (younger than the age gate) embedding-similar neighbor anywhere in
+    the workspace?
+
+    The mechanical, honest distillation of "something recent touches
+    this topic" — memodi cannot tell "migrated away" from "still uses",
+    that reading is semantic and left to the agent reviewing the cluster
+    before it fuses anything.
+    """
+    conn = get_connection()
+    row = conn.execute(
+        """
+        SELECT 1
+        FROM observations m
+        CROSS JOIN LATERAL (
+            SELECT 1 - (m.embedding <=> o2.embedding) AS similarity
+            FROM observations o2
+            JOIN projects p2 ON p2.id = o2.project_id
+            WHERE p2.workspace_id = %s
+              AND o2.id != m.id
+              AND o2.deleted_at IS NULL
+              AND o2.superseded_by IS NULL
+              AND o2.embedding IS NOT NULL
+              AND o2.created_at > now() - make_interval(days => %s)
+            ORDER BY m.embedding <=> o2.embedding
+            LIMIT %s
+        ) n
+        WHERE m.id = ANY(%s) AND n.similarity >= %s
+        LIMIT 1
+        """,
+        (
+            workspace_id,
+            min_age_days,
+            RECENT_ACTIVITY_CANDIDATES,
+            member_ids,
+            similarity_threshold,
+        ),
+    ).fetchone()
+    return row is not None
+
+
+def find_consolidation_clusters(
+    workspace_id: str,
+    min_age_days: int = 30,
+    min_cluster_size: int = 3,
+    similarity_threshold: float = 0.75,
+    theme: str | None = None,
+) -> list[dict]:
+    """Mechanically detect clusters of similar, aged, live observations
+    ripe for a compressed-logbook rollup.
+
+    Never re-embeds and never writes: builds K-NN edges via a LATERAL
+    self-join against idx_obs_embedding over the eligible set (live,
+    embedded, aged, workspace-scoped, optionally theme-narrowed via the
+    same keyword FTS builder as search_observations_by_workspace), then
+    finds connected components in Python with union-find. memodi
+    recommends the cluster as evidence; the agent vets it and writes the
+    compression.
+    """
+    conn = get_connection()
+
+    theme_cte = ""
+    theme_join = ""
+    theme_filter = ""
+    params: list = []
+    if theme:
+        theme_cte = """
+        theme_q AS (
+            SELECT string_agg(lexeme, ' | ') AS tsq
+            FROM unnest(tsvector_to_array(to_tsvector('simple', %s))) AS lexeme
+            WHERE char_length(lexeme) >= 3 AND lexeme <> ALL(%s)
+        ),
+        """
+        theme_join = "CROSS JOIN theme_q"
+        theme_filter = """
+              AND theme_q.tsq IS NOT NULL AND theme_q.tsq <> ''
+              AND o.search_vector @@ to_tsquery('simple', theme_q.tsq)
+        """
+        params.extend([theme, list(PROMPT_STOPWORDS)])
+
+    params.extend([workspace_id, min_age_days])
+    params.extend([CLUSTER_CANDIDATES, 1 - similarity_threshold])
+
+    query = f"""
+        WITH {theme_cte}eligible AS (
+            SELECT o.id
+            FROM observations o
+            JOIN projects p ON p.id = o.project_id
+            {theme_join}
+            WHERE p.workspace_id = %s
+              AND o.deleted_at IS NULL
+              AND o.superseded_by IS NULL
+              AND o.embedding IS NOT NULL
+              AND o.created_at <= now() - make_interval(days => %s)
+              {theme_filter}
+        )
+        SELECT
+            oe.id AS a_id, oe.title AS a_title, oe.topic_key AS a_topic_key,
+            oe.type AS a_type, oe.created_at AS a_created_at,
+            length(oe.content) AS a_chars,
+            n.id AS b_id, n.title AS b_title, n.topic_key AS b_topic_key,
+            n.type AS b_type, n.created_at AS b_created_at, n.chars AS b_chars,
+            1 - n.distance AS similarity
+        FROM eligible e
+        JOIN observations oe ON oe.id = e.id
+        CROSS JOIN LATERAL (
+            SELECT o2.id, o2.title, o2.topic_key, o2.type, o2.created_at,
+                   length(o2.content) AS chars,
+                   oe.embedding <=> o2.embedding AS distance
+            FROM observations o2
+            JOIN eligible e2 ON e2.id = o2.id
+            WHERE o2.id != oe.id
+            ORDER BY oe.embedding <=> o2.embedding
+            LIMIT %s
+        ) n
+        WHERE n.distance <= %s
+    """
+    rows = conn.execute(query, params).fetchall()
+
+    attrs: dict = {}
+    parent: dict = {}
+    edge_similarity: dict = {}
+    edge_pairs: set = set()
+
+    def find(node_id):
+        while parent[node_id] != node_id:
+            parent[node_id] = parent[parent[node_id]]
+            node_id = parent[node_id]
+        return node_id
+
+    def union(a, b):
+        root_a, root_b = find(a), find(b)
+        if root_a != root_b:
+            parent[root_a] = root_b
+
+    for row in rows:
+        a_id, b_id = row["a_id"], row["b_id"]
+        for node_id, prefix in ((a_id, "a"), (b_id, "b")):
+            parent.setdefault(node_id, node_id)
+            if node_id not in attrs:
+                attrs[node_id] = {
+                    "id": node_id,
+                    "title": row[f"{prefix}_title"],
+                    "topic_key": row[f"{prefix}_topic_key"],
+                    "type": row[f"{prefix}_type"],
+                    "created_at": row[f"{prefix}_created_at"],
+                    "chars": row[f"{prefix}_chars"],
+                }
+        edge_similarity[frozenset((a_id, b_id))] = row["similarity"]
+        edge_pairs.add((a_id, b_id))
+
+    for a_id, b_id in edge_pairs:
+        union(a_id, b_id)
+
+    components: dict = {}
+    for node_id in parent:
+        components.setdefault(find(node_id), set()).add(node_id)
+
+    now = datetime.now(UTC)
+    clusters = []
+    for member_ids in components.values():
+        if len(member_ids) < min_cluster_size:
+            continue
+
+        internal_similarities = [
+            similarity
+            for pair, similarity in edge_similarity.items()
+            if pair <= member_ids
+        ]
+        confidence = sum(internal_similarities) / len(internal_similarities)
+        members = [attrs[member_id] for member_id in member_ids]
+        total_chars = sum(member["chars"] for member in members)
+        largest_chars = max(member["chars"] for member in members)
+        oldest_days = max((now - member["created_at"]).days for member in members)
+
+        reason = []
+        if confidence >= 0.85:
+            reason.append("high_cohesion")
+        reason.append(f"oldest_member_days:{oldest_days}")
+        if _has_recent_similar_activity(
+            workspace_id, list(member_ids), min_age_days, similarity_threshold
+        ):
+            reason.append("recent_similar_activity")
+
+        clusters.append(
+            {
+                "members": members,
+                "confidence": confidence,
+                "reason": reason,
+                "member_count": len(members),
+                "total_chars": total_chars,
+                "estimated_gain": 1 - (largest_chars / total_chars)
+                if total_chars
+                else 0.0,
+            }
+        )
+    return clusters
 
 
 def search_hybrid(
