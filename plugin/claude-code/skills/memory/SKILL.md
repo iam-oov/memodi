@@ -113,6 +113,11 @@ explicit project name with omitted-project calls for the SAME repo silently spli
 memories across two projects inside the same workspace. **When in doubt, omit
 `project` and let `path` drive it.**
 
+`affects` is NOT this rule — it is a different axis. `project` answers "whose memory is
+this", `affects` answers "who else needs to find it". You still never invent an `affects`
+name: use the directory names of the repos you actually changed. When work spans repos,
+keep passing `path` as your cwd and add `affects` — see the `affects` bullet below.
+
 ## WORKSPACE ONBOARDING (runs only via `/memodi:start`)
 
 This flow is triggered by the `/memodi:start` command, not on your own initiative. When
@@ -212,6 +217,13 @@ to another, write `[[topic-key]]` in content instead (see FORMAT below).
 - **title**: Verb + what — short, searchable (e.g. "Chose LiveKit over Twilio for WebRTC")
 - **type**: decision | bugfix | discovery | pattern | config | preference | architecture
 - **topic_key** (recommended for evolving topics): stable key like "architecture/auth-model". Same topic_key = upsert (updates existing, tracks revisions)
+- **affects** (pass whenever the work touched more than one repo): the directory names of
+  every repo involved, e.g. `affects=["load-matching-worker", "celery-service"]`. Saves ONE
+  observation that all of those projects can find, instead of burying a cross-repo contract
+  under whichever repo you happened to be sitting in. Never invent a name — use the real
+  directory names. New names are created and echoed back as `projects_created`, so check
+  that field for typos. On a `topic_key` upsert, omitting `affects` keeps the stored list;
+  pass `affects=[]` only when you mean to clear it. Cap is 20 names.
 - **content**: structured as:
   - **What**: One sentence — what was done
   - **Why**: What motivated it
@@ -349,6 +361,11 @@ Also search memory PROACTIVELY when:
 - `memodi_search` — when you know exact words (load via ToolSearch first)
 - `memodi_search_similar` — when searching by concept (load via ToolSearch first)
 - `memodi_search_global` — cross-project results across the caller's OWN projects (load via ToolSearch first)
+
+`memodi_search_hybrid`, `memodi_search` and `memodi_search_similar` are scoped by the `path`
+you pass: from a repo you get that repo's own observations plus any that list it in `affects`;
+from the registered workspace root you get every project in the workspace. So when you need
+the wide view, pass the root as `path` instead of reaching for `memodi_search_global`.
 
 ## Automatic context on your prompts
 

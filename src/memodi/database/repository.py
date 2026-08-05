@@ -16,6 +16,15 @@ def _normalize_path(path: str) -> str:
     return path.rstrip("/")
 
 
+def _with_affects(meta: dict, affects: list[str]) -> dict:
+    out = dict(meta)
+    if affects:
+        out["affects"] = affects
+    else:
+        out.pop("affects", None)
+    return out
+
+
 ALLOWED_TYPES = {
     "decision",
     "bugfix",
@@ -42,6 +51,36 @@ def get_or_create_workspace(name: str, owner_user_id: str) -> dict:
     ).fetchone()
     conn.commit()
     return dict(row)
+
+
+def _project_scope(
+    project_id: str | None, project_name: str | None, alias: str = ""
+) -> tuple[str, list]:
+    """Predicate narrowing observations to one project plus anything that lists
+    it in metadata.affects.
+
+    Empty when project_id is None: the caller sits at the registered workspace
+    root, where every project in the workspace is legitimately in scope.
+    """
+    if project_id is None:
+        return "", []
+    col = f"{alias}." if alias else ""
+    if not project_name:
+        return f"AND {col}project_id = %s", [project_id]
+    # ponytail: unindexed JSONB scan. Add an index on ((metadata->'affects'))
+    # USING GIN if a workspace ever outgrows a sequential filter.
+    return (
+        f"AND ({col}project_id = %s OR {col}metadata->'affects' ? %s)",
+        [project_id, project_name],
+    )
+
+
+def get_project_names(workspace_id: str) -> set[str]:
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT name FROM projects WHERE workspace_id = %s", (workspace_id,)
+    ).fetchall()
+    return {r["name"] for r in rows}
 
 
 def get_or_create_project(name: str, workspace_id: str) -> dict:
@@ -107,7 +146,7 @@ def resolve_workspace(user_id: str, machine: str, path: str) -> dict | None:
     normalized_path = _normalize_path(path)
     row = conn.execute(
         """
-        SELECT w.* FROM workspaces w
+        SELECT w.*, wp.path AS matched_path FROM workspaces w
         JOIN workspace_paths wp ON wp.workspace_id = w.id
         WHERE w.owner_user_id = %s
           AND wp.machine = %s
@@ -392,25 +431,35 @@ def save_observation(
     metadata: dict | None = None,
     embedding: list[float] | None = None,
     occurred_at: str | None = None,
+    affects: list[str] | None = None,
 ) -> dict:
     if type not in ALLOWED_TYPES:
         raise ValueError(f"type must be one of: {', '.join(sorted(ALLOWED_TYPES))}")
 
     conn = get_connection()
-    meta = json.dumps(metadata or {})
+    base_meta = dict(metadata or {})
+    if affects is not None:
+        base_meta = _with_affects(base_meta, affects)
+    meta = json.dumps(base_meta)
 
     chash = _content_hash(title, content)
 
     if topic_key:
         existing = conn.execute(
             """
-            SELECT id FROM observations
+            SELECT id, metadata FROM observations
             WHERE project_id = %s AND topic_key = %s
               AND deleted_at IS NULL AND superseded_by IS NULL
             """,
             (project_id, topic_key),
         ).fetchone()
         if existing:
+            # This branch replaces metadata wholesale, so an omitted affects
+            # has to carry the stored list forward or a later revision would
+            # silently strip the observation's cross-project visibility.
+            if affects is None:
+                stored = (existing["metadata"] or {}).get("affects")
+                meta = json.dumps(_with_affects(base_meta, stored or []))
             if embedding is not None:
                 row = conn.execute(
                     """
@@ -475,7 +524,7 @@ def save_observation(
     # success while the content surfaced nowhere.
     existing_dup = conn.execute(
         """
-        SELECT id FROM observations
+        SELECT id, metadata FROM observations
         WHERE project_id = %s
           AND content_hash = %s
           AND deleted_at IS NULL
@@ -486,15 +535,22 @@ def save_observation(
         (project_id, chash),
     ).fetchone()
     if existing_dup:
+        # content_hash covers title and content only, so the same content
+        # reaching one more project lands here. Union rather than drop it —
+        # otherwise the wider routing is lost with no signal.
+        dup_meta = dict(existing_dup["metadata"] or {})
+        stored = dup_meta.get("affects") or []
+        merged = stored + [a for a in (affects or []) if a not in stored]
         row = conn.execute(
             """
             UPDATE observations
             SET duplicate_count = duplicate_count + 1,
+                metadata = %s,
                 updated_at = now()
             WHERE id = %s
             RETURNING *
             """,
-            (existing_dup["id"],),
+            (json.dumps(_with_affects(dup_meta, merged)), existing_dup["id"]),
         ).fetchone()
         conn.commit()
         result = dict(row)
@@ -549,36 +605,39 @@ def save_observation(
 
 
 def search_observations(
-    project_id: str,
+    project_id: str | None,
     query: str,
     type: str | None = None,
     limit: int = 10,
     workspace_id: str | None = None,
+    project_name: str | None = None,
 ) -> list[dict]:
     conn = get_connection()
     if workspace_id:
-        base = """
+        scope, scope_params = _project_scope(project_id, project_name, alias="o")
+        base = f"""
             SELECT o.*, ts_rank(o.search_vector, q) AS rank
             FROM observations o
             JOIN projects p ON p.id = o.project_id,
             plainto_tsquery('simple', %s) q
-            WHERE o.project_id = %s
-              AND p.workspace_id = %s
+            WHERE p.workspace_id = %s
               AND o.deleted_at IS NULL
               AND o.superseded_by IS NULL
               AND o.search_vector @@ q
+              {scope}
         """
-        params: list = [query, project_id, workspace_id]
+        params: list = [query, workspace_id, *scope_params]
     else:
-        base = """
+        scope, scope_params = _project_scope(project_id, project_name)
+        base = f"""
             SELECT *, ts_rank(search_vector, query) AS rank
             FROM observations, plainto_tsquery('simple', %s) query
-            WHERE project_id = %s
-              AND deleted_at IS NULL
+            WHERE deleted_at IS NULL
               AND superseded_by IS NULL
               AND search_vector @@ query
+              {scope}
         """
-        params = [query, project_id]
+        params = [query, *scope_params]
 
     if type:
         base += " AND o.type = %s" if workspace_id else " AND type = %s"
@@ -997,42 +1056,51 @@ def rename_workspace(old_name: str, new_name: str, owner_user_id: str) -> dict |
 
 
 def search_similar(
-    project_id: str,
+    project_id: str | None,
     embedding: list[float],
     limit: int = 10,
     workspace_id: str | None = None,
+    project_name: str | None = None,
 ) -> list[dict]:
     conn = get_connection()
     query_embedding = str(embedding)
     if workspace_id:
+        scope, scope_params = _project_scope(project_id, project_name, alias="o")
         rows = conn.execute(
-            """
+            f"""
             SELECT o.*, 1 - (o.embedding <=> %s::vector) AS similarity
             FROM observations o
             JOIN projects p ON p.id = o.project_id
-            WHERE o.project_id = %s
-              AND p.workspace_id = %s
+            WHERE p.workspace_id = %s
               AND o.deleted_at IS NULL
               AND o.superseded_by IS NULL
               AND o.embedding IS NOT NULL
+              {scope}
             ORDER BY o.embedding <=> %s::vector
             LIMIT %s
             """,
-            (query_embedding, project_id, workspace_id, query_embedding, limit),
+            (
+                query_embedding,
+                workspace_id,
+                *scope_params,
+                query_embedding,
+                limit,
+            ),
         ).fetchall()
     else:
+        scope, scope_params = _project_scope(project_id, project_name)
         rows = conn.execute(
-            """
+            f"""
             SELECT *, 1 - (embedding <=> %s::vector) AS similarity
             FROM observations
-            WHERE project_id = %s
-              AND deleted_at IS NULL
+            WHERE deleted_at IS NULL
               AND superseded_by IS NULL
               AND embedding IS NOT NULL
+              {scope}
             ORDER BY embedding <=> %s::vector
             LIMIT %s
             """,
-            (query_embedding, project_id, query_embedding, limit),
+            (query_embedding, *scope_params, query_embedding, limit),
         ).fetchall()
     return [dict(r) for r in rows]
 
@@ -1314,17 +1382,24 @@ def find_consolidation_clusters(
 
 
 def search_hybrid(
-    project_id: str,
+    project_id: str | None,
     query: str,
     embedding: list[float],
     limit: int = 10,
     workspace_id: str | None = None,
+    project_name: str | None = None,
 ) -> list[dict]:
     conn = get_connection()
     query_embedding = str(embedding)
     k = 60  # RRF constant
 
-    cte = """
+    # Both ranking CTEs and the outer join each need the scope: a CTE that
+    # still ranked the whole workspace would let foreign rows crowd out the
+    # in-scope ones before the outer filter ever runs.
+    scope, scope_params = _project_scope(project_id, project_name)
+    outer_scope, outer_params = _project_scope(project_id, project_name, alias="o")
+
+    cte = f"""
         WITH keyword AS (
             SELECT id,
                    ROW_NUMBER() OVER (
@@ -1332,23 +1407,24 @@ def search_hybrid(
                            ts_rank(search_vector, plainto_tsquery('simple', %s)) DESC
                    ) AS rank
             FROM observations
-            WHERE project_id = %s
-              AND deleted_at IS NULL
+            WHERE deleted_at IS NULL
               AND superseded_by IS NULL
               AND search_vector @@ plainto_tsquery('simple', %s)
+              {scope}
         ),
         semantic AS (
             SELECT id,
                    ROW_NUMBER() OVER (ORDER BY embedding <=> %s::vector) AS rank
             FROM observations
-            WHERE project_id = %s
-              AND deleted_at IS NULL
+            WHERE deleted_at IS NULL
               AND superseded_by IS NULL
               AND embedding IS NOT NULL
+              {scope}
         )
     """
+    cte_params = [query, query, *scope_params, query_embedding, *scope_params]
     if workspace_id:
-        tail = """
+        tail = f"""
             SELECT o.*,
                    COALESCE(1.0 / (%s + k.rank), 0)
                        + COALESCE(1.0 / (%s + s.rank), 0) AS rrf_score
@@ -1356,52 +1432,31 @@ def search_hybrid(
             JOIN projects p ON p.id = o.project_id
             LEFT JOIN keyword k ON o.id = k.id
             LEFT JOIN semantic s ON o.id = s.id
-            WHERE o.project_id = %s
-              AND p.workspace_id = %s
+            WHERE p.workspace_id = %s
               AND o.deleted_at IS NULL
               AND o.superseded_by IS NULL
               AND (k.id IS NOT NULL OR s.id IS NOT NULL)
+              {outer_scope}
             ORDER BY rrf_score DESC
             LIMIT %s
         """
-        params = [
-            query,
-            project_id,
-            query,
-            query_embedding,
-            project_id,
-            k,
-            k,
-            project_id,
-            workspace_id,
-            limit,
-        ]
+        params = [*cte_params, k, k, workspace_id, *outer_params, limit]
     else:
-        tail = """
+        tail = f"""
             SELECT o.*,
                    COALESCE(1.0 / (%s + k.rank), 0)
                        + COALESCE(1.0 / (%s + s.rank), 0) AS rrf_score
             FROM observations o
             LEFT JOIN keyword k ON o.id = k.id
             LEFT JOIN semantic s ON o.id = s.id
-            WHERE o.project_id = %s
-              AND o.deleted_at IS NULL
+            WHERE o.deleted_at IS NULL
               AND o.superseded_by IS NULL
               AND (k.id IS NOT NULL OR s.id IS NOT NULL)
+              {outer_scope}
             ORDER BY rrf_score DESC
             LIMIT %s
         """
-        params = [
-            query,
-            project_id,
-            query,
-            query_embedding,
-            project_id,
-            k,
-            k,
-            project_id,
-            limit,
-        ]
+        params = [*cte_params, k, k, *outer_params, limit]
     rows = conn.execute(cte + tail, params).fetchall()
     return [dict(r) for r in rows]
 

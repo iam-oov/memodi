@@ -24,11 +24,65 @@ MAX_SUPERSEDES_KEY = 64
 
 MAX_LINKS = 20
 
+MAX_AFFECTS = 20
+
 _LINK_RE = re.compile(r"\[\[([^\[\]]{1,256})\]\]")
 
 
 def _ensure() -> None:
     ensure_schema()
+
+
+def _normalize_affects(
+    affects: list[str] | None,
+) -> tuple[list[str] | None, str | None]:
+    """Clean the caller's affects list into project names to store.
+
+    Returns (names, reason). A reason means the list was refused while the
+    observation itself still saves, matching how supersedes behaves. None means
+    the caller said nothing about affects, which preserves whatever is stored;
+    an empty list is an explicit request to clear it.
+    """
+    if affects is None:
+        return None, None
+    if not isinstance(affects, list):
+        raise ValueError("affects must be a list of project names")
+    if any(not isinstance(name, str) for name in affects):
+        raise ValueError("affects must contain only strings")
+    if len(affects) > MAX_AFFECTS:
+        return None, "too_many"
+    names: list[str] = []
+    for raw in affects:
+        name = raw.strip()
+        if name and name not in names:
+            names.append(name)
+    return names, None
+
+
+def _ensure_affected_projects(
+    affects: list[str] | None, workspace_id: str
+) -> list[str]:
+    """Create project rows for affected names that do not exist yet.
+
+    Auto-creating them keeps a repo that has no memories yet declarable;
+    returning the ones created is what keeps a typo visible instead of
+    silently swallowing the observation.
+    """
+    if not affects:
+        return []
+    existing = repository.get_project_names(workspace_id)
+    created = [name for name in affects if name not in existing]
+    for name in created:
+        repository.get_or_create_project(name, workspace_id=workspace_id)
+    return created
+
+
+def _search_scope(proj: dict) -> dict:
+    """Project scope for a search. At the registered workspace root no single
+    repo is in scope, so nothing narrows."""
+    if proj.get("at_workspace_root"):
+        return {"project_id": None, "project_name": None}
+    return {"project_id": proj["id"], "project_name": proj["name"]}
 
 
 def parse_links(content: str, own_topic_key: str | None) -> tuple[list[str], int]:
@@ -251,15 +305,18 @@ def save(
     metadata: dict | None = None,
     occurred_at: str | None = None,
     supersedes: str | list[str] | None = None,
+    affects: list[str] | None = None,
 ) -> str:
     _ensure()
     from memodi.embeddings import generate_embedding
 
+    affected, affects_reason = _normalize_affects(affects)
     proj = resolve_project(user_id, machine, path, project)
     embedding = generate_embedding(f"{title} {content}")
     # Auto-attach active session if one exists
     active_session = repository.get_active_session(proj["id"])
     session_id = str(active_session["id"]) if active_session else None
+    projects_created = _ensure_affected_projects(affected, proj["workspace_id"])
     obs = repository.save_observation(
         project_id=proj["id"],
         title=title,
@@ -270,8 +327,13 @@ def save(
         metadata=metadata,
         embedding=embedding,
         occurred_at=occurred_at,
+        affects=affected,
     )
     ack = serialize_observation_save(obs)
+    if affects_reason:
+        ack["affects_reason"] = affects_reason
+    if projects_created:
+        ack["projects_created"] = projects_created
     if supersedes is not None:
         _apply_supersedes(ack, supersedes, str(obs["id"]), proj["workspace_id"])
     _attach_related(ack, embedding, str(obs["id"]), proj["workspace_id"])
@@ -292,7 +354,7 @@ def search(
     _ensure()
     proj = resolve_project(user_id, machine, path, project)
     results = repository.search_observations(
-        project_id=proj["id"],
+        **_search_scope(proj),
         query=query,
         type=type,
         limit=limit,
@@ -511,7 +573,7 @@ def search_similar(
     proj = resolve_project(user_id, machine, path, project)
     embedding = generate_embedding(query)
     results = repository.search_similar(
-        project_id=proj["id"],
+        **_search_scope(proj),
         embedding=embedding,
         limit=limit,
         workspace_id=proj["workspace_id"],
@@ -534,7 +596,7 @@ def search_hybrid(
     proj = resolve_project(user_id, machine, path, project)
     embedding = generate_embedding(query)
     results = repository.search_hybrid(
-        project_id=proj["id"],
+        **_search_scope(proj),
         query=query,
         embedding=embedding,
         limit=limit,

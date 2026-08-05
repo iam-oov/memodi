@@ -31,4 +31,8 @@ def resolve_project(user_id: str, machine: str, path: str, project: str | None) 
             f"cannot derive project name from path '{path}'; "
             "pass an explicit project name"
         )
-    return repository.get_or_create_project(name, workspace_id=workspace["id"])
+    resolved = repository.get_or_create_project(name, workspace_id=workspace["id"])
+    # An explicit project name is an explicit request to narrow, so it never
+    # counts as sitting at the root even when the cwd is the registered path.
+    at_root = project is None and path.rstrip("/") == workspace.get("matched_path")
+    return {**resolved, "at_workspace_root": at_root}

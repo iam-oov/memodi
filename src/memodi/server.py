@@ -117,6 +117,7 @@ def memodi_save(
     metadata: dict | None = None,
     occurred_at: str | None = None,
     supersedes: str | list[str] | None = None,
+    affects: list[str] | None = None,
 ) -> str:
     """Persist an observation to memory.
 
@@ -169,6 +170,21 @@ def memodi_save(
     is rejected at this boundary before anything is saved. The save
     itself always persists.
 
+    Pass affects=["repo-a", "repo-b"] when the work spans several
+    repos in this workspace: ONE observation that searching from any
+    of those projects will find, instead of a cross-repo contract
+    filed only under whichever repo happened to be the cwd. Use the
+    directory names of the repos you actually touched — do not invent
+    names. Names with no project yet are created and listed back as
+    projects_created, so a typo shows up immediately instead of
+    silently swallowing the memory. On a topic_key upsert, omitting
+    affects keeps the stored list while affects=[] clears it. Over 20
+    names the list is refused with affects_reason "too_many" and the
+    observation still saves. Primary ownership always stays with path
+    — affects widens who can find an observation, it never moves it,
+    and it never makes another project's topic_key upsertable from
+    here.
+
     The response may carry a `related` list — up to 3 existing
     observations from anywhere in the workspace very similar to
     this one (id, title, topic_key, project, similarity, never
@@ -209,6 +225,7 @@ def memodi_save(
         metadata,
         occurred_at,
         supersedes,
+        affects=affects,
     )
 
 

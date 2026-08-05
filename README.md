@@ -113,7 +113,7 @@ Every project-scoped tool takes `path` (the caller's cwd) and resolves it agains
 ### Memory
 | Tool | Description |
 |------|-------------|
-| `memodi_save` | Save an observation (auto-generates embedding) |
+| `memodi_save` | Save an observation (auto-generates embedding); `affects` attributes one observation to several projects |
 | `memodi_search` | Keyword search |
 | `memodi_search_similar` | Semantic search |
 | `memodi_search_hybrid` | Keyword + semantic with RRF |
@@ -195,7 +195,7 @@ uv run pytest -v
 uv run ruff check src/ tests/
 ```
 
-PR to `main` → `ci.yml` runs lint + tests (437) → on merge, `deploy.yml` deploys automatically.
+PR to `main` → `ci.yml` runs lint + tests (453) → on merge, `deploy.yml` deploys automatically.
 
 ## Production
 
