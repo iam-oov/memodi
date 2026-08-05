@@ -200,3 +200,38 @@ independently of any deploy:
 - [ ] cloudflared tunnel running independently (step 10) — no chicken-and-egg with deploy
 - [ ] `docker/prod/.env` present, `MEMODI_SIGNUP_CODE` non-empty
 - [ ] sudoers line in place for passwordless `systemctl restart memodi` only (step 9)
+
+## Day-2 operations
+
+### Exposed routes
+
+- `/signup` is public by design (the only entry point without a key): invite code (`MEMODI_SIGNUP_CODE`) + app-level body limit. There is NO app-level throttling — set a Cloudflare rate-limiting rule on `memodi.valdoh.com/signup` (suggested: 5 req/min per IP).
+- `/mcp` requires a valid per-user api key (`X-Memodi-Api-Key`); missing or invalid → `not_authenticated`.
+- Four plain-HTTP hook routes share the same auth contract (`X-Memodi-Api-Key` + `X-Memodi-Machine`) with no other gate in front: `POST /hooks/session-start`, `/hooks/session-close`, `/hooks/capture`, `/hooks/prompt-search`. Each validates and bounds its fields and caps the body at app level (4KB; 64KB for `capture`). Rate limiting on `/hooks/*` is an operator action in Cloudflare.
+
+### Health checks
+
+`deploy.yml` fails with `exit 1` if `/signup` doesn't return 200 after the restart, or if the installed version doesn't match `__about__.py`, and dumps the last 30 lines of `journalctl -u memodi`. A GET on `/mcp` returns 406 from a HEALTHY server (streamable-http requires MCP headers) — never use it as a liveness probe.
+
+### Release
+
+```bash
+# Bump version in pyproject.toml, commit, then:
+git tag v0.18.0
+git push origin v0.18.0
+```
+
+`release.yml` generates the changelog from the previous tag and creates the GitHub Release.
+
+### Manual deploy
+
+```bash
+ssh -o "ProxyCommand=cloudflared access ssh --hostname %h" memodi@pi.valdoh.com
+cd ~/memodi && git fetch origin main && git reset --hard origin/main
+uv sync --reinstall-package memodi
+sudo systemctl restart memodi
+```
+
+### Backups
+
+Deferred — the Pi starts with a fresh DB; offsite backup strategy is a future change.

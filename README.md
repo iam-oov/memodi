@@ -1,91 +1,49 @@
 # memodi
 
-**Memoria Distribuida** — Memoria persistente y distribuida para agentes de IA.
+[![CI](https://github.com/iam-oov/memodi/actions/workflows/ci.yml/badge.svg)](https://github.com/iam-oov/memodi/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/iam-oov/memodi)](https://github.com/iam-oov/memodi/releases)
+[![Python](https://img.shields.io/badge/python-3.12+-blue)](pyproject.toml)
+[![License: MIT](https://img.shields.io/github/license/iam-oov/memodi)](LICENSE)
 
-## Que es memodi?
+English | [Español](README.es.md)
 
-Un servidor MCP que le da a Claude Code (y a cualquier agente compatible con MCP) memoria persistente distribuida entre workspaces y proyectos. Pensalo como `git pull` para contexto — cambias de proyecto y retomas exactamente donde quedaste.
+**Memoria Distribuida** — MCP server that gives Claude Code persistent memory across workspaces, projects, and machines. It saves decisions, bugs, and discoveries proactively and recalls them by keyword, semantics, or graph — with no extra LLM calls.
 
-## Por que?
+A single PostgreSQL instance does it all: document store (JSONB), semantic search (pgvector), and knowledge graph (Apache AGE).
 
-Los agentes de IA olvidan todo entre sesiones. Las soluciones existentes son:
-- **Solo locales** (SQLite) — no se pueden compartir entre equipos
-- **Demasiado pesadas** (infra completa de knowledge graph) — overkill para equipos chicos
-- **Sin relaciones** — no pueden responder "que se rompe si cambio esto?"
+## Features
 
-memodi combina tres capacidades en una sola instancia de PostgreSQL:
-- **Document store** (JSONB) — tareas, estado, decisiones, metadata
-- **Busqueda semantica** (pgvector) — "ya resolvimos algo parecido?"
-- **Grafo de conocimiento** (Apache AGE) — dependencias entre repos, relaciones entre modulos, analisis de impacto
+- **Proactive memory** — the agent saves observations without being asked; the instructions ship with the plugin skill
+- **Hybrid search** — keyword + semantic combined with RRF, plus global search across all your projects
+- **Knowledge graph** — cross-repo dependencies and transitive impact analysis ("what breaks if I change X?")
+- **Auto-linking** — writing `[[topic-key]]` in an observation creates the `LINKS_TO` relation in the graph
+- **Multi-machine** — one key per user; registering the same workspace on two machines shares memories between them
+- **Automatic context** — session hooks load memory when you open the repo and inject relevant pointers on every prompt
+- **Inert by default** — an unregistered path returns `not_started`; projects and workspaces are never auto-created
 
-## Arquitectura
+## Quick start
 
-```
-Internet ──HTTPS──► Cloudflare Tunnel ──► memodi-server (uv + systemd) ──► PostgreSQL (nativo)
-                    memodi.valdoh.com      puerto 8787, Raspberry Pi
-```
+You need [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and a memodi API key (one per user). Sign up at `https://memodi.valdoh.com/signup` (or your instance's URL) and copy the `mmd_...` key as soon as you see it — it is shown only once.
 
-Claude decide que vale la pena recordar. memodi persiste y consulta. Sin llamadas extra a LLMs — Claude ya esta ahi.
-
-El agente usa memodi de forma PROACTIVA — guarda decisiones, bugs y descubrimientos automaticamente sin que el usuario lo pida. Las instrucciones viajan con el skill del plugin.
-
-## Modelo de autenticacion
-
-memodi usa cuentas reales por usuario, no una key compartida entre todos:
-
-- Alta en `/signup` (ruta publica del server, sin auth de MCP por diseno — es el unico punto de entrada sin key)
-- La api key (`mmd_...`) se muestra UNA SOLA VEZ al registrarte; el server solo guarda su hash, nunca puede volver a mostrartela
-- `X-Memodi-Api-Key` identifica al usuario y es el UNICO control de acceso a nivel app frente a `/mcp` — no hay otra capa delante
-- `X-Memodi-Machine` identifica la maquina; los paths se registran por `(usuario, maquina, path)`, asi la misma carpeta puede resolver a workspaces distintos en maquinas distintas
-- `path` (el cwd del caller) es un parametro explicito en cada llamada a una tool de proyecto — memodi es INERTE para paths no registrados: devuelve `{"type": "not_started"}`, sin auto-creacion de proyectos ni workspaces
-- Key ausente o invalida -> `{"type": "not_authenticated"}`
-
-## Quick Start
-
-Necesitas: [Claude Code](https://docs.anthropic.com/en/docs/claude-code) instalado y una API key propia de memodi (una por usuario, no se comparte).
-
-### 0. Conseguir tu API key
-
-Registrate en la pagina de signup del server (reemplaza la URL por la de tu instancia):
-
-```
-https://memodi.valdoh.com/signup
-```
-
-Copia la api key (`mmd_...`) apenas la veas — se muestra una sola vez.
-
-### Instalacion rapida
+### Install
 
 ```bash
 export MEMODI_API_KEY="mmd_..."
 curl -sf https://raw.githubusercontent.com/iam-oov/memodi/main/install.sh | sh
 ```
 
-> Si preferis no ejecutar scripts remotos directamente (comprensible), segui la instalacion manual.
-
-### Instalacion manual
-
-**1. Configurar la API key** — agregalo a tu shell profile (`~/.zshrc` o `~/.bashrc`):
+<details>
+<summary>Manual install</summary>
 
 ```bash
+# 1. API key in your shell profile (~/.zshrc or ~/.bashrc)
 export MEMODI_API_KEY="mmd_..."
-```
 
-**2. Agregar el marketplace de memodi:**
-
-```bash
+# 2. Marketplace + plugin (session hooks + skills)
 claude plugin marketplace add iam-oov/memodi
-```
-
-**3. Instalar el plugin** (hooks de sesion + skills de memoria e import):
-
-```bash
 claude plugin install memodi@memodi
-```
 
-**4. Configurar la conexion al server** (dos headers: tu identidad de usuario y la de esta maquina):
-
-```bash
+# 3. Server connection
 claude mcp add --transport http \
   -H "X-Memodi-Api-Key: $MEMODI_API_KEY" \
   -H "X-Memodi-Machine: $(hostname)" \
@@ -93,110 +51,123 @@ claude mcp add --transport http \
   memodi https://memodi.valdoh.com/mcp
 ```
 
-**5. Permitir todas las tools de memodi** (evita aprobar una por una):
+Adding `"mcp__memodi__*"` to `permissions.allow` in `~/.claude/settings.json` avoids approving tool by tool.
 
-Agregar `"mcp__memodi__*"` al array `permissions.allow` en `~/.claude/settings.json`.
+</details>
 
-**6. Reiniciar Claude Code y activar la memoria:**
+Restart Claude Code and run `/memodi:start`: it registers the workspace on this machine (or attaches to an existing one from another machine — same name = shared memories) and loads its memory. Once per (machine, folder); after that, memory loads silently every time you open the repo.
 
+`/memodi:end` closes the session with a structured summary (Goal / Accomplished / Next Steps). A `SessionEnd` hook also runs on every exit as a safety net — it never overwrites a real summary.
+
+### Upgrade
+
+The installer is idempotent — running it again pulls the latest plugin version:
+
+```bash
+curl -sf https://raw.githubusercontent.com/iam-oov/memodi/main/install.sh | sh
 ```
-/memodi:start
+
+Or directly:
+
+```bash
+claude plugin marketplace update memodi
+claude plugin update memodi@memodi
 ```
 
-### Activar y verificar
-
-Abri Claude Code en tu proyecto y corre `/memodi:start`. Ese comando:
-1. Chequea si el path ya esta registrado en esta maquina (`memodi_context`)
-2. Si no lo esta, registra el workspace — te deja elegir un nombre nuevo o **enganchar uno que ya tengas en otra maquina** (registrar el mismo nombre en dos maquinas comparte las memorias entre ambas)
-3. Carga las memorias de todo el workspace y abre una sesion
-
-Una sola vez por (maquina, carpeta). Despues de eso la memoria se carga **sola y en silencio** cada vez que abris ese repo — no hace falta volver a correr `/memodi:start` salvo que quieras re-traer el contexto a mano. En un path no registrado memodi se queda inerte y callado hasta que corras el comando.
-
-Para cerrar una sesion de forma explicita corre `/memodi:end`: arma un resumen estructurado (Goal / Accomplished / Next Steps) y lo guarda con `memodi_session_end`, para que la proxima sesion arranque con ese contexto. Un hook `SessionEnd` corre igual en cada salida como red de contencion, por HTTP plano (no MCP), pero solo cierra la sesion que coincide exactamente con el session id de Claude Code y siempre con resumen NULL — nunca reemplaza el resumen real.
-
-Un hook `UserPromptSubmit` corre en cada prompt: busca por keyword (sin embeddings) en todo el workspace via `POST /hooks/prompt-search` e inyecta punteros compactos (id/type/title/topic_key/project) a observaciones previas relacionadas — nunca el contenido. Un prompt corto o sin coincidencias lexicas no inyecta nada; nunca bloquea el turno (falla en silencio si el server no responde).
-
-### Desinstalar
+### Uninstall
 
 ```bash
 curl -sf https://raw.githubusercontent.com/iam-oov/memodi/main/uninstall.sh | sh
 ```
 
-O manualmente:
+## Architecture
 
-```bash
-claude mcp remove memodi --scope user
-claude plugin uninstall memodi@memodi --scope user
-claude plugin marketplace remove memodi
+```
+Claude Code ──HTTPS──► Cloudflare Tunnel ──► memodi-server (uv + systemd) ──► PostgreSQL
+                       memodi.valdoh.com      Raspberry Pi                     pgvector + AGE
 ```
 
-## Tools MCP (37 tools)
+Claude decides what is worth remembering; memodi persists and retrieves.
 
-Todas las tools de proyecto (memoria, workflow, sesiones) reciben `path` (el cwd del
-caller) y lo resuelven contra un workspace registrado — ver Modelo de autenticacion.
+| Layer | Extension | Purpose |
+|-------|-----------|---------|
+| Document store | JSONB | State, tasks, decisions, metadata |
+| Full-text search | tsvector | Multi-language keywords |
+| Semantic search | pgvector (HNSW, 384d) | "have we solved something like this?" |
+| Knowledge graph | Apache AGE (Cypher) | Dependencies, impact |
 
-### Sistema
-| Tool | Descripcion |
+## Authentication
+
+Real per-user accounts, not a shared key:
+
+- Sign up at `/signup` (the only route without a key); the `mmd_...` api key is shown ONCE — the server stores only its hash
+- `X-Memodi-Api-Key` identifies the user and is the only access control in front of `/mcp` and `/hooks/*`
+- `X-Memodi-Machine` identifies the machine; paths are registered per (user, machine, path) — the same folder can resolve to different workspaces on different machines
+- `path` (the caller's cwd) is an explicit parameter on every project-scoped tool
+- Unregistered path → `{"type": "not_started"}`; missing or invalid key → `{"type": "not_authenticated"}`
+
+## MCP Tools (37)
+
+Every project-scoped tool takes `path` (the caller's cwd) and resolves it against a registered workspace.
+
+### Memory
+| Tool | Description |
 |------|-------------|
-| `memodi_ping` | Verificar que el server esta vivo |
-| `memodi_status` | Salud del server y extensiones de PostgreSQL |
-| `memodi_version` | Version del server en produccion |
+| `memodi_save` | Save an observation (auto-generates embedding) |
+| `memodi_search` | Keyword search |
+| `memodi_search_similar` | Semantic search |
+| `memodi_search_hybrid` | Keyword + semantic with RRF |
+| `memodi_context` | Recent context for a project |
+| `memodi_search_global` | Search across all your projects (user-scoped) |
+| `memodi_backfill` | Embeddings for old observations |
+| `memodi_backfill_links` | Reconcile LINKS_TO from before auto-linking (idempotent) |
+| `memodi_find_consolidation_clusters` | Detect clusters of observations ready to consolidate (read-only) |
+| `memodi_list_projects` | Known projects and their workspace |
+| `memodi_delete` | Soft-delete an observation |
+| `memodi_get_observation` | Read an observation by id, including superseded ones |
 
-### Memoria (proactivo — el agente los usa sin que le pidas)
-| Tool | Descripcion |
+### Knowledge graph
+| Tool | Description |
 |------|-------------|
-| `memodi_save` | Guardar observacion (auto-genera embedding semantico) |
-| `memodi_search` | Buscar por keywords exactos |
-| `memodi_search_similar` | Buscar por significado (semantica) |
-| `memodi_search_hybrid` | Mejor de ambos: keyword + semantica con RRF |
-| `memodi_context` | Cargar contexto reciente de un proyecto |
-| `memodi_search_global` | Buscar keywords en TODOS tus propios proyectos (scoped al usuario, no cruza cuentas) |
-| `memodi_backfill` | Generar embeddings para observaciones viejas |
-| `memodi_backfill_links` | Reconciliar LINKS_TO para observaciones guardadas antes del auto-linking `[[topic-key]]` (idempotente) |
-| `memodi_find_consolidation_clusters` | Detectar mecanicamente clusters de observaciones similares, viejas y vigentes ("migas") listas para comprimir en una sola. Solo lectura: recomienda evidencia, nunca escribe |
-| `memodi_list_projects` | Listar tus proyectos conocidos y su workspace |
-| `memodi_delete` | Soft-delete de una observacion junk/test/incorrecta (reversible a nivel DB) |
-| `memodi_get_observation` | Leer una observacion por id, incluidas las superseded (path de auditoria) |
+| `memodi_relate` | Create a relation (e.g. repo-a DEPENDS_ON repo-b) |
+| `memodi_dependencies` | What depends on what; with `path` includes the workspace's LINKS_TO |
+| `memodi_impact` | Transitive impact; with `path` also traverses LINKS_TO |
+| `memodi_graph_overview` | Summary of nodes and relations |
+| `memodi_remove_relation` | Invalidate a relation (soft delete) |
+| `memodi_delete_relation` | Remove a relation (hard delete) |
 
-### Grafo de conocimiento (proactivo — el agente crea relaciones al descubrirlas)
-| Tool | Descripcion |
+### Workspaces
+| Tool | Description |
 |------|-------------|
-| `memodi_relate` | Crear relacion (ej: repo-a DEPENDS_ON repo-b) |
-| `memodi_dependencies` | Que depende de que. Con `path` (opcional) tambien devuelve `links_to`/`linked_from`, los LINKS_TO auto-creados desde `[[topic-key]]` en el contenido, scoped a ese workspace |
-| `memodi_impact` | Analisis de impacto transitivo: "que se rompe si cambio X?". Con `path` (opcional) tambien recorre LINKS_TO ademas de DEPENDS_ON |
-| `memodi_graph_overview` | Resumen de todos los nodos y relaciones |
-| `memodi_remove_relation` | Invalidar una relacion (soft delete, conserva historial) |
-| `memodi_delete_relation` | Eliminar una relacion permanentemente (hard delete) |
+| `memodi_workspace_start` | Register a folder as a workspace (triggered by `/memodi:start`) |
+| `memodi_list_workspaces` | List workspaces |
+| `memodi_merge_projects` | Merge duplicate projects (dry_run by default) |
+| `memodi_delete_workspace` | Delete a workspace |
+| `memodi_rename_workspace` | Rename a workspace |
+| `memodi_purge_workspace` | Empty a workspace (destructive, dry_run by default) |
 
-### Workspaces (inerte para paths no registrados — sin auto-creacion)
-| Tool | Descripcion |
+### Workflow
+| Tool | Description |
 |------|-------------|
-| `memodi_workspace_start` | Registrar una carpeta padre como workspace en esta maquina — el UNICO gate de onboarding (normalmente lo dispara `/memodi:start`, no se llama a mano) |
-| `memodi_list_workspaces` | Listar tus workspaces con su cantidad de proyectos |
-| `memodi_merge_projects` | Fusionar un proyecto en otro (repara duplicados, dry_run por defecto) |
-| `memodi_delete_workspace` | Eliminar un workspace |
-| `memodi_rename_workspace` | Renombrar un workspace |
-| `memodi_purge_workspace` | Vaciar datos de un workspace para reimportar (destructivo, dry_run por defecto) |
+| `memodi_plan` | Create a plan |
+| `memodi_update_plan` | Define criteria and tasks |
+| `memodi_approve_plan` | Approve the plan, move to apply |
+| `memodi_apply_done` | Mark apply as done |
+| `memodi_verify` | Verify the result |
+| `memodi_unify` | Close the loop |
+| `memodi_progress` | Active workflow status |
+| `memodi_task_update` | Update a task |
 
-### Workflow (solo cuando el usuario pide planificacion)
-| Tool | Descripcion |
+### Sessions and system
+| Tool | Description |
 |------|-------------|
-| `memodi_plan` | Crear plan de trabajo |
-| `memodi_update_plan` | Definir criterios y tareas |
-| `memodi_approve_plan` | Aprobar plan, pasar a apply |
-| `memodi_apply_done` | Marcar apply como hecho |
-| `memodi_verify` | Verificar resultado |
-| `memodi_unify` | Cerrar el loop |
-| `memodi_progress` | Ver estado del workflow activo |
-| `memodi_task_update` | Actualizar estado de una tarea |
+| `memodi_session_start` | Start a session (observations auto-attach) |
+| `memodi_session_end` | Close a session with a structured summary (required) |
+| `memodi_ping` | Server liveness |
+| `memodi_status` | Server health and PostgreSQL extensions |
+| `memodi_version` | Version running in production |
 
-### Sesiones
-| Tool | Descripcion |
-|------|-------------|
-| `memodi_session_start` | Iniciar una sesion (las observaciones se auto-adjuntan) |
-| `memodi_session_end` | Cerrar sesion con un resumen estructurado (obligatorio) |
-
-## Modelo del grafo
+## Graph model
 
 ```
 Repo ──DEPENDS_ON──► Repo
@@ -205,139 +176,31 @@ Module ──AFFECTS───► Module
 Topic ──LINKS_TO───► Topic
 ```
 
-| Nodo | Propiedades | Ejemplo |
-|------|-------------|---------|
-| Repo | name, language, description | repo-a, Python |
-| Module | name, description | auth, database |
-| Topic | name, workspace_id | architecture/auth-model |
+`LINKS_TO` is auto-created by writing `[[topic-key]]` in the content of a `memodi_save` that has its own `topic_key`. `Topic` is the only workspace-scoped node (identity = name + workspace_id); `Repo` and `Module` are global and created only via `memodi_relate`.
 
-| Relacion | De → A | Ejemplo |
-|----------|--------|---------|
-| DEPENDS_ON | Repo → Repo | repo-c depende de repo-a |
-| CONTAINS | Repo → Module | repo-a contiene auth |
-| AFFECTS | Module → Module | auth afecta a api |
-| LINKS_TO | Topic → Topic | auto-creado al escribir `[[topic-key]]` en el contenido de un `memodi_save` con `topic_key` propio |
+Apache AGE limitations:
 
-`Topic` es el unico nodo scoped por workspace (identidad = name + workspace_id): dos
-workspaces distintos pueden tener cada uno su propio `architecture/auth-model` sin
-pisarse. El resto de los nodos (`Repo`, `Module`) siguen siendo globales, creados solo
-via `memodi_relate`.
+- No type unions in variable-length paths (`[:A|B*1..5]`)
+- No Cypher parameters — values are interpolated
+- Every connection needs `LOAD 'age'` + `SET search_path`
 
-### Limitaciones conocidas de Apache AGE
-
-- **Sin union de tipos en paths variables**: `[:DEPENDS_ON|AFFECTS*1..5]` no funciona en variable-length patterns
-- **Sin parametros Cypher**: los valores se interpolan directamente en el query string
-- **LOAD requerido por conexion**: cada conexion necesita `LOAD 'age'` y `SET search_path`
-
-## Produccion
-
-### Stack
-- **Server**: Raspberry Pi (arm64), todo nativo — sin containers en produccion
-- **PostgreSQL 16**: nativo (PGDG apt repo) con pgvector + Apache AGE compilado desde source — ver `docs/pi-setup.md`
-- **memodi-server**: Python via uv + systemd (`memodi.service`, puerto 8787). Por defecto bindea a todas las interfaces (`0.0.0.0`); en producción `MEMODI_HOST=127.0.0.1` lo restringe a loopback para que solo el túnel local llegue, nunca la LAN
-- **Cloudflare Tunnel**: expone `https://memodi.valdoh.com` con TLS incluido, sin abrir puertos en el router; corre como servicio systemd nativo del usuario (fuera de este repo); el ingress se configura en el dashboard de Zero Trust
-- **Deploy**: push-based — GitHub Actions entra por SSH a traves del mismo tunnel (`pi.valdoh.com`), autenticando con un service token de Cloudflare Access
-
-### Primer arranque (una vez, en el Pi)
-
-El deploy automatico llega al Pi *a traves del tunnel*, asi que no puede
-bootstrapearlo. Antes del primer deploy segui `docs/pi-setup.md` completo:
-PostgreSQL + pgvector + Apache AGE nativos, `memodi.service`, sudoers, env
-file. No hay imagen de Docker que pullear ni compose que levantar —
-`db-image.yml` ya no es un prerequisito de produccion (solo alimenta el
-desarrollo local).
-
-Verificar antes del primer deploy:
-- cloudflared corriendo como servicio nativo del usuario (independiente de cualquier deploy)
-- `MEMODI_SIGNUP_CODE` no esta vacio en `docker/prod/.env` (con signup deshabilitado,
-  `GET /signup` devuelve 503 y el health check del deploy falla)
-- `memodi.service` habilitado y corriendo (`systemctl status memodi`)
-- `https://memodi.valdoh.com/signup` responde 200
-
-### Proteccion de /signup, /mcp y /hooks/*
-
-`/signup` es publico por diseno (es el unico punto de entrada sin key). Su proteccion:
-
-- Invite code (`MEMODI_SIGNUP_CODE`) + limite de body a nivel app
-- Una regla de **rate limiting en Cloudflare** sobre `memodi.valdoh.com/signup` — configurala en el dashboard (sugerido: 5 requests por minuto por IP). No hay throttling a nivel app.
-- `/mcp` requiere una api key valida por usuario (`X-Memodi-Api-Key`); sin key o con key invalida responde `not_authenticated`
-
-Ademas de `/mcp` hay **cuatro rutas HTTP planas** para los hooks del plugin, con el mismo
-contrato de auth (`X-Memodi-Api-Key` + `X-Memodi-Machine`) y sin ninguna otra puerta
-delante: `POST /hooks/session-start`, `POST /hooks/session-close`, `POST /hooks/capture`
-y `POST /hooks/prompt-search`. Quien configure el WAF tiene que saber que existen:
-
-- Cada ruta valida y acota sus campos, y limita el body a nivel app (4KB las de sesion y `prompt-search`, 64KB `capture`)
-- Igual que `/signup`, no hay throttling a nivel app — una regla de **rate limiting en Cloudflare** sobre `/hooks/*` queda como accion de operador
-
-### Pipeline CI/CD
-
-4 workflows de GitHub Actions, cada uno con una sola responsabilidad:
-
-| Workflow | Trigger | Que hace |
-|----------|---------|----------|
-| `ci.yml` | PR a main, push a main | Lint + tests (155 tests, 0 skippeados) |
-| `deploy.yml` | `ci.yml` pasa en main | SSH al Pi a traves del Cloudflare Tunnel + `uv sync` + `systemctl restart memodi` + health check |
-| `release.yml` | Tag `v*` | Changelog desde el tag anterior + GitHub Release |
-| `db-image.yml` | Cambios en `Dockerfile.db` | Build + push a GHCR (imagen usada solo en desarrollo local) |
-
-El deploy falla con `exit 1` si `/signup` no devuelve 200 despues del restart, o si la version instalada no coincide con `__about__.py`, y vuelca los ultimos 30 logs del servicio (`journalctl -u memodi`). Ojo: un GET a `/mcp` devuelve 406 con el server SANO (streamable-http exige headers MCP) — nunca lo uses como health check.
-
-### Crear un release
+## Local development
 
 ```bash
-# Bump version en pyproject.toml, commit, tag, push
-git tag v0.4.0
-git push origin v0.4.0
-```
-
-El workflow genera el changelog automaticamente desde el tag anterior y crea el GitHub Release.
-
-### Deploy manual (si es necesario)
-
-```bash
-ssh -o "ProxyCommand=cloudflared access ssh --hostname %h" usuario@pi.valdoh.com
-cd ~/memodi && git fetch origin main && git reset --hard origin/main
-uv sync --reinstall-package memodi
-sudo systemctl restart memodi
-```
-
-### Backups
-
-Backups: deferred — el Pi arranca con DB fresca; la estrategia de backup offsite queda para un cambio futuro.
-
-## Desarrollo local
-
-```bash
-# Pull la imagen pre-buildeada de DB (pgvector + AGE incluidos)
-docker compose pull db
-
-# Levantar PostgreSQL local
+docker compose pull db        # pre-built image (pgvector + AGE); without pull, it compiles from source
 docker compose up -d
-
-# Configurar env vars
 export MEMODI_DB_USER=memodi MEMODI_DB_PASSWORD=memodi_dev
-
-# Instalar dependencias
 uv sync
-
-# Correr tests (incluye los 12 tests de graph que requieren Apache AGE)
 uv run pytest -v
-
-# Lint
 uv run ruff check src/ tests/
 ```
 
-Si no pulleas la imagen, docker compose la buildea desde `docker/Dockerfile.db` — compila pgvector y AGE desde source (lento pero funciona offline).
+PR to `main` → `ci.yml` runs lint + tests (437) → on merge, `deploy.yml` deploys automatically.
 
-## Contribuir
+## Production
 
-1. Abri un PR apuntando a `main`
-2. `ci.yml` corre lint + tests automaticamente — vas a ver el check en el PR
-3. Si CI pasa y el PR se mergea, `deploy.yml` arranca solo
+Runs natively on a Raspberry Pi (PostgreSQL + pgvector + AGE, uv + systemd) behind a Cloudflare Tunnel, with push-based deploys via GitHub Actions. Full setup and day-2 operations: [`docs/pi-setup.md`](docs/pi-setup.md).
 
-Las conexiones a PostgreSQL tienen `idle_in_transaction_session_timeout=30s` — transacciones colgadas se matan solas. Si corres tests y los abortas a la mitad, no vas a dejar locks bloqueando la DB.
-
-## Licencia
+## License
 
 MIT

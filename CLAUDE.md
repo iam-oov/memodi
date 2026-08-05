@@ -48,7 +48,7 @@ Real per-user accounts, not a single shared key:
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
-| `ci.yml` | PR to main, push to main | Lint + tests (155 tests, full coverage) |
+| `ci.yml` | PR to main, push to main | Lint + tests (437 tests, full coverage) |
 | `deploy.yml` | `ci.yml` succeeds on main | SSH to the Pi through the Cloudflare Tunnel + `uv sync` + `systemctl restart memodi` + health check |
 | `release.yml` | Tag `v*` | Auto-generated changelog + GitHub Release |
 | `db-image.yml` | Changes to `Dockerfile.db` | Build + push to `ghcr.io/iam-oov/memodi-db` (dev-only image) |
