@@ -4,6 +4,8 @@ dynamic = ["version"]
 description = "Persistent distributed memory for AI coding agents via MCP"
 readme = "README.md"
 authors = [{ name = "osvaldo hinojosa", email = "osvaldo.javier14@gmail.com" }]
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
     "fastembed>=0.8.0,<0.9",
