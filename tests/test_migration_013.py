@@ -1,4 +1,3 @@
-import hashlib
 import uuid
 
 import psycopg
@@ -31,10 +30,9 @@ def test_migration_013_fk_safe_with_cross_project_session_reference():
         conn.execute("ALTER TABLE workspaces ALTER COLUMN owner_user_id DROP NOT NULL")
 
         email = f"mig013-{uuid.uuid4()}@example.com"
-        api_key_hash = hashlib.sha256(email.encode()).hexdigest()
         user = conn.execute(
-            "INSERT INTO users (email, api_key_hash) VALUES (%s, %s) RETURNING id",
-            (email, api_key_hash),
+            "INSERT INTO users (email) VALUES (%s) RETURNING id",
+            (email,),
         ).fetchone()
         ws_ok = conn.execute(
             "INSERT INTO workspaces (name, owner_user_id) VALUES (%s, %s) RETURNING id",
