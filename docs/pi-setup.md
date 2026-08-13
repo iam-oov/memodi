@@ -234,4 +234,79 @@ sudo systemctl restart memodi
 
 ### Backups
 
-Deferred — the Pi starts with a fresh DB; offsite backup strategy is a future change.
+> **2026-08-13 role inversion**: production migrated to the x86 home server
+> the same day this section was written (Pi PSU undervoltage incident). The
+> dump cron now runs on the home server and the Pi will become the puller
+> once it has a new power supply. Read "Pi" and "home server" below as
+> swapped until the full doc rewrite lands.
+
+Two layers, decided 2026-08-13: a daily `pg_dump` on the Pi with 7-day
+retention, plus an always-on home server on the same LAN pulling the dumps
+off-device. The AGE graph is NOT in the dump — it is derived state, rebuilt
+after a restore by `ensure_graph()` (app startup) + `memodi_backfill_links` —
+so only schema `public` is dumped. Keep the `-n public` flag: dumping the AGE
+catalogs (`ag_catalog`, the `memodi` graph schema) produces dumps that do not
+restore cleanly.
+
+**On the Pi** (as the `memodi` user — peer auth over the unix socket, no
+password needed):
+
+```bash
+crontab -e
+# 15 3 * * * /home/memodi/memodi/scripts/backup-dump.sh
+```
+
+Dumps land in `~/backups/memodi-YYYY-MM-DD.dump` (KB–MB each). The script
+writes to a `.tmp` file and renames on success, so a torn dump is never
+picked up by the pull. Dumps older than `MEMODI_BACKUP_RETENTION_DAYS`
+(default 7) are deleted.
+
+**On the home server** (Ubuntu Server, same LAN — pulls directly over local
+SSH, no cloudflared involved):
+
+```bash
+sudo apt install -y rsync
+ssh-keygen -t ed25519 -N '' -f ~/.ssh/id_ed25519
+ssh-copy-id memodi@<pi-lan-address>
+scp memodi@<pi-lan-address>:memodi/scripts/backup-pull.sh ~/backup-pull.sh
+
+crontab -e
+# 45 3 * * * MEMODI_PI=memodi@<pi-lan-address> $HOME/backup-pull.sh
+```
+
+Pulled dumps accumulate in `~/memodi-backups` without pruning (they are
+tiny); add server-side retention only when disk space starts to matter.
+Known remaining gap: both copies live under the same roof — an offsite copy
+is a possible later add-on.
+
+**Restore drill** (into the local docker compose DB):
+
+The dump contains a `CREATE SCHEMA public` entry (a side effect of
+`-n public`) that collides with the schema every fresh database already has,
+and `--clean` cannot drop it either because the `vector` extension lives in
+it — so filter that one entry out of the restore list instead of ignoring
+restore errors:
+
+```bash
+docker compose up -d db
+export PGPASSWORD=memodi_dev
+createdb -h localhost -U memodi memodi_restore
+psql -h localhost -U memodi -d memodi_restore \
+  -c 'CREATE EXTENSION vector; CREATE EXTENSION age;'
+pg_restore -l memodi-YYYY-MM-DD.dump | grep -v 'SCHEMA - public' \
+  > /tmp/restore.list
+pg_restore -h localhost -U memodi -d memodi_restore --no-owner \
+  --exit-on-error -L /tmp/restore.list memodi-YYYY-MM-DD.dump
+psql -h localhost -U memodi -d memodi_restore \
+  -c 'SELECT count(*) FROM observations;'
+dropdb -h localhost -U memodi memodi_restore
+```
+
+Drill executed 2026-08-13 against the local compose DB (dump of its own
+`public` schema restored into a fresh `memodi_restore` with AGE installed):
+15 observations and 9 tables restored, `--exit-on-error` clean.
+
+To also rebuild the graph, point a local memodi server at the restored DB
+(`MEMODI_DB_NAME=memodi_restore`) and call `memodi_backfill_links` — the
+2026-08-12 audit verified every edge is a derived `LINKS_TO` (zero manual
+`memodi_relate` edges), so the rebuild is complete.
