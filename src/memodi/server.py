@@ -16,7 +16,7 @@ from memodi.web.hooks import (
     post_session_close,
     post_session_start,
 )
-from memodi.web.signup import get_signup, post_signup
+from memodi.web.login import get_login, get_oauth_callback
 
 # Tools always loaded into Claude's context. All others are deferred
 # and loaded on-demand via ToolSearch to save tokens.
@@ -46,8 +46,8 @@ mcp = FastMCP(
 
 # --- Web (public, no MCP auth by design) ---
 
-mcp.custom_route("/signup", methods=["GET"])(get_signup)
-mcp.custom_route("/signup", methods=["POST"])(post_signup)
+mcp.custom_route("/login", methods=["GET"])(get_login)
+mcp.custom_route("/oauth/callback", methods=["GET"])(get_oauth_callback)
 
 # --- Web (hooks — plain HTTP counterpart to MCP, for Claude Code shell hooks) ---
 

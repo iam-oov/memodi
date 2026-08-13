@@ -14,7 +14,9 @@ class Settings(BaseSettings):
 
     user_api_key: str | None = None
     machine: str | None = None
-    signup_code: str | None = None
+    google_client_id: str | None = None
+    google_client_secret: str | None = None
+    google_redirect_uri: str | None = None
 
     @property
     def db_url(self) -> str:

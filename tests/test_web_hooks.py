@@ -570,7 +570,7 @@ def test_over_long_field_returns_clean_validation(client, registered_workspace):
     _assert_clean_validation(response)
 
 
-# --- Body size caps (signup already caps at 8KB; these routes must too) ---
+# --- Body size caps (no route may buffer an unbounded body) ---
 
 
 @pytest.mark.parametrize("route", ("/hooks/session-start", "/hooks/session-close"))

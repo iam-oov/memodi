@@ -106,7 +106,8 @@ def _caller(request: Request) -> dict | JSONResponse:
 
 
 async def _body(request: Request, max_bytes: int) -> dict | JSONResponse:
-    """Read a bounded JSON object body — same cap pattern as /signup.
+    """Read a bounded JSON object body — the cap keeps a malformed or
+    hostile request from buffering unbounded input into memory.
 
     Unparseable or non-object bodies (null, a list, a bare scalar) become an
     empty dict so the route's own field validation reports the problem
