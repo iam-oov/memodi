@@ -279,8 +279,8 @@ if [[ ! -f "$ENV_FILE" ]]; then
   cat <<EOF
 
 Seeded ${ENV_FILE} from the committed template.
-Fill in every CHANGE_ME value (at minimum MEMODI_DB_PASSWORD and
-MEMODI_SIGNUP_CODE), then re-run to finish provisioning:
+Fill in every CHANGE_ME value (at minimum MEMODI_DB_PASSWORD and the three
+MEMODI_GOOGLE_* vars), then re-run to finish provisioning:
 
   sudo bash scripts/pi-provision.sh
 
@@ -400,7 +400,7 @@ EOF
   else
     log "no tunnel credentials backup found at ${TUNNEL_BACKUP_DIR}"
     log "cloudflared binary installed - complete the tunnel manually (docs/pi-setup.md step 10):"
-    log "  - memodi.valdoh.com -> http://localhost:8787 (MCP server + /signup)"
+    log "  - memodi.valdoh.com -> http://localhost:8787 (MCP server + /login)"
     log "  - pi.valdoh.com -> ssh://localhost:22 (deploys over SSH)"
     log "  - Cloudflare Access service-token policy for CF_ACCESS_CLIENT_ID / CF_ACCESS_CLIENT_SECRET"
   fi

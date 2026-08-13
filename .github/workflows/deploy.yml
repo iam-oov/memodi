@@ -32,9 +32,10 @@ name: Deploy
 #       and fill in the values) — memodi.service reads it via EnvironmentFile.
 #   (e) Passwordless sudo for `systemctl restart memodi` ONLY:
 #       memodi ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart memodi
-#   (f) MEMODI_SIGNUP_CODE must be non-empty. The health probe below hits
-#       GET /signup, which returns 503 when signup is disabled (empty code),
-#       which would fail the deploy even on a healthy server.
+#   (f) MEMODI_GOOGLE_CLIENT_ID, MEMODI_GOOGLE_CLIENT_SECRET, and
+#       MEMODI_GOOGLE_REDIRECT_URI must all be set. The health probe below
+#       hits GET /login, which returns 503 when login is disabled (any one
+#       missing), which would fail the deploy even on a healthy server.
 
 on:
   workflow_run:
@@ -82,20 +83,21 @@ jobs:
           ~/.local/bin/uv sync --reinstall-package memodi
           sudo systemctl restart memodi
 
-          # Health check: /signup returns 200 from a healthy server. The server
-          # runs ensure_schema() at startup, so a down DB or a failing migration
-          # exits nonzero and this unit crash-loops (systemd Restart=on-failure) —
-          # this probe never reaches 200 in that case.
+          # Health check: /login returns 302 from a healthy, configured server.
+          # The server runs ensure_schema() at startup, so a down DB or a
+          # failing migration exits nonzero and this unit crash-loops (systemd
+          # Restart=on-failure) — this probe never reaches 302 in that case.
+          # No -L: following the redirect would depend on reaching Google.
           # (A GET on the streamable-http /mcp endpoint returns 406 even
           # when healthy — do not use it as a liveness probe.)
           CODE=000
           for _ in $(seq 1 30); do
-            CODE=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8787/signup || true)
-            [ "$CODE" = "200" ] && break
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8787/login || true)
+            [ "$CODE" = "302" ] && break
             sleep 5
           done
-          if [ "$CODE" != "200" ]; then
-            echo "DEPLOY FAILED: /signup returned $CODE"
+          if [ "$CODE" != "302" ]; then
+            echo "DEPLOY FAILED: /login returned $CODE"
             journalctl -u memodi -n 30 --no-pager
             exit 1
           fi

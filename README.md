@@ -23,7 +23,7 @@ A single PostgreSQL instance does it all: document store (JSONB), semantic searc
 
 ## Quick start
 
-You need [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and a memodi API key (one per user). Sign up at `https://memodi.valdoh.com/signup` (or your instance's URL) and copy the `mmd_...` key as soon as you see it — it is shown only once.
+You need [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and a memodi API key (one per user). Log in with Google at `https://memodi.valdoh.com/login` (or your instance's URL) and copy the `mmd_...` key as soon as you see it — it is shown only once.
 
 ### Install
 
@@ -100,7 +100,7 @@ Claude decides what is worth remembering; memodi persists and retrieves.
 
 Real per-user accounts, not a shared key:
 
-- Sign up at `/signup` (the only route without a key); the `mmd_...` api key is shown ONCE — the server stores only its hash
+- Log in with Google at `/login` (the only route without a key); the `mmd_...` api key is shown ONCE — the server stores only its hash. Each login mints an additional key, so logging in from a second machine never invalidates the first
 - `X-Memodi-Api-Key` identifies the user and is the only access control in front of `/mcp` and `/hooks/*`
 - `X-Memodi-Machine` identifies the machine; paths are registered per (user, machine, path) — the same folder can resolve to different workspaces on different machines
 - `path` (the caller's cwd) is an explicit parameter on every project-scoped tool
@@ -195,7 +195,7 @@ uv run pytest -v
 uv run ruff check src/ tests/
 ```
 
-PR to `main` → `ci.yml` runs lint + tests (453) → on merge, `deploy.yml` deploys automatically.
+PR to `main` → `ci.yml` runs lint + tests (480) → on merge, `deploy.yml` deploys automatically.
 
 ## Production
 

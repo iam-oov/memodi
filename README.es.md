@@ -23,7 +23,7 @@ Una sola instancia de PostgreSQL hace todo: document store (JSONB), busqueda sem
 
 ## Quick start
 
-Necesitas [Claude Code](https://docs.anthropic.com/en/docs/claude-code) y una API key de memodi (una por usuario). Registrate en `https://memodi.valdoh.com/signup` (o la URL de tu instancia) y copia la key `mmd_...` apenas la veas — se muestra una sola vez.
+Necesitas [Claude Code](https://docs.anthropic.com/en/docs/claude-code) y una API key de memodi (una por usuario). Inicia sesion con Google en `https://memodi.valdoh.com/login` (o la URL de tu instancia) y copia la key `mmd_...` apenas la veas — se muestra una sola vez.
 
 ### Instalar
 
@@ -100,7 +100,7 @@ Claude decide que vale la pena recordar; memodi persiste y consulta.
 
 Cuentas reales por usuario, no una key compartida:
 
-- Alta en `/signup` (unica ruta sin key); la api key `mmd_...` se muestra UNA sola vez — el server guarda solo su hash
+- Inicio de sesion con Google en `/login` (unica ruta sin key); la api key `mmd_...` se muestra UNA sola vez — el server guarda solo su hash. Cada login genera una key adicional, asi que iniciar sesion desde una segunda maquina nunca invalida la primera
 - `X-Memodi-Api-Key` identifica al usuario y es el unico control de acceso frente a `/mcp` y `/hooks/*`
 - `X-Memodi-Machine` identifica la maquina; los paths se registran por (usuario, maquina, path) — la misma carpeta puede resolver a workspaces distintos en maquinas distintas
 - `path` (el cwd del caller) es parametro explicito en cada tool de proyecto
@@ -195,7 +195,7 @@ uv run pytest -v
 uv run ruff check src/ tests/
 ```
 
-PR a `main` → `ci.yml` corre lint + tests (437) → si se mergea, `deploy.yml` deploya solo.
+PR a `main` → `ci.yml` corre lint + tests (480) → si se mergea, `deploy.yml` deploya solo.
 
 ## Produccion
 

@@ -227,8 +227,8 @@ if [[ ! -f "$ENV_FILE" ]]; then
   cat <<EOF
 
 Seeded ${ENV_FILE} from the committed template.
-Fill in every CHANGE_ME value (at minimum MEMODI_DB_PASSWORD and
-MEMODI_SIGNUP_CODE), then re-run to finish provisioning:
+Fill in every CHANGE_ME value (at minimum MEMODI_DB_PASSWORD and the three
+MEMODI_GOOGLE_* vars), then re-run to finish provisioning:
 
   sudo bash server-provision.sh
 

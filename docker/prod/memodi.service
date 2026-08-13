@@ -15,7 +15,7 @@ Environment=FASTEMBED_CACHE_PATH=/home/memodi/.cache/fastembed
 # main() calls ensure_schema() at startup (DB connectivity + migrations)
 # before serving. A broken DB or a failing migration exits nonzero here,
 # so this unit crash-loops until it's fixed — the deploy health check
-# (GET /signup) is what actually surfaces that failure.
+# (GET /login) is what actually surfaces that failure.
 ExecStart=/home/memodi/.local/bin/uv run memodi --http
 Restart=on-failure
 RestartSec=5

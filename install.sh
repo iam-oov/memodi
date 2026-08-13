@@ -5,7 +5,7 @@
 # the MCP server connection to the shared production instance.
 #
 # Usage:
-#   1. Sign up for an api key: https://memodi.valdoh.com/signup
+#   1. Log in to get an api key: https://memodi.valdoh.com/login
 #   2. ./install.sh          # prompts for the key (no echo)
 #
 # Or via curl:
@@ -20,7 +20,7 @@ set -e
 
 MEMODI_BASE_URL="https://memodi.valdoh.com"
 MEMODI_URL="${MEMODI_BASE_URL}/mcp"
-SIGNUP_URL="${MEMODI_BASE_URL}/signup"
+LOGIN_URL="${MEMODI_BASE_URL}/login"
 
 MARKER_START="# >>> memodi env >>>"
 MARKER_END="# <<< memodi env <<<"
@@ -54,9 +54,9 @@ persist_env() {
 }
 
 echo "memodi needs a per-user api key before it can be installed."
-echo "Sign up here if you don't have one yet:"
+echo "Log in with Google here if you don't have one yet:"
 echo ""
-echo "  ${SIGNUP_URL}"
+echo "  ${LOGIN_URL}"
 echo ""
 
 # --- Preflight checks ---

@@ -36,7 +36,7 @@ Production: Claude Code ──HTTPS──► Cloudflare Tunnel ──► memodi-
 
 Real per-user accounts, not a single shared key:
 
-- Sign up at `/signup` (public route, no MCP auth by design) — creates a user and shows the `mmd_…` api key ONCE; only its hash is stored server-side
+- Log in with Google at `/login` (public route, no MCP auth by design) — `GET /oauth/callback` completes the flow, creates or reuses the user by email, and shows the `mmd_…` api key ONCE; only its hash is stored server-side. Each login mints an additional key in `api_keys` (one user, many keys) so logging in from a second machine never invalidates the first
 - `X-Memodi-Api-Key` header — the caller's identity. This IS the app-level access control; there is no other gate in front of `/mcp`, nor in front of the three plain-HTTP hook routes (`POST /hooks/session-start`, `/hooks/session-close`, `/hooks/capture`) that share the same header contract
 - `X-Memodi-Machine` header — per-machine identity, used to scope path registration (`memodi_workspace_start`) so the same filesystem path can resolve to different workspaces on different machines
 - `path` (the caller's cwd) is an explicit per-call parameter on every project-scoped tool — never inferred from the api key or machine
@@ -48,12 +48,12 @@ Real per-user accounts, not a single shared key:
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
-| `ci.yml` | PR to main, push to main | Lint + tests (453 tests, full coverage) |
+| `ci.yml` | PR to main, push to main | Lint + tests (480 tests, full coverage) |
 | `deploy.yml` | `ci.yml` succeeds on main | SSH to the Pi through the Cloudflare Tunnel + `uv sync` + `systemctl restart memodi` + health check |
 | `release.yml` | Tag `v*` | Auto-generated changelog + GitHub Release |
 | `db-image.yml` | Changes to `Dockerfile.db` | Build + push to `ghcr.io/iam-oov/memodi-db` (dev-only image) |
 
-Deploy authenticates to Cloudflare Access with a service token (`cloudflared access ssh` as SSH ProxyCommand), then verifies `/signup` returns 200 and the installed version matches `__about__.py` — otherwise it dumps the last 30 `journalctl -u memodi` logs and fails the pipeline. A GET on `/mcp` returns 406 from a healthy server; never use it as a liveness probe.
+Deploy authenticates to Cloudflare Access with a service token (`cloudflared access ssh` as SSH ProxyCommand), then verifies `/login` returns 302 and the installed version matches `__about__.py` — otherwise it dumps the last 30 `journalctl -u memodi` logs and fails the pipeline. A GET on `/mcp` returns 406 from a healthy server; never use it as a liveness probe.
 
 ## Plugin Structure
 

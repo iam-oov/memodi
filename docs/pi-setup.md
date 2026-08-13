@@ -154,9 +154,30 @@ EOF
 ```
 
 Edit `/home/memodi/memodi/docker/prod/.env`: `MEMODI_DB_PASSWORD` (match
-step 3), `MEMODI_SIGNUP_CODE` (non-empty — the deploy health check depends on
-it). `MEMODI_HOST=127.0.0.1` is already set (loopback only; the tunnel
-connects locally, the LAN must not reach the port).
+step 3), `MEMODI_GOOGLE_CLIENT_ID`, `MEMODI_GOOGLE_CLIENT_SECRET`, and
+`MEMODI_GOOGLE_REDIRECT_URI` (all three non-empty — the deploy health check
+depends on them; see "Google OAuth client" below). `MEMODI_HOST=127.0.0.1`
+is already set (loopback only; the tunnel connects locally, the LAN must not
+reach the port).
+
+### Google OAuth client
+
+Registration is open (any Google account) — there is no invite code. One
+manual, one-time setup in Google Cloud Console before the first deploy:
+
+1. Create an OAuth consent screen: External user type, scopes `openid` and
+   `userinfo.email` only (non-sensitive — no verification review needed),
+   skip the app logo (triggers brand review), and **publish** the app.
+   Testing mode caps registration at 100 users, which contradicts open
+   registration.
+2. Create a Web application OAuth client. Add both redirect URIs:
+   `https://memodi.valdoh.com/oauth/callback` (prod) and
+   `http://localhost:8787/oauth/callback` (local dev/testing).
+3. Copy the client ID and client secret into `MEMODI_GOOGLE_CLIENT_ID` and
+   `MEMODI_GOOGLE_CLIENT_SECRET`; set `MEMODI_GOOGLE_REDIRECT_URI` to the
+   exact prod redirect URI above — it is never derived from the incoming
+   request (uvicorn behind the tunnel always sees plain `http`, and the
+   `Host` header is client-controlled), so a mismatch here breaks login.
 
 ## 8. memodi.service
 
@@ -187,7 +208,7 @@ Not installed or configured by this repo. Before the first deploy, confirm
 the user's existing native cloudflared systemd service is already running,
 independently of any deploy:
 
-- `memodi.valdoh.com` -> `http://localhost:8787` (MCP server + `/signup`)
+- `memodi.valdoh.com` -> `http://localhost:8787` (MCP server + `/login`)
 - `pi.valdoh.com` -> `ssh://localhost:22` (deploys over SSH)
 - A Cloudflare Access service-token policy authorizing the token used by
   `deploy.yml` (`CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET`)
@@ -198,20 +219,20 @@ independently of any deploy:
 - [ ] `memodi` OS user created, deploy public key in its `authorized_keys`, `PI_SSH_USER=memodi` (step 5)
 - [ ] `memodi.service` installed and enabled (step 8)
 - [ ] cloudflared tunnel running independently (step 10) — no chicken-and-egg with deploy
-- [ ] `docker/prod/.env` present, `MEMODI_SIGNUP_CODE` non-empty
+- [ ] `docker/prod/.env` present, all three `MEMODI_GOOGLE_*` vars non-empty (see "Google OAuth client" in step 7)
 - [ ] sudoers line in place for passwordless `systemctl restart memodi` only (step 9)
 
 ## Day-2 operations
 
 ### Exposed routes
 
-- `/signup` is public by design (the only entry point without a key): invite code (`MEMODI_SIGNUP_CODE`) + app-level body limit. There is NO app-level throttling — set a Cloudflare rate-limiting rule on `memodi.valdoh.com/signup` (suggested: 5 req/min per IP).
+- `/login` and `/oauth/callback` are public by design (the only entry points without a key) and GET-only, so there is no request body to cap: a verified Google identity is the gate on who can complete a login, and there is no invite code (registration is open to anyone with such an account). There is NO app-level throttling — set a Cloudflare rate-limiting rule on `memodi.valdoh.com/login` and `/oauth/callback` (suggested: 5 req/min per IP).
 - `/mcp` requires a valid per-user api key (`X-Memodi-Api-Key`); missing or invalid → `not_authenticated`.
 - Four plain-HTTP hook routes share the same auth contract (`X-Memodi-Api-Key` + `X-Memodi-Machine`) with no other gate in front: `POST /hooks/session-start`, `/hooks/session-close`, `/hooks/capture`, `/hooks/prompt-search`. Each validates and bounds its fields and caps the body at app level (4KB; 64KB for `capture`). Rate limiting on `/hooks/*` is an operator action in Cloudflare.
 
 ### Health checks
 
-`deploy.yml` fails with `exit 1` if `/signup` doesn't return 200 after the restart, or if the installed version doesn't match `__about__.py`, and dumps the last 30 lines of `journalctl -u memodi`. A GET on `/mcp` returns 406 from a HEALTHY server (streamable-http requires MCP headers) — never use it as a liveness probe.
+`deploy.yml` fails with `exit 1` if `/login` doesn't return 302 after the restart, or if the installed version doesn't match `__about__.py`, and dumps the last 30 lines of `journalctl -u memodi`. A 503 there means the Google OAuth vars are missing, which also fails the deploy. A GET on `/mcp` returns 406 from a HEALTHY server (streamable-http requires MCP headers) — never use it as a liveness probe.
 
 ### Release
 
