@@ -62,9 +62,11 @@ def test_session_close_matching_client_id_closes_with_null_summary(
 
     proj = _project(registered_workspace, project_name)
     assert repository.get_active_session(proj["id"]) is None
-    row = get_connection().execute(
-        "SELECT summary FROM sessions WHERE id = %s", (body["session_id"],)
-    ).fetchone()
+    row = (
+        get_connection()
+        .execute("SELECT summary FROM sessions WHERE id = %s", (body["session_id"],))
+        .fetchone()
+    )
     assert row["summary"] is None
 
 
@@ -400,9 +402,11 @@ def test_capture_saves_an_observation(client, registered_workspace):
     assert "id" in body
 
     proj = _project(registered_workspace, project_name)
-    row = get_connection().execute(
-        "SELECT title FROM observations WHERE project_id = %s", (proj["id"],)
-    ).fetchone()
+    row = (
+        get_connection()
+        .execute("SELECT title FROM observations WHERE project_id = %s", (proj["id"],))
+        .fetchone()
+    )
     assert row["title"] == "Subagent findings"
 
 
@@ -701,3 +705,94 @@ def test_blank_client_session_id_is_never_persisted_as_a_string(
         headers=headers,
     )
     assert close.json() == {"closed": False, "reason": "missing_client_session_id"}
+
+
+# --- /hooks/digest (SessionStart user-visible digest) ---
+
+
+def test_digest_returns_recent_activity(client, registered_workspace):
+    project_name = f"test-hooks-{uuid.uuid4()}"
+    path = _path(registered_workspace, project_name)
+    proj = _project(registered_workspace, project_name)
+
+    repository.save_observation(
+        proj["id"], "Digest fixture decision", "some content", "decision"
+    )
+    sess = repository.create_session(proj["id"])
+    repository.end_session(
+        sess["id"],
+        summary="## Goal\nShip the digest\n## Next Steps\n- Wire the hook\n- Release",
+    )
+
+    response = client.post(
+        "/hooks/digest", json={"path": path}, headers=_headers(registered_workspace)
+    )
+
+    assert response.status_code == 200
+    digest = response.json()["digest"]
+    assert registered_workspace["workspace"]["name"] in digest
+    assert "[decision] Digest fixture decision" in digest
+    assert "Goal: Ship the digest" in digest
+    assert "Next: Wire the hook" in digest
+
+
+def test_digest_excludes_observations_outside_the_window(client, registered_workspace):
+    project_name = f"test-hooks-{uuid.uuid4()}"
+    path = _path(registered_workspace, project_name)
+    proj = _project(registered_workspace, project_name)
+
+    repository.save_observation(
+        proj["id"],
+        "Ancient observation",
+        "content",
+        "decision",
+        occurred_at="2020-01-01T00:00:00Z",
+    )
+
+    response = client.post(
+        "/hooks/digest", json={"path": path}, headers=_headers(registered_workspace)
+    )
+
+    assert response.status_code == 200
+    assert response.json()["digest"] == ""
+
+
+def test_digest_empty_workspace_returns_empty_digest(client, registered_workspace):
+    response = client.post(
+        "/hooks/digest",
+        json={"path": registered_workspace["root"]},
+        headers=_headers(registered_workspace),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["digest"] == ""
+
+
+def test_digest_missing_api_key_returns_not_authenticated(client, registered_workspace):
+    response = client.post(
+        "/hooks/digest",
+        json={"path": registered_workspace["root"]},
+        headers={MACHINE_HEADER: registered_workspace["machine"]},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["type"] == "not_authenticated"
+
+
+def test_digest_unregistered_path_returns_not_started(client, registered_workspace):
+    response = client.post(
+        "/hooks/digest",
+        json={"path": f"/tmp/unregistered-hooks-{uuid.uuid4()}"},
+        headers=_headers(registered_workspace),
+    )
+
+    assert response.status_code == 404
+    assert response.json()["type"] == "not_started"
+
+
+def test_digest_missing_path_returns_clean_validation(client, registered_workspace):
+    response = client.post(
+        "/hooks/digest", json={}, headers=_headers(registered_workspace)
+    )
+
+    _assert_clean_validation(response)

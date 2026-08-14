@@ -383,7 +383,7 @@ def get_active_session_by_client_id(
 
 
 def get_latest_session_summary(
-    project_id: str, workspace_id: str | None = None
+    project_id: str | None, workspace_id: str | None = None
 ) -> dict | None:
     """Get the most recent completed session with a summary.
 
@@ -804,7 +804,7 @@ def search_observations_by_workspace(
 
 
 def get_recent_observations(
-    project_id: str,
+    project_id: str | None,
     limit: int = 20,
     workspace_id: str | None = None,
 ) -> list[dict]:

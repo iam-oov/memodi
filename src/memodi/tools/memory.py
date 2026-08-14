@@ -1,6 +1,7 @@
 import json
 import re
 import uuid
+from datetime import UTC, datetime, timedelta
 
 from memodi.database import graph_repository, repository
 from memodi.database.connection import ensure_schema, rollback
@@ -374,6 +375,105 @@ def search_for_prompt(
     workspace = require_workspace(user_id, machine, path)
     results = repository.search_observations_by_workspace(workspace["id"], query, limit)
     return json.dumps(serialize_prompt_search(results), default=str)
+
+
+DIGEST_DAYS = 5
+DIGEST_MAX_ITEMS = 8
+_DIGEST_FETCH_LIMIT = 40
+_DIGEST_TITLE_WIDTH = 100
+_DIGEST_LINE_WIDTH = 140
+
+
+def _relative_age(moment: datetime, now: datetime) -> str:
+    delta = now - moment
+    if delta.days >= 1:
+        return f"{delta.days}d ago"
+    hours = delta.seconds // 3600
+    if hours >= 1:
+        return f"{hours}h ago"
+    return "just now"
+
+
+def _clip(text: str, width: int = _DIGEST_LINE_WIDTH) -> str:
+    text = " ".join(text.split())
+    if len(text) <= width:
+        return text
+    return text[: width - 1].rstrip() + "…"
+
+
+def _summary_sections(summary: str) -> dict[str, list[str]]:
+    sections: dict[str, list[str]] = {}
+    current = None
+    for line in summary.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            current = stripped.lstrip("#").strip().lower()
+            sections.setdefault(current, [])
+        elif current is not None and stripped:
+            sections[current].append(stripped.lstrip("-*").strip())
+    return sections
+
+
+def _session_lines(last_session: dict, now: datetime) -> list[str]:
+    age = _relative_age(last_session["ended_at"], now)
+    project = last_session.get("project")
+    where = f", {project}" if project else ""
+    lines = [f"Last session ({age}{where}):"]
+    sections = _summary_sections(last_session["summary"] or "")
+    goal = sections.get("goal")
+    if goal:
+        lines.append(f"  Goal: {_clip(goal[0])}")
+    for step in sections.get("next steps", [])[:2]:
+        lines.append(f"  Next: {_clip(step)}")
+    if len(lines) == 1:
+        lines.append(f"  {_clip(last_session['summary'] or '')}")
+    return lines
+
+
+@handle_errors
+def digest_for_session_start(
+    path: str, user_id: str, machine: str, days: int = DIGEST_DAYS
+) -> str:
+    """Preformatted recap of the workspace's recent activity.
+
+    Backs the SessionStart digest hook: the model loads its context through
+    memodi_context; this text is shown to the USER at startup. An empty
+    digest means "nothing to show" and the hook stays silent.
+    """
+    _ensure()
+    workspace = require_workspace(user_id, machine, path)
+    now = datetime.now(UTC)
+    cutoff = now - timedelta(days=days)
+
+    last_session = repository.get_latest_session_summary(
+        None, workspace_id=workspace["id"]
+    )
+    observations = [
+        o
+        for o in repository.get_recent_observations(
+            None, limit=_DIGEST_FETCH_LIMIT, workspace_id=workspace["id"]
+        )
+        if (o.get("occurred_at") or o["created_at"]) >= cutoff
+    ]
+
+    if not last_session and not observations:
+        return json.dumps({"digest": ""})
+
+    lines = [f"memodi — {workspace['name']} · last {days} days"]
+    if last_session:
+        lines.append("")
+        lines.extend(_session_lines(last_session, now))
+    if observations:
+        lines.append("")
+        lines.append("Recent observations:")
+        for o in observations[:DIGEST_MAX_ITEMS]:
+            when = _relative_age(o.get("occurred_at") or o["created_at"], now)
+            title = _clip(o["title"], _DIGEST_TITLE_WIDTH)
+            lines.append(f"  [{o['type']}] {title} ({when})")
+        extra = len(observations) - DIGEST_MAX_ITEMS
+        if extra > 0:
+            lines.append(f"  … and {extra} more")
+    return json.dumps({"digest": "\n".join(lines)})
 
 
 @handle_errors

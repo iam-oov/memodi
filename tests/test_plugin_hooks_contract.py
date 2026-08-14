@@ -25,6 +25,7 @@ START_COMMAND = PLUGIN / "commands" / "start.md"
 END_COMMAND = PLUGIN / "commands" / "end.md"
 LOGOUT_COMMAND = PLUGIN / "commands" / "logout.md"
 SESSION_START_HOOK = PLUGIN / "scripts" / "session-start.sh"
+SESSION_DIGEST_HOOK = PLUGIN / "scripts" / "session-digest.sh"
 SESSION_END_HOOK = PLUGIN / "scripts" / "session-end.sh"
 POST_COMPACTION_HOOK = PLUGIN / "scripts" / "post-compaction.sh"
 SUBAGENT_STOP_HOOK = PLUGIN / "scripts" / "subagent-stop.sh"
@@ -267,6 +268,111 @@ def test_post_compaction_hook_omits_client_session_id_when_there_is_none(hook_se
 
     assert "memodi_session_end" in out
     assert "client_session_id" not in out
+
+
+# --- session-digest.sh (SessionStart, user-visible digest) ---
+
+
+class _DigestStubHandler(_StubHandler):
+    """A stub that answers /hooks/digest with a configurable JSON body."""
+
+    body: ClassVar[bytes] = b""
+
+    def do_POST(self) -> None:
+        raw = self.rfile.read(int(self.headers.get("content-length") or 0))
+        try:
+            self.posts.append(json.loads(raw))
+        except ValueError:
+            self.posts.append({"unparseable": raw.decode(errors="replace")})
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(self.body)))
+        self.end_headers()
+        self.wfile.write(self.body)
+
+
+@pytest.fixture
+def digest_server():
+    servers = []
+
+    def factory(body: dict) -> SimpleNamespace:
+        posts: list[dict] = []
+        gets: list[str] = []
+        handler = type(
+            "_Handler",
+            (_DigestStubHandler,),
+            {"posts": posts, "gets": gets, "body": json.dumps(body).encode()},
+        )
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        servers.append(server)
+        return SimpleNamespace(
+            url=f"http://127.0.0.1:{server.server_port}", posts=posts
+        )
+
+    yield factory
+    for server in servers:
+        server.shutdown()
+        server.server_close()
+
+
+def test_session_digest_hook_shows_the_digest_as_system_message(digest_server):
+    digest = "memodi — ws · last 5 days\n\nRecent:\n  [decision] X (2h ago)"
+    stub = digest_server({"digest": digest})
+
+    out = _run_hook(SESSION_DIGEST_HOOK, {"cwd": "/tmp/hook-cwd"}, stub.url)
+
+    assert json.loads(out) == {"systemMessage": digest}
+    assert stub.posts == [{"path": "/tmp/hook-cwd"}]
+
+
+def test_session_digest_hook_is_silent_when_digest_is_empty(digest_server):
+    stub = digest_server({"digest": ""})
+
+    out = _run_hook(SESSION_DIGEST_HOOK, {"cwd": "/tmp/hook-cwd"}, stub.url)
+
+    assert out.strip() == ""
+
+
+def test_session_digest_hook_is_silent_on_a_server_error_body(digest_server):
+    """not_started / not_authenticated bodies must never leak to the user —
+    session-start.sh owns messaging for those states."""
+    stub = digest_server({"error": "memodi is not started", "type": "not_started"})
+
+    out = _run_hook(SESSION_DIGEST_HOOK, {"cwd": "/tmp/hook-cwd"}, stub.url)
+
+    assert out.strip() == ""
+
+
+def test_session_digest_hook_is_silent_without_api_key(digest_server):
+    stub = digest_server({"digest": "should never be fetched"})
+
+    result = subprocess.run(
+        ["sh", str(SESSION_DIGEST_HOOK)],
+        input=json.dumps({"cwd": "/tmp/hook-cwd"}),
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env={**os.environ, "MEMODI_URL": stub.url, "MEMODI_API_KEY": ""},
+    )
+
+    assert result.returncode == 0
+    assert result.stdout.strip() == ""
+    assert stub.posts == []
+
+
+def test_hooks_json_registers_the_digest_hook_after_session_start():
+    hooks = json.loads(HOOKS_JSON.read_text())
+    startup = next(
+        entry
+        for entry in hooks["hooks"]["SessionStart"]
+        if entry["matcher"] == "startup|clear"
+    )
+    commands = [hook["command"] for hook in startup["hooks"]]
+    assert commands[0].endswith("session-start.sh")
+    assert commands[1].endswith("session-digest.sh")
+    digest = startup["hooks"][1]
+    assert digest["timeout"] >= 6
 
 
 # --- prompt-search.sh (UserPromptSubmit) ---

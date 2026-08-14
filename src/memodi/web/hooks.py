@@ -213,6 +213,26 @@ async def post_capture(request: Request) -> JSONResponse:
     return _response(result)
 
 
+async def post_digest(request: Request) -> JSONResponse:
+    """Recent-activity recap for the caller's workspace — the SessionStart
+    digest hook's read. Returns {"digest": "<text>"}, empty when there is
+    nothing to show.
+    """
+    caller = _caller(request)
+    if isinstance(caller, JSONResponse):
+        return caller
+    body = await _body(request, MAX_SESSION_BODY)
+    if isinstance(body, JSONResponse):
+        return body
+    try:
+        path = _field(body, "path", MAX_PATH, required=True)
+    except _InvalidFieldError as e:
+        return _error(str(e), "validation")
+
+    result = memory.digest_for_session_start(path, caller["user_id"], caller["machine"])
+    return _response(result)
+
+
 async def post_prompt_search(request: Request) -> JSONResponse:
     """Keyword search over the caller's workspace — the UserPromptSubmit hook's
     counterpart to /hooks/capture.

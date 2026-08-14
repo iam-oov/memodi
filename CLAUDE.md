@@ -64,6 +64,7 @@ plugin/claude-code/
 ├── .claude-plugin/plugin.json    — plugin metadata
 ├── hooks/hooks.json              — SessionStart / SubagentStop / SessionEnd hooks
 ├── scripts/session-start.sh      — silent workspace resolution + session open on session start
+├── scripts/session-digest.sh     — user-visible recap of the last 5 days at session start (systemMessage)
 ├── scripts/session-end.sh        — hygiene session close on session end (plain HTTP)
 ├── scripts/subagent-stop.sh      — captures subagent findings (plain HTTP)
 ├── scripts/login_listener.py     — loopback HTTP listener for the no-paste login hand-off
