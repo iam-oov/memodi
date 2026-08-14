@@ -59,6 +59,8 @@ Reinicia Claude Code y corre `/memodi:start`: registra el workspace en esta maqu
 
 `/memodi:end` cierra la sesion con un resumen estructurado (Goal / Accomplished / Next Steps). Un hook `SessionEnd` corre igual en cada salida como red de contencion — nunca pisa un resumen real.
 
+`/memodi:logout` revoca la api key de esta maquina y limpia la config local — usalo para cambiar de cuenta en esta maquina, o para probar el flujo de login desde cero.
+
 ### Actualizar
 
 El instalador es idempotente — volver a correrlo trae la ultima version del plugin:
@@ -105,6 +107,7 @@ Cuentas reales por usuario, no una key compartida:
 - `X-Memodi-Machine` identifica la maquina; los paths se registran por (usuario, maquina, path) — la misma carpeta puede resolver a workspaces distintos en maquinas distintas
 - `path` (el cwd del caller) es parametro explicito en cada tool de proyecto
 - Path no registrado → `{"type": "not_started"}`; key ausente o invalida → `{"type": "not_authenticated"}`
+- Cambiar de cuenta en la misma maquina no necesita codigo nuevo: la key de otro usuario resuelve a sus propias memorias, nunca a las del usuario anterior. Corre `/memodi:logout` para revocar la key de esta maquina antes de iniciar sesion con otra cuenta
 
 ## Tools MCP (37)
 
@@ -195,7 +198,7 @@ uv run pytest -v
 uv run ruff check src/ tests/
 ```
 
-PR a `main` → `ci.yml` corre lint + tests (480) → si se mergea, `deploy.yml` deploya solo.
+PR a `main` → `ci.yml` corre lint + tests (485) → si se mergea, `deploy.yml` deploya solo.
 
 ## Produccion
 

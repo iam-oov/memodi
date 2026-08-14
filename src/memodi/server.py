@@ -4,6 +4,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import Tool as MCPTool
 
 from memodi.config import settings
+from memodi.database import auth_repository
 from memodi.database.connection import ensure_schema
 from memodi.tools import graph, memory, session, workflow
 from memodi.tools.context import client_context
@@ -280,6 +281,25 @@ def memodi_list_projects(ctx: Context) -> str:
     if isinstance(caller, str):
         return caller
     return memory.list_projects(caller["user_id"])
+
+
+@mcp.tool()
+def memodi_logout(ctx: Context) -> str:
+    """Revoke this machine's api key server-side, ending its access
+    immediately.
+
+    Use when the user wants to log out, switch to a different account
+    on this machine, or test the login flow from scratch. The calling
+    key dies immediately — any further MCP calls this session makes
+    afterward will return not_authenticated.
+    """
+    cc = client_context(ctx)
+    try:
+        user = require_user(cc["api_key"])
+    except NotAuthenticatedError as e:
+        return json.dumps({"error": str(e), "type": "not_authenticated"})
+    auth_repository.revoke_api_key(cc["api_key"])
+    return json.dumps({"revoked": True, "email": user["email"]})
 
 
 @mcp.tool()

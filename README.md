@@ -59,6 +59,8 @@ Restart Claude Code and run `/memodi:start`: it registers the workspace on this 
 
 `/memodi:end` closes the session with a structured summary (Goal / Accomplished / Next Steps). A `SessionEnd` hook also runs on every exit as a safety net — it never overwrites a real summary.
 
+`/memodi:logout` revokes this machine's api key and cleans up the local config — use it to switch to a different account on this machine, or to test the login flow from scratch.
+
 ### Upgrade
 
 The installer is idempotent — running it again pulls the latest plugin version:
@@ -105,6 +107,7 @@ Real per-user accounts, not a shared key:
 - `X-Memodi-Machine` identifies the machine; paths are registered per (user, machine, path) — the same folder can resolve to different workspaces on different machines
 - `path` (the caller's cwd) is an explicit parameter on every project-scoped tool
 - Unregistered path → `{"type": "not_started"}`; missing or invalid key → `{"type": "not_authenticated"}`
+- Switching accounts on the same machine needs no new code: a different user's key resolves to its own memories, never the previous user's. Run `/memodi:logout` to revoke this machine's key before logging in as someone else
 
 ## MCP Tools (37)
 
@@ -195,7 +198,7 @@ uv run pytest -v
 uv run ruff check src/ tests/
 ```
 
-PR to `main` → `ci.yml` runs lint + tests (480) → on merge, `deploy.yml` deploys automatically.
+PR to `main` → `ci.yml` runs lint + tests (485) → on merge, `deploy.yml` deploys automatically.
 
 ## Production
 

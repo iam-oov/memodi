@@ -89,6 +89,21 @@ def login_with_email(email: str) -> dict:
     return result
 
 
+def revoke_api_key(api_key: str) -> bool:
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "DELETE FROM api_keys WHERE key_hash = %s",
+            (_hash_api_key(api_key),),
+        )
+        revoked = cursor.rowcount == 1
+    except Exception:
+        conn.rollback()
+        raise
+    conn.commit()
+    return revoked
+
+
 def get_user_by_api_key(api_key: str) -> dict | None:
     api_key_hash = _hash_api_key(api_key)
     conn = get_connection()

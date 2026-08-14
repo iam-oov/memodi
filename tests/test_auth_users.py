@@ -149,3 +149,34 @@ def test_login_with_email_normalizes_case(email):
 
     assert first["id"] == second["id"]
     assert first["email"] == email
+
+
+def test_revoke_api_key_removes_only_the_targeted_key(email):
+    created = auth_repository.create_user(email)
+    second_key = auth_repository.create_api_key(created["id"])
+
+    revoked = auth_repository.revoke_api_key(created["api_key"])
+
+    assert revoked is True
+    assert auth_repository.get_user_by_api_key(created["api_key"]) is None
+    assert auth_repository.get_user_by_api_key(second_key)["id"] == created["id"]
+
+    conn = get_connection()
+    count = conn.execute(
+        "SELECT COUNT(*) AS c FROM api_keys WHERE user_id = %s", (created["id"],)
+    ).fetchone()["c"]
+    assert count == 1
+
+
+def test_revoke_api_key_unknown_key_returns_false():
+    assert auth_repository.revoke_api_key("mmd_does-not-exist") is False
+
+
+def test_revoke_api_key_twice_is_idempotent(email):
+    created = auth_repository.create_user(email)
+
+    first = auth_repository.revoke_api_key(created["api_key"])
+    second = auth_repository.revoke_api_key(created["api_key"])
+
+    assert first is True
+    assert second is False

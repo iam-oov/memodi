@@ -41,6 +41,7 @@ Real per-user accounts, not a single shared key:
 - `X-Memodi-Machine` header — per-machine identity, used to scope path registration (`memodi_workspace_start`) so the same filesystem path can resolve to different workspaces on different machines
 - `path` (the caller's cwd) is an explicit per-call parameter on every project-scoped tool — never inferred from the api key or machine
 - Unregistered path → `{"type": "not_started"}`; missing or invalid key → `{"type": "not_authenticated"}` — both self-describing errors, no silent auto-creation of projects or workspaces
+- Key revocation is manual and explicit: `/memodi:logout` deletes the calling key's row from `api_keys` server-side and cleans up the local config; there is no other revocation path
 
 ## CI/CD Pipeline
 
@@ -48,7 +49,7 @@ Real per-user accounts, not a single shared key:
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
-| `ci.yml` | PR to main, push to main | Lint + tests (480 tests, full coverage) |
+| `ci.yml` | PR to main, push to main | Lint + tests (485 tests, full coverage) |
 | `deploy.yml` | `ci.yml` succeeds on main | SSH to the Pi through the Cloudflare Tunnel + `uv sync` + `systemctl restart memodi` + health check |
 | `release.yml` | Tag `v*` | Auto-generated changelog + GitHub Release |
 | `db-image.yml` | Changes to `Dockerfile.db` | Build + push to `ghcr.io/iam-oov/memodi-db` (dev-only image) |
@@ -66,6 +67,7 @@ plugin/claude-code/
 ├── scripts/subagent-stop.sh      — captures subagent findings (plain HTTP)
 ├── commands/start.md             — /memodi:start (user-driven activation)
 ├── commands/end.md               — /memodi:end (user-driven session close with a real summary)
+├── commands/logout.md            — /memodi:logout (revoke this machine's key, clean local config)
 └── skills/memory/SKILL.md        — proactive memory instructions
 ```
 
