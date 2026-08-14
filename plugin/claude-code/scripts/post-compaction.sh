@@ -66,7 +66,9 @@ Follow these steps IMMEDIATELY and IN ORDER:
    - {"type": "not_authenticated"} -> tell the user once that the api key
      is missing or invalid, then continue without memory.
 
-2. Read the returned observations carefully — they contain what was being worked on
+2. Read the last session summary and the observation pointers (titles) —
+   they name what was being worked on. Fetch any observation that matters
+   with memodi_get_observation(id); do not fetch all of them.
 
 3. Only THEN continue with the user's task
 

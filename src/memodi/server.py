@@ -258,13 +258,18 @@ def memodi_search(
 def memodi_context(
     ctx: Context, path: str, project: str | None = None, limit: int = 20
 ) -> str:
-    """Load recent decisions, discoveries, patterns, and session
-    summaries for a project.
+    """Load the last session summary plus pointers to recent
+    observations (id, type, title, topic_key, project, dates — no
+    content) for a project.
 
     This is the primary orientation tool — your FIRST call when
     joining a project, before git log, TODO files, or READMEs.
     memodi holds cross-session context that doesn't exist anywhere
     else: what was decided, what was learned, what was tried.
+
+    Observations arrive as pointers to keep the once-per-session
+    load cheap. Read any that matters with memodi_get_observation(id),
+    or search with memodi_search_hybrid.
     """
     caller = _caller(ctx)
     if isinstance(caller, str):

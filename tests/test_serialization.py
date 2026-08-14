@@ -15,6 +15,7 @@ from memodi.tools.memory import (
 )
 from memodi.tools.serialization import (
     _CLUSTER_MEMBER_FIELDS,
+    _CONTEXT_OBSERVATION_FIELDS,
     _OBSERVATION_READ_FIELDS,
     _PROMPT_SEARCH_FIELDS,
     _RELATED_FIELDS,
@@ -464,9 +465,7 @@ def test_get_observation_exact_field_set(registered_workspace, project_name):
     assert not leaked
 
 
-def test_get_observation_successor_exact_field_set(
-    registered_workspace, project_name
-):
+def test_get_observation_successor_exact_field_set(registered_workspace, project_name):
     common = dict(
         path=_path(registered_workspace, project_name),
         user_id=registered_workspace["user_id"],
@@ -532,14 +531,27 @@ def test_successor_carries_no_supersedes_through_context_and_search(
 
     for search_fn in (search, search_hybrid, search_similar):
         rows = json.loads(search_fn(**common, query="pelican rollout"))
-        hits = [
-            row for row in rows if row["title"] == "Surfacing boundary successor"
-        ]
+        hits = [row for row in rows if row["title"] == "Surfacing boundary successor"]
         assert hits, f"expected the successor in {search_fn.__name__}"
         assert "supersedes" not in hits[0], search_fn.__name__
 
 
+def test_context_fields_allowlist_is_pinned():
+    assert {
+        "id",
+        "type",
+        "title",
+        "topic_key",
+        "project",
+        "created_at",
+        "occurred_at",
+    } == _CONTEXT_OBSERVATION_FIELDS
+
+
 def test_context_observation_exact_field_set(registered_workspace, project_name):
+    """Context observations are content-free pointers: the once-per-session
+    orientation load must stay cheap, and full bodies are one
+    memodi_get_observation(id) away."""
     common = dict(
         path=_path(registered_workspace, project_name),
         user_id=registered_workspace["user_id"],
@@ -556,9 +568,36 @@ def test_context_observation_exact_field_set(registered_workspace, project_name)
     assert payload["observations"], "expected at least one recent observation"
     row = payload["observations"][0]
 
-    assert set(row.keys()) == OBSERVATION_ROW_FIELDS | {"project"}
-    assert row["content"]
+    assert set(row.keys()) == {"id", "type", "title", "project", "created_at"}
+    assert "content" not in row
     assert row["title"]
+
+
+def test_context_observation_keeps_topic_key_and_occurred_at_when_set(
+    registered_workspace, project_name
+):
+    common = dict(
+        path=_path(registered_workspace, project_name),
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+    )
+    save(
+        **common,
+        title="Context pointer with topic",
+        content="Body that must never surface through context",
+        type="discovery",
+        topic_key="test/context-pointer",
+        occurred_at="2026-08-01T00:00:00Z",
+    )
+
+    payload = json.loads(context(**common))
+    row = next(
+        r for r in payload["observations"] if r["title"] == "Context pointer with topic"
+    )
+
+    assert row["topic_key"] == "test/context-pointer"
+    assert row["occurred_at"]
+    assert "content" not in row
 
 
 def test_cluster_member_fields_allowlist_is_pinned():

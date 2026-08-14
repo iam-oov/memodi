@@ -9,6 +9,7 @@ from memodi.tools.errors import handle_errors
 from memodi.tools.scope import require_workspace, resolve_project
 from memodi.tools.serialization import (
     serialize_clusters,
+    serialize_context_observations,
     serialize_observation,
     serialize_observation_save,
     serialize_observations,
@@ -492,7 +493,7 @@ def context(
             "last_session": serialize_session_summary(last_session)
             if last_session
             else None,
-            "observations": serialize_observations(observations),
+            "observations": serialize_context_observations(observations),
         },
         default=str,
     )

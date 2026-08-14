@@ -48,6 +48,16 @@ _RELATED_FIELDS = {
     "similarity",
 }
 
+_CONTEXT_OBSERVATION_FIELDS = {
+    "id",
+    "type",
+    "title",
+    "topic_key",
+    "project",
+    "created_at",
+    "occurred_at",
+}
+
 _PROMPT_SEARCH_FIELDS = {
     "id",
     "type",
@@ -111,6 +121,22 @@ def serialize_observation(obs: dict) -> dict:
 
 def serialize_observations(observations: list[dict]) -> list[dict]:
     return [serialize_observation(obs) for obs in observations]
+
+
+def serialize_context_observations(observations: list[dict]) -> list[dict]:
+    """Content-free pointers for the session-start orientation load.
+
+    memodi_context is called once per session by protocol, so its payload is
+    a standing tax on every conversation — full bodies made it ~15k tokens.
+    Detail stays one call away: memodi_get_observation(id).
+    """
+    slim = [_allow(obs, _CONTEXT_OBSERVATION_FIELDS) for obs in observations]
+    for entry in slim:
+        if not entry.get("topic_key"):
+            entry.pop("topic_key", None)
+        if not entry.get("occurred_at"):
+            entry.pop("occurred_at", None)
+    return slim
 
 
 def serialize_related(observations: list[dict]) -> list[dict]:
