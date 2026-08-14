@@ -21,7 +21,8 @@ GOOGLE_ISSUERS = ("https://accounts.google.com", "accounts.google.com")
 STATE_COOKIE = "memodi_oauth_state"
 STATE_MAX_AGE = 600
 
-NONCE_RE = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
+NONCE_RE = re.compile(r"\A[A-Za-z0-9_-]{16,64}\Z")
+PORT_RE = re.compile(r"\A[1-9][0-9]{3,4}\Z")
 PORT_MIN = 1024
 PORT_MAX = 65535
 LOOPBACK_HOST = "127.0.0.1"
@@ -109,12 +110,11 @@ def _configured() -> bool:
 def _valid_dest(port_raw: str | None, nonce: str | None) -> int | None:
     if port_raw is None or nonce is None:
         return None
-    if not NONCE_RE.match(nonce):
+    if not NONCE_RE.fullmatch(nonce):
         return None
-    try:
-        port = int(port_raw)
-    except ValueError:
+    if not PORT_RE.fullmatch(port_raw):
         return None
+    port = int(port_raw)
     if port < PORT_MIN or port > PORT_MAX:
         return None
     return port

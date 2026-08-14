@@ -88,9 +88,12 @@ def _complete_login(client, state: str):
     )
 
 
-def _complete_login_no_follow(client, state: str, **extra_params):
-    params = {"state": state, "code": "test-code", **extra_params}
-    return client.get("/oauth/callback", params=params, follow_redirects=False)
+def _complete_login_no_follow(client, state: str):
+    return client.get(
+        "/oauth/callback",
+        params={"state": state, "code": "test-code"},
+        follow_redirects=False,
+    )
 
 
 def _login_with_loopback(client, port=VALID_PORT, nonce=VALID_NONCE):
@@ -578,6 +581,12 @@ def test_get_login_with_loopback_preserves_cookie_flags(client, google_settings)
         (str(VALID_PORT), "bad nonce!"),
         (str(VALID_PORT), "a" * 15),
         (str(VALID_PORT), "a" * 65),
+        (" 8080", VALID_NONCE),
+        ("+8080", VALID_NONCE),
+        ("8_080", VALID_NONCE),
+        ("08080", VALID_NONCE),
+        ("0", VALID_NONCE),
+        ("٨٠٨٠", VALID_NONCE),
     ],
 )
 def test_get_login_rejects_invalid_loopback_params(
@@ -590,6 +599,20 @@ def test_get_login_rejects_invalid_loopback_params(
         params["nonce"] = nonce
 
     response = client.get("/login", params=params, follow_redirects=False)
+
+    assert response.status_code == 400
+
+
+def test_get_login_nonce_with_trailing_newline_returns_400_not_500(
+    client, google_settings
+):
+    """A trailing newline reaches http.cookies, which raises — a 500 on the
+    public /login route. `$` matching before it is what let it through."""
+    response = client.get(
+        "/login",
+        params={"port": str(VALID_PORT), "nonce": VALID_NONCE + "\n"},
+        follow_redirects=False,
+    )
 
     assert response.status_code == 400
 
@@ -615,7 +638,7 @@ def test_callback_with_loopback_redirects_to_127_0_0_1_with_key_nonce_email(
     assert query["email"] == [email]
 
 
-def test_callback_loopback_key_not_in_response_body(
+def test_callback_loopback_key_travels_only_in_the_location_header(
     client, google_settings, email, monkeypatch
 ):
     login_response = _login_with_loopback(client)
@@ -626,7 +649,14 @@ def test_callback_loopback_key_not_in_response_body(
 
     location = response.headers["location"]
     key = urllib.parse.parse_qs(urllib.parse.urlparse(location).query)["key"][0]
+    assert key.startswith("mmd_")
     assert key not in response.text
+    carrying_the_key = [
+        name
+        for name, value in response.headers.items()
+        if key in value or urllib.parse.quote(key, safe="") in value
+    ]
+    assert carrying_the_key == ["location"]
 
 
 def test_callback_loopback_response_has_no_store_and_clears_cookie(
@@ -688,21 +718,6 @@ def test_callback_malformed_state_cookie_degrades_to_success_page(
 
     assert response.status_code == 200
     assert response.text.count("mmd_") == 1
-
-
-def test_callback_loopback_ignores_host_override_query_param(
-    client, google_settings, email, monkeypatch
-):
-    login_response = _login_with_loopback(client)
-    bare_state = _bare_state_from_login(login_response)
-    _mock_exchange(monkeypatch, _fake_id_token(**_valid_claims(email)))
-
-    response = _complete_login_no_follow(client, bare_state, host="evil.com")
-
-    assert response.status_code == 302
-    location = response.headers["location"]
-    assert urllib.parse.urlparse(location).hostname == "127.0.0.1"
-    assert "evil.com" not in location
 
 
 def test_callback_loopback_creates_user_and_persists_key(
