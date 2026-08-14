@@ -710,14 +710,11 @@ def test_blank_client_session_id_is_never_persisted_as_a_string(
 # --- /hooks/digest (SessionStart user-visible digest) ---
 
 
-def test_digest_returns_recent_activity(client, registered_workspace):
+def test_digest_returns_pending_next_steps(client, registered_workspace):
     project_name = f"test-hooks-{uuid.uuid4()}"
     path = _path(registered_workspace, project_name)
     proj = _project(registered_workspace, project_name)
 
-    repository.save_observation(
-        proj["id"], "Digest fixture decision", "some content", "decision"
-    )
     sess = repository.create_session(proj["id"])
     repository.end_session(
         sess["id"],
@@ -731,23 +728,39 @@ def test_digest_returns_recent_activity(client, registered_workspace):
     assert response.status_code == 200
     digest = response.json()["digest"]
     assert registered_workspace["workspace"]["name"] in digest
-    assert "[decision] Digest fixture decision" in digest
-    assert "Goal: Ship the digest" in digest
-    assert "Next: Wire the hook" in digest
+    assert "1. Wire the hook" in digest
+    assert "2. Release" in digest
+    assert "Goal" not in digest
 
 
-def test_digest_excludes_observations_outside_the_window(client, registered_workspace):
+def test_digest_caps_pending_steps_at_five(client, registered_workspace):
+    project_name = f"test-hooks-{uuid.uuid4()}"
+    path = _path(registered_workspace, project_name)
+    proj = _project(registered_workspace, project_name)
+
+    steps = "\n".join(f"- Step {n}" for n in range(1, 8))
+    sess = repository.create_session(proj["id"])
+    repository.end_session(sess["id"], summary=f"## Next Steps\n{steps}")
+
+    response = client.post(
+        "/hooks/digest", json={"path": path}, headers=_headers(registered_workspace)
+    )
+
+    digest = response.json()["digest"]
+    assert "5. Step 5" in digest
+    assert "Step 6" not in digest
+
+
+def test_digest_without_next_steps_is_empty(client, registered_workspace):
     project_name = f"test-hooks-{uuid.uuid4()}"
     path = _path(registered_workspace, project_name)
     proj = _project(registered_workspace, project_name)
 
     repository.save_observation(
-        proj["id"],
-        "Ancient observation",
-        "content",
-        "decision",
-        occurred_at="2020-01-01T00:00:00Z",
+        proj["id"], "An observation alone is not a todo", "content", "decision"
     )
+    sess = repository.create_session(proj["id"])
+    repository.end_session(sess["id"], summary="## Goal\nNo pending work recorded")
 
     response = client.post(
         "/hooks/digest", json={"path": path}, headers=_headers(registered_workspace)
