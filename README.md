@@ -11,6 +11,16 @@ English | [Español](README.es.md)
 
 A single PostgreSQL instance does it all: document store (JSONB), semantic search (pgvector), and knowledge graph (Apache AGE).
 
+## Where memodi shines
+
+Picture `~/work/acme/` holding the repos of one product — `api/`, `worker/`, `billing/`. Run `/memodi:start` once and register the **parent folder** as the workspace: from then on every repo under `acme/` resolves to that workspace automatically (the longest registered path wins), and each repo becomes its own project inside it, named after its folder.
+
+That one decision is what memodi is built around:
+
+- **Memory that crosses repos.** A decision saved while working in `api/` ("the queue contract changed — consumers must ack twice") is findable from `billing/`. Searching inside a repo returns that repo's observations plus anything that lists it in `affects`; searching from the workspace root covers every project at once. `[[topic-key]]` links and `memodi_relate` build the cross-repo graph, so "what breaks if I change X?" has a real answer.
+- **Continuity across sessions and machines.** Close with `/memodi:end` and the next session — tomorrow, or on your other machine after attaching to the same workspace name — opens with your pending next steps on screen and the last summary loaded silently. Monday-morning "where was I?" stops being a question.
+- **Three kinds of recall, one PostgreSQL.** Keyword (tsvector), semantic (pgvector — "have we solved something like this before?"), and graph (Apache AGE), over observations the agent saves proactively: decisions, bugfixes, discoveries, patterns, conventions, architecture notes, and session summaries.
+
 ## Features
 
 - **Proactive memory** — the agent saves observations without being asked; the instructions ship with the plugin skill
@@ -19,6 +29,7 @@ A single PostgreSQL instance does it all: document store (JSONB), semantic searc
 - **Auto-linking** — writing `[[topic-key]]` in an observation creates the `LINKS_TO` relation in the graph
 - **Multi-machine** — one key per user; registering the same workspace on two machines shares memories between them
 - **Automatic context** — session hooks load memory when you open the repo and inject relevant pointers on every prompt
+- **Session digest** — opening a session prints your pending next steps from the last one, right in the terminal
 - **Inert by default** — an unregistered path returns `not_started`; projects and workspaces are never auto-created
 
 ## Quick start
@@ -103,6 +114,8 @@ Adding `"mcp__memodi__*"` to `permissions.allow` in `~/.claude/settings.json` av
 
 Restart Claude Code and run `/memodi:start`: it registers the workspace on this machine (or attaches to an existing one from another machine — same name = shared memories) and loads its memory. Once per (machine, folder); after that, memory loads silently every time you open the repo.
 
+> **Tip — the folder you register decides how much your repos share.** `/memodi:start` suggests the **parent folder** of the current repo by default. Accept it when sibling repos belong to the same product: every repo under it shares the workspace with zero further setup, each one becoming its own project named after its folder. Working out of one lone repo? Registering the repo folder itself is fine. On a second machine, pick the **same workspace name** to share memories — a different name creates a separate workspace. And avoid registering a subfolder of an already-registered workspace: it does not fail, it silently creates a nested workspace that shadows the parent for that subtree.
+
 `/memodi:end` closes the session with a structured summary (Goal / Accomplished / Next Steps). A `SessionEnd` hook also runs on every exit as a safety net — it never overwrites a real summary.
 
 `/memodi:logout` revokes this machine's api key and cleans up the local config — use it to switch to a different account on this machine, or to test the login flow from scratch.
@@ -134,7 +147,7 @@ curl -sf https://raw.githubusercontent.com/iam-oov/memodi/main/uninstall.sh | sh
 
 ```
 Claude Code ──HTTPS──► Cloudflare Tunnel ──► memodi-server (uv + systemd) ──► PostgreSQL
-                       memodi.valdoh.com      Raspberry Pi                     pgvector + AGE
+                       memodi.valdoh.com      home server (x86)                pgvector + AGE
 ```
 
 Claude decides what is worth remembering; memodi persists and retrieves.
@@ -157,7 +170,7 @@ Real per-user accounts, not a shared key:
 - Unregistered path → `{"type": "not_started"}`; missing or invalid key → `{"type": "not_authenticated"}`
 - Switching accounts on the same machine needs no new code: a different user's key resolves to its own memories, never the previous user's. Run `/memodi:logout` to revoke this machine's key before logging in as someone else
 
-## MCP Tools (37)
+## MCP Tools (38)
 
 Every project-scoped tool takes `path` (the caller's cwd) and resolves it against a registered workspace.
 
@@ -168,7 +181,7 @@ Every project-scoped tool takes `path` (the caller's cwd) and resolves it agains
 | `memodi_search` | Keyword search |
 | `memodi_search_similar` | Semantic search |
 | `memodi_search_hybrid` | Keyword + semantic with RRF |
-| `memodi_context` | Recent context for a project |
+| `memodi_context` | Workspace-wide recent context: last session summary + observation pointers |
 | `memodi_search_global` | Search across all your projects (user-scoped) |
 | `memodi_backfill` | Embeddings for old observations |
 | `memodi_backfill_links` | Reconcile LINKS_TO from before auto-linking (idempotent) |
@@ -214,6 +227,7 @@ Every project-scoped tool takes `path` (the caller's cwd) and resolves it agains
 |------|-------------|
 | `memodi_session_start` | Start a session (observations auto-attach) |
 | `memodi_session_end` | Close a session with a structured summary (required) |
+| `memodi_logout` | Revoke the calling api key server-side (backs `/memodi:logout`) |
 | `memodi_ping` | Server liveness |
 | `memodi_status` | Server health and PostgreSQL extensions |
 | `memodi_version` | Version running in production |
@@ -246,11 +260,11 @@ uv run pytest -v
 uv run ruff check src/ tests/
 ```
 
-PR to `main` → `ci.yml` runs lint + tests (525) → on merge, `deploy.yml` deploys automatically.
+PR to `main` → `ci.yml` runs lint + the full test suite → on merge, `deploy.yml` deploys automatically.
 
 ## Production
 
-Runs natively on a Raspberry Pi (PostgreSQL + pgvector + AGE, uv + systemd) behind a Cloudflare Tunnel, with push-based deploys via GitHub Actions. Full setup and day-2 operations: [`docs/pi-setup.md`](docs/pi-setup.md).
+Runs natively on an always-on x86 home server (PostgreSQL + pgvector + AGE, uv + systemd) behind a Cloudflare Tunnel, with push-based deploys via GitHub Actions. Setup and day-2 operations: [`docs/pi-setup.md`](docs/pi-setup.md) — written for the original Raspberry Pi host, the same steps apply.
 
 ## License
 

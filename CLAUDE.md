@@ -8,7 +8,7 @@ MCP server (Python) that gives Claude Code persistent, distributed memory across
 
 ```
 Local dev:  Claude Code ──HTTP──► memodi-server (docker compose) ──► PostgreSQL (docker)
-Production: Claude Code ──HTTPS──► Cloudflare Tunnel ──► memodi-server (uv + systemd, Raspberry Pi) ──► PostgreSQL (native)
+Production: Claude Code ──HTTPS──► Cloudflare Tunnel ──► memodi-server (uv + systemd, x86 home server) ──► PostgreSQL (native)
 ```
 
 ### Storage layers (PostgreSQL)
@@ -29,7 +29,7 @@ Production: Claude Code ──HTTPS──► Cloudflare Tunnel ──► memodi-
 - **Database**: PostgreSQL 16+ (pgvector + Apache AGE)
 - **Embeddings**: paraphrase-multilingual-MiniLM-L12-v2 via fastembed (quantized ONNX runtime, 384d, ES+EN)
 - **Local infra**: Docker Compose (DB from GHCR pre-built image, server from source)
-- **Production infra**: uv + systemd (`memodi.service`) on a Raspberry Pi, native PostgreSQL + pgvector + Apache AGE, Cloudflare Tunnel (native cloudflared, TLS + DNS at `memodi.valdoh.com`); see `docs/pi-setup.md`; backups: deferred
+- **Production infra**: uv + systemd (`memodi.service`) on an x86 home server (migrated from the Raspberry Pi on 2026-08-13 after the PSU undervoltage incident), native PostgreSQL + pgvector + Apache AGE, Cloudflare Tunnel (native cloudflared, TLS + DNS at `memodi.valdoh.com`); see `docs/pi-setup.md` (written for the Pi, same steps apply)
 - **Config**: System env vars with MEMODI_ prefix
 
 ## Auth Model
@@ -50,8 +50,8 @@ Real per-user accounts, not a single shared key:
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
-| `ci.yml` | PR to main, push to main | Lint + tests (525 tests, full coverage) |
-| `deploy.yml` | `ci.yml` succeeds on main | SSH to the Pi through the Cloudflare Tunnel + `uv sync` + `systemctl restart memodi` + health check |
+| `ci.yml` | PR to main, push to main | Lint + the full test suite |
+| `deploy.yml` | `ci.yml` succeeds on main | SSH to the prod host through the Cloudflare Tunnel + `uv sync` + `systemctl restart memodi` + health check |
 | `release.yml` | Tag `v*` | Auto-generated changelog + GitHub Release |
 | `db-image.yml` | Changes to `Dockerfile.db` | Build + push to `ghcr.io/iam-oov/memodi-db` (dev-only image) |
 
@@ -123,5 +123,5 @@ The skill tells Claude WHEN and WHY to use memory. The MCP server handles HOW.
 - Every MCP tool must have a clear, single responsibility
 - PostgreSQL is the ONLY persistence — no local files for shared state
 - Credentials come from system env vars only — never hardcode, never commit
-- Docker Compose for local dev only; production runs natively on a Raspberry Pi behind a Cloudflare Tunnel
+- Docker Compose for local dev only; production runs natively on the x86 home server behind a Cloudflare Tunnel
 - Connection pool sets `idle_in_transaction_session_timeout=30s` — DB kills abandoned transactions automatically
