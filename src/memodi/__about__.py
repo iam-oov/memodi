@@ -6,4 +6,4 @@ Read by:
 - scripts/sync_plugin_version.py (propagates to plugin.json)
 """
 
-__version__ = "0.22.0"
+__version__ = "0.23.0"

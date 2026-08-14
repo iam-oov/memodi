@@ -167,13 +167,12 @@ def workspace_start(user_id: str, machine: str, path: str, workspace_name: str) 
 
     existing_path = conn.execute(
         """
-        SELECT w.id AS workspace_id, w.name AS workspace_name,
-               w.owner_user_id AS owner_user_id
+        SELECT w.id AS workspace_id, w.name AS workspace_name
         FROM workspace_paths wp
         JOIN workspaces w ON w.id = wp.workspace_id
-        WHERE wp.machine = %s AND wp.path = %s
+        WHERE wp.machine = %s AND wp.path = %s AND wp.owner_user_id = %s
         """,
-        (machine, normalized_path),
+        (machine, normalized_path, user_id),
     ).fetchone()
 
     if existing_path:
@@ -184,19 +183,17 @@ def workspace_start(user_id: str, machine: str, path: str, workspace_name: str) 
         if owned and existing_path["workspace_id"] == owned["id"]:
             return get_or_create_workspace(workspace_name, owner_user_id=user_id)
         conn.rollback()
-        if existing_path["owner_user_id"] == user_id:
-            raise ValueError(
-                f"Path already registered to workspace "
-                f"'{existing_path['workspace_name']}'"
-            )
-        raise ValueError("Path already registered on this machine")
+        raise ValueError(
+            f"Path already registered to workspace "
+            f"'{existing_path['workspace_name']}'"
+        )
 
     workspace = get_or_create_workspace(workspace_name, owner_user_id=user_id)
     try:
         conn.execute(
-            "INSERT INTO workspace_paths (workspace_id, machine, path) "
-            "VALUES (%s, %s, %s)",
-            (workspace["id"], machine, normalized_path),
+            "INSERT INTO workspace_paths (workspace_id, machine, path, owner_user_id) "
+            "VALUES (%s, %s, %s, %s)",
+            (workspace["id"], machine, normalized_path, user_id),
         )
         conn.commit()
     except UniqueViolation as e:

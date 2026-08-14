@@ -159,8 +159,10 @@ A repo at `/home/user/work/repo-a` resolves through a workspace registered at
 - A workspace groups MULTIPLE related projects (parent-folder model)
 - Examples: "trabajo" contains repo-a, repo-b, repo-c, repo-d
 
-This registration happens ONCE per (machine, path). After that, memodi auto-detects
-the workspace from the path on that machine.
+This registration happens ONCE per (owner, machine, path) — the same path on the
+same machine can belong to several accounts at once, each resolving their own
+workspace. After that, memodi auto-detects the workspace from the path on that
+machine for this account.
 
 ## PROACTIVE SAVE TRIGGERS (mandatory — do NOT wait for user to ask)
 

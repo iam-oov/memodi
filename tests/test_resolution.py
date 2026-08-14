@@ -262,7 +262,7 @@ def test_prefix_boundary_ignores_like_metachars(registry):
     assert resolved is None
 
 
-def test_workspace_start_duplicate_path_other_owner_hides_workspace_name(registry):
+def test_workspace_start_same_path_different_owners_coexist(registry):
     owner = registry.new_owner()
     other = registry.new_owner("other")
     ws_name = registry.new_workspace_name()
@@ -271,11 +271,15 @@ def test_workspace_start_duplicate_path_other_owner_hides_workspace_name(registr
     path = _path()
 
     repository.workspace_start(owner["id"], machine, path, ws_name)
+    repository.workspace_start(other["id"], machine, path, other_ws_name)
 
-    with pytest.raises(ValueError) as excinfo:
-        repository.workspace_start(other["id"], machine, path, other_ws_name)
+    resolved_owner = repository.resolve_workspace(owner["id"], machine, path)
+    resolved_other = repository.resolve_workspace(other["id"], machine, path)
 
-    assert ws_name not in str(excinfo.value)
+    assert resolved_owner is not None
+    assert resolved_owner["name"] == ws_name
+    assert resolved_other is not None
+    assert resolved_other["name"] == other_ws_name
 
 
 def test_workspace_start_duplicate_path_leaves_connection_idle(registry):
@@ -288,7 +292,8 @@ def test_workspace_start_duplicate_path_leaves_connection_idle(registry):
     repository.workspace_start(owner["id"], machine, path, first_ws)
 
     conn = get_connection()
-    with pytest.raises(ValueError):
+    expected_message = f"already registered to workspace '{first_ws}'"
+    with pytest.raises(ValueError, match=expected_message):
         repository.workspace_start(owner["id"], machine, path, other_ws_name)
 
     assert conn.info.transaction_status == psycopg.pq.TransactionStatus.IDLE

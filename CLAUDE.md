@@ -38,7 +38,7 @@ Real per-user accounts, not a single shared key:
 
 - Log in with Google at `/login` (public route, no MCP auth by design) — `GET /oauth/callback` completes the flow, creates or reuses the user by email, and shows the `mmd_…` api key ONCE; only its hash is stored server-side. Each login mints an additional key in `api_keys` (one user, many keys) so logging in from a second machine never invalidates the first
 - `X-Memodi-Api-Key` header — the caller's identity. This IS the app-level access control; there is no other gate in front of `/mcp`, nor in front of the three plain-HTTP hook routes (`POST /hooks/session-start`, `/hooks/session-close`, `/hooks/capture`) that share the same header contract
-- `X-Memodi-Machine` header — per-machine identity, used to scope path registration (`memodi_workspace_start`) so the same filesystem path can resolve to different workspaces on different machines
+- `X-Memodi-Machine` header — per-machine identity, used to scope path registration (`memodi_workspace_start`) so the same filesystem path can resolve to different workspaces on different machines. Path registration is also per-owner: the same path on the same machine can belong to several accounts at once, each resolving their own workspace
 - `path` (the caller's cwd) is an explicit per-call parameter on every project-scoped tool — never inferred from the api key or machine
 - Unregistered path → `{"type": "not_started"}`; missing or invalid key → `{"type": "not_authenticated"}` — both self-describing errors, no silent auto-creation of projects or workspaces
 - Key revocation is manual and explicit: `/memodi:logout` deletes the calling key's row from `api_keys` server-side and cleans up the local config; there is no other revocation path
