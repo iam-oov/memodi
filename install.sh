@@ -60,6 +60,22 @@ if ! command -v claude >/dev/null 2>&1; then
   exit 1
 fi
 
+if [ -n "$MEMODI_API_KEY" ]; then
+  PROBE_CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
+    -X POST \
+    -H "X-Memodi-Api-Key: ${MEMODI_API_KEY}" \
+    -H "Content-Type: application/json" \
+    -d '{"path": "/", "query": "login probe"}' \
+    "${MEMODI_BASE_URL}/hooks/prompt-search" 2>/dev/null) || PROBE_CODE=""
+  if [ "$PROBE_CODE" = "401" ]; then
+    echo "      MEMODI_API_KEY in your environment is no longer valid — starting a fresh login."
+    MEMODI_API_KEY=""
+  else
+    echo "      Using MEMODI_API_KEY from your environment (no login needed)."
+    echo "      To log in as a different account: unset MEMODI_API_KEY and run again."
+  fi
+fi
+
 if [ -z "$MEMODI_API_KEY" ]; then
   if command -v python3 >/dev/null 2>&1; then
     LOGIN_OUT=$(python3 - "$LOGIN_URL" <<'PYEOF'
