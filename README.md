@@ -19,6 +19,8 @@ Your product is not one repo - it's several. The API, the worker, the billing se
 - **Pick up exactly where you left off.** Close a session and the next one - tomorrow, or on your other machine - opens with your pending work already on screen. The Monday "where was I?" comes pre-answered.
 - **It remembers the way you ask.** By exact word, by idea ("didn't we solve something like this before?"), or by connection ("what breaks if I touch this?"). And it saves as you work - decisions, bugs, discoveries - so you never have to remember to remember.
 
+That shared memory is a **workspace** - and you can have as many as you need. One for work, one for your personal projects, one for your thesis: each keeps its own memories, isolated from the rest, with every repo inside it as its own project. `/memodi:start` creates one - or joins one you already use on another machine.
+
 ## Features
 
 - **Proactive memory** - the agent saves observations without being asked; the instructions ship with the plugin skill

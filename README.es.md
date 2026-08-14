@@ -19,6 +19,8 @@ Tu producto no es un repo - son varios. El API, el worker, el servicio de billin
 - **Retoma exactamente donde quedaste.** Cierra una sesion y la siguiente - mañana, o en tu otra maquina - abre con tus pendientes ya en pantalla. El "donde me quede?" del lunes llega respondido.
 - **Recuerda como tu preguntas.** Por palabra exacta, por idea ("no resolvimos ya algo parecido?"), o por conexion ("que se rompe si toco esto?"). Y guarda mientras trabajas - decisiones, bugs, descubrimientos - para que nunca tengas que acordarte de recordar.
 
+Esa memoria compartida es un **workspace** - y puedes tener tantos como necesites. Uno para el trabajo, otro para tus proyectos personales, otro para la tesis: cada uno guarda sus propias memorias, aisladas del resto, y cada repo adentro es su propio proyecto. `/memodi:start` crea uno - o te une al que ya usas en otra maquina.
+
 ## Features
 
 - **Memoria proactiva** - el agente guarda observaciones sin que se lo pidas; las instrucciones viajan con el skill del plugin
