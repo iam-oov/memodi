@@ -15,6 +15,8 @@
 
 MEMODI_URL="${MEMODI_URL:-https://memodi.valdoh.com}"
 
+[ -z "$MEMODI_API_KEY" ] && exit 0
+
 # --- Parse stdin JSON ---
 INPUT=$(cat)
 PROMPT=$(printf '%s' "$INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('prompt',''))" 2>/dev/null)

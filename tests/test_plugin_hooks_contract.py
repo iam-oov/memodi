@@ -23,11 +23,16 @@ PLUGIN = Path(__file__).resolve().parent.parent / "plugin" / "claude-code"
 SKILL = PLUGIN / "skills" / "memory" / "SKILL.md"
 START_COMMAND = PLUGIN / "commands" / "start.md"
 END_COMMAND = PLUGIN / "commands" / "end.md"
+LOGOUT_COMMAND = PLUGIN / "commands" / "logout.md"
 SESSION_START_HOOK = PLUGIN / "scripts" / "session-start.sh"
+SESSION_END_HOOK = PLUGIN / "scripts" / "session-end.sh"
 POST_COMPACTION_HOOK = PLUGIN / "scripts" / "post-compaction.sh"
 SUBAGENT_STOP_HOOK = PLUGIN / "scripts" / "subagent-stop.sh"
 PROMPT_SEARCH_HOOK = PLUGIN / "scripts" / "prompt-search.sh"
+LOGIN_LISTENER = PLUGIN / "scripts" / "login_listener.py"
+LOGIN_SCRIPT = PLUGIN / "scripts" / "login.sh"
 HOOKS_JSON = PLUGIN / "hooks" / "hooks.json"
+INSTALL_SH = Path(__file__).resolve().parent.parent / "install.sh"
 
 _PROHIBITION_MARKERS = ("do not", "never", "not call", "no llames")
 
@@ -143,8 +148,10 @@ class _StubHandler(http.server.BaseHTTPRequestHandler):
     """Answers the hooks' connectivity probe and records what they POST."""
 
     posts: ClassVar[list[dict]] = []
+    gets: ClassVar[list[str]] = []
 
     def do_GET(self) -> None:
+        self.gets.append(self.path)
         self.send_response(200)
         self.send_header("Content-Length", "0")
         self.end_headers()
@@ -166,10 +173,13 @@ class _StubHandler(http.server.BaseHTTPRequestHandler):
 @pytest.fixture
 def hook_server():
     posts: list[dict] = []
-    handler = type("_Handler", (_StubHandler,), {"posts": posts})
+    gets: list[str] = []
+    handler = type("_Handler", (_StubHandler,), {"posts": posts, "gets": gets})
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    yield SimpleNamespace(url=f"http://127.0.0.1:{server.server_port}", posts=posts)
+    yield SimpleNamespace(
+        url=f"http://127.0.0.1:{server.server_port}", posts=posts, gets=gets
+    )
     server.shutdown()
     server.server_close()
 
@@ -384,3 +394,90 @@ def test_prompt_search_hook_exits_0_silently_when_prompt_is_absent(hook_server):
 
     assert out == ""
     assert hook_server.posts == []
+
+
+# --- Loopback login hand-off ---
+
+
+def _run_hook_with_env(
+    script: Path, payload: dict, url: str, api_key: str
+) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["sh", str(script)],
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env={
+            **os.environ,
+            "MEMODI_URL": url,
+            "MEMODI_API_KEY": api_key,
+            "MEMODI_MACHINE": "test-machine",
+        },
+    )
+
+
+def test_session_start_hook_without_api_key_tells_model_to_login(hook_server):
+    result = _run_hook_with_env(
+        SESSION_START_HOOK,
+        {"cwd": "/tmp/hook-cwd", "session_id": "sid-abc"},
+        hook_server.url,
+        api_key="",
+    )
+
+    assert result.returncode == 0
+    assert "/memodi:login" in result.stdout
+    assert "## Memodi Memory — Session Start" not in result.stdout
+    assert hook_server.posts == []
+
+
+@pytest.mark.parametrize(
+    "script",
+    [POST_COMPACTION_HOOK, PROMPT_SEARCH_HOOK, SESSION_END_HOOK, SUBAGENT_STOP_HOOK],
+)
+def test_hooks_without_api_key_stay_silent_and_send_nothing(hook_server, script):
+    """Every hook must be inert until the user logs in — an unauthenticated
+    POST would only be rejected server-side, and any stdout would nag the
+    model on a machine that deliberately has no key."""
+    result = _run_hook_with_env(
+        script,
+        {
+            "cwd": "/tmp/hook-cwd",
+            "session_id": "sid-abc",
+            "prompt": "q",
+            "last_assistant_message": (
+                "## Learnings\nA hook with no api key must send nothing at all.\n"
+            ),
+        },
+        hook_server.url,
+        api_key="",
+    )
+
+    assert result.returncode == 0
+    assert result.stdout == ""
+    assert hook_server.posts == []
+    assert hook_server.gets == []
+
+
+def test_install_sh_embeds_the_login_listener_verbatim():
+    assert LOGIN_LISTENER.read_text() in INSTALL_SH.read_text()
+
+
+def test_env_markers_are_identical_across_install_login_and_logout():
+    marker_start = "# >>> memodi env >>>"
+    marker_end = "# <<< memodi env <<<"
+    for path in (INSTALL_SH, LOGIN_SCRIPT, LOGOUT_COMMAND):
+        text = path.read_text()
+        assert marker_start in text
+        assert marker_end in text
+
+
+def test_login_script_never_prints_the_key_outside_persist_env():
+    text = LOGIN_SCRIPT.read_text()
+    func_start = text.index("persist_env() {")
+    func_end = text.index("\n}\n", func_start)
+    outside = text[:func_start] + text[func_end:]
+    for line in outside.splitlines():
+        if "MEMODI_API_KEY" in line:
+            assert "echo" not in line
+            assert "printf" not in line

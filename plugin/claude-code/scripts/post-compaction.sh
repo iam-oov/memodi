@@ -18,6 +18,8 @@ CWD="${CWD:-$PWD}"
 # --- Server URL (env var or production default) ---
 MEMODI_URL="${MEMODI_URL:-https://memodi.valdoh.com}"
 
+[ -z "$MEMODI_API_KEY" ] && exit 0
+
 # --- Build auth headers (per-user api key + machine identity) ---
 MACHINE="${MEMODI_MACHINE:-$(hostname 2>/dev/null)}"
 AUTH_HEADERS=""

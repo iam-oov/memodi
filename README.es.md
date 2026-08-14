@@ -23,14 +23,60 @@ Una sola instancia de PostgreSQL hace todo: document store (JSONB), busqueda sem
 
 ## Quick start
 
-Necesitas [Claude Code](https://docs.anthropic.com/en/docs/claude-code) y una API key de memodi (una por usuario). Inicia sesion con Google en `https://memodi.valdoh.com/login` (o la URL de tu instancia) y copia la key `mmd_...` apenas la veas — se muestra una sola vez.
+Necesitas [Claude Code](https://docs.anthropic.com/en/docs/claude-code) y una API key de memodi (una por usuario). `install.sh` la obtiene automaticamente — abre un navegador para iniciar sesion con Google y le pasa la key directo al instalador, sin copiar ni pegar nada.
 
 ### Instalar
 
 ```bash
-export MEMODI_API_KEY="mmd_..."
 curl -sf https://raw.githubusercontent.com/iam-oov/memodi/main/install.sh | sh
 ```
+
+### Que hace install.sh
+
+Una sola corrida encadena login, instalacion del plugin, conexion MCP y permisos — sin pasos manuales:
+
+```
+$ curl -sf https://raw.githubusercontent.com/iam-oov/memodi/main/install.sh | sh
+[1/6] Logging in...
+Open this URL to log in:
+https://memodi.valdoh.com/login?port=54231&nonce=Kx9pQ2z8mN...
+
+Logged in as someone@example.com
+Installing memodi plugin for Claude Code...
+[2/6] Adding marketplace...
+[3/6] Installing plugin...
+[4/6] Configuring MCP server...
+[5/6] Adding permissions...
+[6/6] Persisting environment to your shell rc...
+
+Done! Wrote MEMODI_API_KEY and MEMODI_MACHINE to ~/.zshrc.
+
+Next:
+  1. Reload your shell:   source ~/.zshrc   (or open a new terminal)
+  2. Restart Claude Code, then run:  /memodi:start
+```
+
+Una pestaña del navegador se abre sola con esa URL. La key nunca aparece en la terminal, en el historial del shell, ni en un prompt para pegarla — viaja directo desde el redirect del navegador hasta un listener efimero en `127.0.0.1`.
+
+Ese listener escucha en loopback de la maquina que corre el instalador, asi que la URL impresa solo completa el login si tu navegador corre en esa misma maquina. Por SSH o en una maquina sin interfaz grafica el listener llega al timeout a los 180s y el instalador cae al prompt para pegar la key — o exporta `MEMODI_API_KEY` de antemano y saltea el login por completo.
+
+Que toca en tu maquina:
+
+- El rc file de tu shell (`~/.zshrc`, `~/.bash_profile`, o `~/.profile`) — un bloque delimitado por marcadores con `MEMODI_API_KEY` y `MEMODI_MACHINE`
+- `~/.claude.json` — la entrada del server MCP `memodi`
+- `~/.claude/settings.json` — el permiso `"mcp__memodi__*"`
+- El registro del marketplace y del plugin `iam-oov/memodi`
+
+Casos de respaldo:
+
+| Condicion | Resultado |
+|---|---|
+| `MEMODI_API_KEY` ya exportada | El login se salta por completo |
+| No hay `python3` en la maquina | Cae al prompt para pegar la key |
+| No hay navegador local (SSH, sin interfaz grafica) | El listener llega al timeout y toma el prompt para pegar la key |
+| El listener llega al timeout (180s) | Cae al prompt para pegar la key |
+
+El hand-off por loopback es un redirect HTTP real, asi que la URL de un solo uso puede quedar en el historial de tu navegador local. `/memodi:logout` revoca la key del lado del server si eso te preocupa.
 
 <details>
 <summary>Instalacion manual</summary>
@@ -60,6 +106,8 @@ Reinicia Claude Code y corre `/memodi:start`: registra el workspace en esta maqu
 `/memodi:end` cierra la sesion con un resumen estructurado (Goal / Accomplished / Next Steps). Un hook `SessionEnd` corre igual en cada salida como red de contencion — nunca pisa un resumen real.
 
 `/memodi:logout` revoca la api key de esta maquina y limpia la config local — usalo para cambiar de cuenta en esta maquina, o para probar el flujo de login desde cero.
+
+`/memodi:login` vuelve a iniciar sesion sin arrancar de cero — el mismo hand-off por navegador que `install.sh`, sin necesidad de correr todo el instalador de nuevo. Necesita un navegador en la misma maquina que Claude Code; por SSH no tiene respaldo para pegar la key y falla, asi que ahi conviene correr `install.sh` en una terminal.
 
 ### Actualizar
 
@@ -198,7 +246,7 @@ uv run pytest -v
 uv run ruff check src/ tests/
 ```
 
-PR a `main` → `ci.yml` corre lint + tests (485) → si se mergea, `deploy.yml` deploya solo.
+PR a `main` → `ci.yml` corre lint + tests (525) → si se mergea, `deploy.yml` deploya solo.
 
 ## Produccion
 

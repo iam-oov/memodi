@@ -23,14 +23,60 @@ A single PostgreSQL instance does it all: document store (JSONB), semantic searc
 
 ## Quick start
 
-You need [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and a memodi API key (one per user). Log in with Google at `https://memodi.valdoh.com/login` (or your instance's URL) and copy the `mmd_...` key as soon as you see it — it is shown only once.
+You need [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and a memodi API key (one per user). `install.sh` gets you one automatically — it opens a browser to log in with Google and hands the key straight to the installer, nothing to copy or paste.
 
 ### Install
 
 ```bash
-export MEMODI_API_KEY="mmd_..."
 curl -sf https://raw.githubusercontent.com/iam-oov/memodi/main/install.sh | sh
 ```
+
+### What install.sh does
+
+One run drives login, plugin install, MCP wiring, and permissions — no manual steps:
+
+```
+$ curl -sf https://raw.githubusercontent.com/iam-oov/memodi/main/install.sh | sh
+[1/6] Logging in...
+Open this URL to log in:
+https://memodi.valdoh.com/login?port=54231&nonce=Kx9pQ2z8mN...
+
+Logged in as someone@example.com
+Installing memodi plugin for Claude Code...
+[2/6] Adding marketplace...
+[3/6] Installing plugin...
+[4/6] Configuring MCP server...
+[5/6] Adding permissions...
+[6/6] Persisting environment to your shell rc...
+
+Done! Wrote MEMODI_API_KEY and MEMODI_MACHINE to ~/.zshrc.
+
+Next:
+  1. Reload your shell:   source ~/.zshrc   (or open a new terminal)
+  2. Restart Claude Code, then run:  /memodi:start
+```
+
+A browser tab opens on that URL automatically. The key itself never appears in the terminal, your shell history, or a paste prompt — it travels from the browser redirect straight to a short-lived listener on `127.0.0.1`.
+
+That listener binds to loopback on the machine running the installer, so the printed URL only completes the login when your browser runs on that same machine. Over SSH or on a headless box, the listener times out after 180s and the installer falls back to the paste prompt — or export `MEMODI_API_KEY` beforehand and skip login entirely.
+
+What it touches on your machine:
+
+- Your shell rc file (`~/.zshrc`, `~/.bash_profile`, or `~/.profile`) — a marker-delimited block with `MEMODI_API_KEY` and `MEMODI_MACHINE`
+- `~/.claude.json` — the `memodi` MCP server entry
+- `~/.claude/settings.json` — the `"mcp__memodi__*"` permission
+- The `iam-oov/memodi` marketplace and plugin registration
+
+Fallbacks:
+
+| Condition | Result |
+|---|---|
+| `MEMODI_API_KEY` already exported | Login is skipped entirely |
+| No `python3` on the machine | Falls back to the paste prompt |
+| No local browser (SSH, headless) | The listener times out, then the paste prompt takes over |
+| Listener times out (180s) | Falls back to the paste prompt |
+
+The loopback hand-off is a real HTTP redirect, so the one-time-use URL can land in your local browser history. `/memodi:logout` revokes the key server-side if that's a concern.
 
 <details>
 <summary>Manual install</summary>
@@ -60,6 +106,8 @@ Restart Claude Code and run `/memodi:start`: it registers the workspace on this 
 `/memodi:end` closes the session with a structured summary (Goal / Accomplished / Next Steps). A `SessionEnd` hook also runs on every exit as a safety net — it never overwrites a real summary.
 
 `/memodi:logout` revokes this machine's api key and cleans up the local config — use it to switch to a different account on this machine, or to test the login flow from scratch.
+
+`/memodi:login` logs back in without restarting from scratch — same browser hand-off as `install.sh`, no need to re-run the whole installer. It needs a browser on the same machine as Claude Code; over SSH it has no paste fallback and will fail, so use `install.sh` in a terminal there instead.
 
 ### Upgrade
 
@@ -198,7 +246,7 @@ uv run pytest -v
 uv run ruff check src/ tests/
 ```
 
-PR to `main` → `ci.yml` runs lint + tests (485) → on merge, `deploy.yml` deploys automatically.
+PR to `main` → `ci.yml` runs lint + tests (525) → on merge, `deploy.yml` deploys automatically.
 
 ## Production
 

@@ -48,5 +48,5 @@ Tell the user in a few short lines:
 
 - Logged out (name the email from step 2, if you got one).
 - Restart Claude Code for this to take effect.
-- To log in again — same account or a different one — open https://memodi.valdoh.com/login and re-run `install.sh` with the new key.
+- To log in again — same account or a different one — run `/memodi:login`.
 - Memories are per-account: a different account starts with ITS memories (or none), never the previous one's.

@@ -16,6 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 ABOUT_FILE = ROOT / "src" / "memodi" / "__about__.py"
 PLUGIN_FILE = ROOT / "plugin" / "claude-code" / ".claude-plugin" / "plugin.json"
+MARKETPLACE_FILE = ROOT / ".claude-plugin" / "marketplace.json"
 
 VERSION_RE = re.compile(r"""^__version__\s*=\s*["']([^"']+)["']""", re.MULTILINE)
 
@@ -39,7 +40,20 @@ def write_plugin_version(plugin_file: Path, version: str) -> None:
     """Update the version field in plugin.json, preserving 2-space indent and trailing newline."""
     data = json.loads(plugin_file.read_text())
     data["version"] = version
-    plugin_file.write_text(json.dumps(data, indent=2) + "\n")
+    plugin_file.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+
+
+def read_marketplace_version(marketplace_file: Path) -> str:
+    """Read the plugins[0].version field from marketplace.json."""
+    data = json.loads(marketplace_file.read_text())
+    return data["plugins"][0]["version"]
+
+
+def write_marketplace_version(marketplace_file: Path, version: str) -> None:
+    """Update plugins[0].version in marketplace.json, preserving indent and newline."""
+    data = json.loads(marketplace_file.read_text())
+    data["plugins"][0]["version"] = version
+    marketplace_file.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -55,11 +69,17 @@ def main(argv: list[str] | None = None) -> int:
 
     pkg = read_package_version(ABOUT_FILE)
     plugin = read_plugin_version(PLUGIN_FILE)
+    marketplace = read_marketplace_version(MARKETPLACE_FILE)
 
     if args.check:
+        mismatched = []
         if pkg != plugin:
+            mismatched.append(f"plugin.json={plugin}")
+        if pkg != marketplace:
+            mismatched.append(f"marketplace.json={marketplace}")
+        if mismatched:
             print(
-                f"VERSION MISMATCH: package={pkg}, plugin={plugin}",
+                f"VERSION MISMATCH: package={pkg}, " + ", ".join(mismatched),
                 file=sys.stderr,
             )
             print(
@@ -67,15 +87,21 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 1
-        print(f"OK: both at {pkg}")
+        print(f"OK: all in sync at {pkg}")
         return 0
 
     if pkg == plugin:
-        print(f"Already in sync at {pkg}")
-        return 0
+        print(f"plugin.json already in sync at {pkg}")
+    else:
+        write_plugin_version(PLUGIN_FILE, pkg)
+        print(f"Updated plugin.json: {plugin} -> {pkg}")
 
-    write_plugin_version(PLUGIN_FILE, pkg)
-    print(f"Updated plugin.json: {plugin} -> {pkg}")
+    if pkg == marketplace:
+        print(f"marketplace.json already in sync at {pkg}")
+    else:
+        write_marketplace_version(MARKETPLACE_FILE, pkg)
+        print(f"Updated marketplace.json: {marketplace} -> {pkg}")
+
     return 0
 
 

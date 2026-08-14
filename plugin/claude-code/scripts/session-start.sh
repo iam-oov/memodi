@@ -27,6 +27,16 @@ AUTH_HEADERS=""
 [ -n "$MEMODI_API_KEY" ] && AUTH_HEADERS="-H X-Memodi-Api-Key:${MEMODI_API_KEY}"
 [ -n "$MACHINE" ] && AUTH_HEADERS="$AUTH_HEADERS -H X-Memodi-Machine:${MACHINE}"
 
+if [ -z "$MEMODI_API_KEY" ]; then
+  cat <<'EOF'
+## Memodi — not logged in
+
+Tell the user in ONE short line: run /memodi:login (restart afterwards).
+Then continue and do not mention memodi again.
+EOF
+  exit 0
+fi
+
 # --- Check connectivity ---
 if ! curl -s -o /dev/null --max-time 2 $AUTH_HEADERS "${MEMODI_URL}/mcp" 2>/dev/null; then
   cat <<'EOF'

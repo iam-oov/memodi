@@ -5,16 +5,16 @@
 # the MCP server connection to the shared production instance.
 #
 # Usage:
-#   1. Log in to get an api key: https://memodi.valdoh.com/login
-#   2. ./install.sh          # prompts for the key (no echo)
+#   ./install.sh             # opens a browser to log in automatically
 #
 # Or via curl:
 #   curl -sf https://raw.githubusercontent.com/iam-oov/memodi/main/install.sh | sh
 #
-# The key is read from the terminal (never from argv), so it does not
-# land in your shell history or scrollback. It is persisted to your
-# shell rc file automatically so the plugin hooks work in future
-# sessions. To run non-interactively, export MEMODI_API_KEY beforehand.
+# The browser hand-off needs a browser on this machine; without one (SSH,
+# headless, no python3) it falls back to a paste prompt, so the key never
+# lands in your shell history. It is persisted to your shell rc file
+# automatically so the plugin hooks work in future sessions. To run
+# non-interactively, export MEMODI_API_KEY beforehand.
 
 set -e
 
@@ -53,26 +53,125 @@ persist_env() {
   mv "$tmp" "$rc"
 }
 
-echo "memodi needs a per-user api key before it can be installed."
-echo "Log in with Google here if you don't have one yet:"
-echo ""
-echo "  ${LOGIN_URL}"
-echo ""
+echo "[1/6] Logging in..."
 
-# --- Preflight checks ---
 if ! command -v claude >/dev/null 2>&1; then
   echo "Error: claude CLI not found. Install Claude Code first."
   exit 1
 fi
 
-# --- Obtain the api key (prompt interactively, no echo) ---
 if [ -z "$MEMODI_API_KEY" ]; then
-  if [ -r /dev/tty ]; then
-    printf "Paste your memodi api key (mmd_...): " > /dev/tty
-    stty -echo < /dev/tty 2>/dev/null || true
-    read MEMODI_API_KEY < /dev/tty
-    stty echo < /dev/tty 2>/dev/null || true
-    printf "\n" > /dev/tty
+  if command -v python3 >/dev/null 2>&1; then
+    LOGIN_OUT=$(python3 - "$LOGIN_URL" <<'PYEOF'
+import hmac
+import http.server
+import os
+import re
+import secrets
+import sys
+import threading
+import time
+import urllib.parse
+import webbrowser
+
+NONCE = secrets.token_urlsafe(24)
+STATE: dict[str, str | None] = {"key": None, "email": None}
+
+KEY_RE = re.compile(r"\Ammd_[A-Za-z0-9_-]{16,128}\Z")
+EMAIL_RE = re.compile(r"\A[^\s@]+@[^\s@]+\Z")
+EMAIL_MAX = 254
+
+SUCCESS_BODY = (
+    b"<!doctype html><html><head><meta charset='utf-8'>"
+    b"<title>memodi login</title></head><body>"
+    b"<p>Logged in. You can close this tab and return to your terminal.</p>"
+    b'<script>history.replaceState(null, "", "/")</script>'
+    b"</body></html>"
+)
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self) -> None:
+        query = urllib.parse.parse_qs(
+            urllib.parse.urlparse(self.path).query, keep_blank_values=True
+        )
+        key = query.get("key", [""])[0]
+        if not KEY_RE.fullmatch(key):
+            self.send_response(400)
+            self.end_headers()
+            return
+
+        nonce = query.get("nonce", [None])[0]
+        if nonce is None or not hmac.compare_digest(nonce.encode(), NONCE.encode()):
+            self.send_response(403)
+            self.end_headers()
+            return
+
+        email = query.get("email", [""])[0]
+        if len(email) > EMAIL_MAX or not EMAIL_RE.fullmatch(email):
+            self.send_response(400)
+            self.end_headers()
+            return
+
+        STATE["key"] = key
+        STATE["email"] = email
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(SUCCESS_BODY)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(SUCCESS_BODY)
+        self.server.done = True
+
+    def log_message(self, *args: object) -> None:
+        pass
+
+
+login_url = sys.argv[1]
+
+srv = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+srv.done = False
+port = srv.server_address[1]
+
+url = f"{login_url}?port={port}&nonce={NONCE}"
+print(f"Open this URL to log in:\n{url}", file=sys.stderr)
+
+if os.environ.get("MEMODI_NO_BROWSER") != "1":
+    threading.Thread(target=webbrowser.open, args=(url,), daemon=True).start()
+
+timeout = float(os.environ.get("MEMODI_LOGIN_TIMEOUT", "180"))
+deadline = time.monotonic() + timeout
+
+while not srv.done:
+    # Recomputed off the absolute deadline each pass, so a stray request (e.g. /favicon.ico) can never push the wait later.
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        sys.exit(1)
+    srv.timeout = remaining
+    srv.handle_request()
+
+print(f"{STATE['key']} {STATE['email']}")
+sys.exit(0)
+PYEOF
+) || LOGIN_OUT=""
+    MEMODI_API_KEY="${LOGIN_OUT%% *}"
+    MEMODI_EMAIL="${LOGIN_OUT#* }"
+  fi
+
+  if [ -z "$MEMODI_API_KEY" ]; then
+    echo "memodi needs a per-user api key before it can be installed."
+    echo "Log in with Google here if you don't have one yet:"
+    echo ""
+    echo "  ${LOGIN_URL}"
+    echo ""
+    if [ -r /dev/tty ]; then
+      printf "Paste your memodi api key (mmd_...): " > /dev/tty
+      stty -echo < /dev/tty 2>/dev/null || true
+      read MEMODI_API_KEY < /dev/tty
+      stty echo < /dev/tty 2>/dev/null || true
+      printf "\n" > /dev/tty
+    fi
   fi
 fi
 
@@ -80,6 +179,10 @@ if [ -z "$MEMODI_API_KEY" ]; then
   echo "Error: no api key provided."
   echo "Run again and paste your key, or export MEMODI_API_KEY beforehand."
   exit 1
+fi
+
+if [ -n "$MEMODI_EMAIL" ]; then
+  echo "Logged in as $MEMODI_EMAIL"
 fi
 
 MEMODI_MACHINE="${MEMODI_MACHINE:-$(hostname 2>/dev/null)}"
@@ -92,19 +195,19 @@ echo "Installing memodi plugin for Claude Code..."
 # add no-ops when the marketplace exists but does NOT refresh it, so
 # update always runs after it — otherwise a machine that installed once
 # keeps serving a stale snapshot forever.
-echo "[1/5] Adding marketplace..."
+echo "[2/6] Adding marketplace..."
 claude plugin marketplace add iam-oov/memodi
 claude plugin marketplace update memodi
 
 # --- Install or update the plugin (hooks + skills + commands) ---
 # install no-ops when already installed and update no-ops when freshly
 # installed — running both covers first installs and upgrades alike.
-echo "[2/5] Installing plugin..."
+echo "[3/6] Installing plugin..."
 claude plugin install memodi@memodi
 claude plugin update memodi@memodi
 
 # --- Configure MCP server connection ---
-echo "[3/5] Configuring MCP server..."
+echo "[4/6] Configuring MCP server..."
 claude mcp remove memodi --scope user 2>/dev/null || true
 claude mcp add --transport http \
   -H "X-Memodi-Api-Key: ${MEMODI_API_KEY}" \
@@ -113,7 +216,7 @@ claude mcp add --transport http \
   memodi "$MEMODI_URL"
 
 # --- Add wildcard permission for all memodi tools ---
-echo "[4/5] Adding permissions..."
+echo "[5/6] Adding permissions..."
 if [ -f "$CLAUDE_SETTINGS" ]; then
   if ! grep -q '"mcp__memodi__\*"' "$CLAUDE_SETTINGS" 2>/dev/null; then
     python3 -c "
@@ -137,7 +240,7 @@ fi
 # The hooks (session start, session end, post-compaction, subagent capture) read
 # MEMODI_API_KEY and MEMODI_MACHINE from the shell environment. Without
 # them they stay silently inactive in future sessions.
-echo "[5/5] Persisting environment to your shell rc..."
+echo "[6/6] Persisting environment to your shell rc..."
 RC_FILE="$(detect_rc)"
 persist_env "$RC_FILE"
 

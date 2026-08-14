@@ -42,6 +42,7 @@ Real per-user accounts, not a single shared key:
 - `path` (the caller's cwd) is an explicit per-call parameter on every project-scoped tool — never inferred from the api key or machine
 - Unregistered path → `{"type": "not_started"}`; missing or invalid key → `{"type": "not_authenticated"}` — both self-describing errors, no silent auto-creation of projects or workspaces
 - Key revocation is manual and explicit: `/memodi:logout` deletes the calling key's row from `api_keys` server-side and cleans up the local config; there is no other revocation path
+- No-paste login: `install.sh` and `/memodi:login` obtain the key via a loopback listener on `127.0.0.1:<kernel-assigned-port>` — `GET /login?port=&nonce=` redirects the browser back to it with `?key=&nonce=&email=`, so the key never touches argv, shell history, or a paste prompt; falls back to the paste flow when python3, a browser, or the round-trip itself isn't available
 
 ## CI/CD Pipeline
 
@@ -49,7 +50,7 @@ Real per-user accounts, not a single shared key:
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
-| `ci.yml` | PR to main, push to main | Lint + tests (485 tests, full coverage) |
+| `ci.yml` | PR to main, push to main | Lint + tests (525 tests, full coverage) |
 | `deploy.yml` | `ci.yml` succeeds on main | SSH to the Pi through the Cloudflare Tunnel + `uv sync` + `systemctl restart memodi` + health check |
 | `release.yml` | Tag `v*` | Auto-generated changelog + GitHub Release |
 | `db-image.yml` | Changes to `Dockerfile.db` | Build + push to `ghcr.io/iam-oov/memodi-db` (dev-only image) |
@@ -65,8 +66,11 @@ plugin/claude-code/
 ├── scripts/session-start.sh      — silent workspace resolution + session open on session start
 ├── scripts/session-end.sh        — hygiene session close on session end (plain HTTP)
 ├── scripts/subagent-stop.sh      — captures subagent findings (plain HTTP)
+├── scripts/login_listener.py     — loopback HTTP listener for the no-paste login hand-off
+├── scripts/login.sh              — backs /memodi:login (re-login, no tty paste)
 ├── commands/start.md             — /memodi:start (user-driven activation)
 ├── commands/end.md               — /memodi:end (user-driven session close with a real summary)
+├── commands/login.md             — /memodi:login (re-login via the loopback listener)
 ├── commands/logout.md            — /memodi:logout (revoke this machine's key, clean local config)
 └── skills/memory/SKILL.md        — proactive memory instructions
 ```
