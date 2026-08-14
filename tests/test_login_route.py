@@ -16,6 +16,8 @@ from memodi.web import login as login_module
 from tests.conftest import cleanup_rows
 
 GOOGLE_CLIENT_ID = "test-client-id.apps.googleusercontent.com"
+VALID_NONCE = "a" * 32
+VALID_PORT = 51774
 
 
 @pytest.fixture(autouse=True)
@@ -84,6 +86,23 @@ def _complete_login(client, state: str):
     return client.get(
         "/oauth/callback", params={"state": state, "code": "test-code"}
     )
+
+
+def _complete_login_no_follow(client, state: str, **extra_params):
+    params = {"state": state, "code": "test-code", **extra_params}
+    return client.get("/oauth/callback", params=params, follow_redirects=False)
+
+
+def _login_with_loopback(client, port=VALID_PORT, nonce=VALID_NONCE):
+    return client.get(
+        "/login", params={"port": str(port), "nonce": nonce}, follow_redirects=False
+    )
+
+
+def _bare_state_from_login(login_response) -> str:
+    location = login_response.headers["location"]
+    query = urllib.parse.parse_qs(urllib.parse.urlparse(location).query)
+    return query["state"][0]
 
 
 def _user_count() -> int:
@@ -516,3 +535,195 @@ def test_callback_clears_state_cookie_on_error(client, google_settings):
 
     set_cookie = response.headers["set-cookie"]
     assert "Max-Age=0" in set_cookie or "01-Jan-1970" in set_cookie
+
+
+def test_get_login_with_loopback_sets_extended_cookie_and_bare_state(
+    client, google_settings
+):
+    response = _login_with_loopback(client)
+
+    assert response.status_code == 302
+    bare_state = _bare_state_from_login(response)
+    assert "|" not in bare_state
+
+    set_cookie = response.headers["set-cookie"]
+    name_value = set_cookie.split(";", 1)[0]
+    expected = f"{login_module.STATE_COOKIE}={bare_state}|{VALID_PORT}|{VALID_NONCE}"
+    assert name_value == expected
+
+    cookie_state = response.cookies.get(login_module.STATE_COOKIE)
+    assert cookie_state == f"{bare_state}|{VALID_PORT}|{VALID_NONCE}"
+
+
+def test_get_login_with_loopback_preserves_cookie_flags(client, google_settings):
+    plain_response = client.get("/login", follow_redirects=False)
+    loopback_response = _login_with_loopback(client)
+
+    def _flags(set_cookie: str) -> str:
+        return set_cookie.split(";", 1)[1].lower()
+
+    assert _flags(plain_response.headers["set-cookie"]) == _flags(
+        loopback_response.headers["set-cookie"]
+    )
+
+
+@pytest.mark.parametrize(
+    "port,nonce",
+    [
+        ("80", VALID_NONCE),
+        ("70000", VALID_NONCE),
+        ("abc", VALID_NONCE),
+        (str(VALID_PORT), None),
+        (None, VALID_NONCE),
+        (str(VALID_PORT), "bad nonce!"),
+        (str(VALID_PORT), "a" * 15),
+        (str(VALID_PORT), "a" * 65),
+    ],
+)
+def test_get_login_rejects_invalid_loopback_params(
+    client, google_settings, port, nonce
+):
+    params = {}
+    if port is not None:
+        params["port"] = port
+    if nonce is not None:
+        params["nonce"] = nonce
+
+    response = client.get("/login", params=params, follow_redirects=False)
+
+    assert response.status_code == 400
+
+
+def test_callback_with_loopback_redirects_to_127_0_0_1_with_key_nonce_email(
+    client, google_settings, email, monkeypatch
+):
+    login_response = _login_with_loopback(client)
+    bare_state = _bare_state_from_login(login_response)
+    _mock_exchange(monkeypatch, _fake_id_token(**_valid_claims(email)))
+
+    response = _complete_login_no_follow(client, bare_state)
+
+    assert response.status_code == 302
+    location = response.headers["location"]
+    parsed = urllib.parse.urlparse(location)
+    assert parsed.scheme == "http"
+    assert parsed.hostname == "127.0.0.1"
+    assert parsed.port == VALID_PORT
+    query = urllib.parse.parse_qs(parsed.query)
+    assert query["key"][0].startswith("mmd_")
+    assert query["nonce"] == [VALID_NONCE]
+    assert query["email"] == [email]
+
+
+def test_callback_loopback_key_not_in_response_body(
+    client, google_settings, email, monkeypatch
+):
+    login_response = _login_with_loopback(client)
+    bare_state = _bare_state_from_login(login_response)
+    _mock_exchange(monkeypatch, _fake_id_token(**_valid_claims(email)))
+
+    response = _complete_login_no_follow(client, bare_state)
+
+    location = response.headers["location"]
+    key = urllib.parse.parse_qs(urllib.parse.urlparse(location).query)["key"][0]
+    assert key not in response.text
+
+
+def test_callback_loopback_response_has_no_store_and_clears_cookie(
+    client, google_settings, email, monkeypatch
+):
+    login_response = _login_with_loopback(client)
+    bare_state = _bare_state_from_login(login_response)
+    _mock_exchange(monkeypatch, _fake_id_token(**_valid_claims(email)))
+
+    response = _complete_login_no_follow(client, bare_state)
+
+    assert response.headers["cache-control"] == "no-store"
+    set_cookie = response.headers["set-cookie"]
+    assert f"{login_module.STATE_COOKIE}=" in set_cookie
+    assert "Max-Age=0" in set_cookie or "01-Jan-1970" in set_cookie
+
+
+def test_callback_loopback_state_equal_to_whole_cookie_value_returns_400(
+    client, google_settings
+):
+    login_response = _login_with_loopback(client)
+    cookie_value = login_response.cookies.get(login_module.STATE_COOKIE)
+    before = _user_count()
+
+    response = client.get(
+        "/oauth/callback",
+        params={"state": cookie_value, "code": "test-code"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 400
+    assert _user_count() == before
+
+
+def test_callback_loopback_state_mismatch_returns_400(client, google_settings):
+    _login_with_loopback(client)
+    before = _user_count()
+
+    response = client.get(
+        "/oauth/callback",
+        params={"state": "not-the-token-value-1234", "code": "test-code"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 400
+    assert _user_count() == before
+
+
+def test_callback_malformed_state_cookie_degrades_to_success_page(
+    client, google_settings, email, monkeypatch
+):
+    garbage = "not-well-formed|missing-parts"
+    client.cookies.set(login_module.STATE_COOKIE, garbage)
+    _mock_exchange(monkeypatch, _fake_id_token(**_valid_claims(email)))
+
+    response = client.get(
+        "/oauth/callback", params={"state": garbage, "code": "test-code"}
+    )
+
+    assert response.status_code == 200
+    assert response.text.count("mmd_") == 1
+
+
+def test_callback_loopback_ignores_host_override_query_param(
+    client, google_settings, email, monkeypatch
+):
+    login_response = _login_with_loopback(client)
+    bare_state = _bare_state_from_login(login_response)
+    _mock_exchange(monkeypatch, _fake_id_token(**_valid_claims(email)))
+
+    response = _complete_login_no_follow(client, bare_state, host="evil.com")
+
+    assert response.status_code == 302
+    location = response.headers["location"]
+    assert urllib.parse.urlparse(location).hostname == "127.0.0.1"
+    assert "evil.com" not in location
+
+
+def test_callback_loopback_creates_user_and_persists_key(
+    client, google_settings, email, monkeypatch
+):
+    login_response = _login_with_loopback(client)
+    bare_state = _bare_state_from_login(login_response)
+    _mock_exchange(monkeypatch, _fake_id_token(**_valid_claims(email)))
+
+    response = _complete_login_no_follow(client, bare_state)
+
+    assert response.status_code == 302
+    conn = get_connection()
+    row = conn.execute(
+        """
+        SELECT api_keys.key_hash
+        FROM api_keys
+        JOIN users ON users.id = api_keys.user_id
+        WHERE users.email = %s
+        """,
+        (email,),
+    ).fetchone()
+    assert row is not None
+    assert len(row["key_hash"]) == 64

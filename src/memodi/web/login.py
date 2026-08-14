@@ -2,6 +2,7 @@ import base64
 import hmac
 import html
 import json
+import re
 import secrets
 import urllib.parse
 
@@ -19,6 +20,11 @@ GOOGLE_ISSUERS = ("https://accounts.google.com", "accounts.google.com")
 
 STATE_COOKIE = "memodi_oauth_state"
 STATE_MAX_AGE = 600
+
+NONCE_RE = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
+PORT_MIN = 1024
+PORT_MAX = 65535
+LOOPBACK_HOST = "127.0.0.1"
 
 
 def _page(title: str, body: str) -> str:
@@ -100,9 +106,55 @@ def _configured() -> bool:
     )
 
 
+def _valid_dest(port_raw: str | None, nonce: str | None) -> int | None:
+    if port_raw is None or nonce is None:
+        return None
+    if not NONCE_RE.match(nonce):
+        return None
+    try:
+        port = int(port_raw)
+    except ValueError:
+        return None
+    if port < PORT_MIN or port > PORT_MAX:
+        return None
+    return port
+
+
+def _parse_state_cookie(raw: str) -> tuple[str, int | None, str | None]:
+    parts = raw.split("|")
+    if len(parts) != 3:
+        return raw, None, None
+    token, port_raw, nonce = parts
+    if not token:
+        return raw, None, None
+    port = _valid_dest(port_raw, nonce)
+    if port is None:
+        return raw, None, None
+    return token, port, nonce
+
+
+def _loopback_redirect(
+    port: int, nonce: str, email: str, api_key: str
+) -> RedirectResponse:
+    params = {"key": api_key, "nonce": nonce, "email": email}
+    url = f"http://{LOOPBACK_HOST}:{port}/?{urllib.parse.urlencode(params)}"
+    response = RedirectResponse(url, status_code=302)
+    response.headers["Cache-Control"] = "no-store"
+    response.delete_cookie(STATE_COOKIE)
+    return response
+
+
 async def get_login(request: Request) -> HTMLResponse | RedirectResponse:
     if not _configured():
         return _disabled_page()
+
+    port_raw = request.query_params.get("port")
+    nonce = request.query_params.get("nonce")
+    loopback_port: int | None = None
+    if port_raw is not None or nonce is not None:
+        loopback_port = _valid_dest(port_raw, nonce)
+        if loopback_port is None:
+            return _error_page(400, "Invalid loopback port or nonce.")
 
     state = secrets.token_urlsafe(32)
     params = {
@@ -115,10 +167,14 @@ async def get_login(request: Request) -> HTMLResponse | RedirectResponse:
     }
     url = f"{GOOGLE_AUTH_URL}?{urllib.parse.urlencode(params)}"
 
+    cookie_value = (
+        state if loopback_port is None else f"{state}|{loopback_port}|{nonce}"
+    )
+
     response = RedirectResponse(url, status_code=302)
     response.set_cookie(
         STATE_COOKIE,
-        state,
+        cookie_value,
         max_age=STATE_MAX_AGE,
         httponly=True,
         samesite="lax",
@@ -183,7 +239,7 @@ def _email_from_id_token(id_token: str) -> str:
     return email
 
 
-async def get_oauth_callback(request: Request) -> HTMLResponse:
+async def get_oauth_callback(request: Request) -> HTMLResponse | RedirectResponse:
     if not _configured():
         return _disabled_page()
 
@@ -192,11 +248,12 @@ async def get_oauth_callback(request: Request) -> HTMLResponse:
         return _error_page(400, f"Google returned an error: {error}")
 
     state = request.query_params.get("state") or ""
-    cookie_state = request.cookies.get(STATE_COOKIE) or ""
+    cookie_raw = request.cookies.get(STATE_COOKIE) or ""
+    cookie_token, port, nonce = _parse_state_cookie(cookie_raw)
     if (
         not state
-        or not cookie_state
-        or not hmac.compare_digest(state.encode(), cookie_state.encode())
+        or not cookie_token
+        or not hmac.compare_digest(state.encode(), cookie_token.encode())
     ):
         return _error_page(400, "Invalid or missing state.")
 
@@ -221,5 +278,8 @@ async def get_oauth_callback(request: Request) -> HTMLResponse:
 
     ensure_schema()
     user = auth_repository.login_with_email(email)
+
+    if port is not None:
+        return _loopback_redirect(port, nonce, user["email"], user["api_key"])
 
     return _success_page(user["email"], user["api_key"])
