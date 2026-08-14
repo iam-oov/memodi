@@ -7,34 +7,32 @@
 
 English | [Español](README.es.md)
 
-**Memoria Distribuida** — MCP server that gives Claude Code persistent memory across workspaces, projects, and machines. It saves decisions, bugs, and discoveries proactively and recalls them by keyword, semantics, or graph — with no extra LLM calls.
+**Memoria Distribuida** - MCP server that gives Claude Code persistent memory across workspaces, projects, and machines. It saves decisions, bugs, and discoveries proactively and recalls them by keyword, semantics, or graph - with no extra LLM calls.
 
 A single PostgreSQL instance does it all: document store (JSONB), semantic search (pgvector), and knowledge graph (Apache AGE).
 
 ## Where memodi shines
 
-Picture `~/work/acme/` holding the repos of one product — `api/`, `worker/`, `billing/`. Run `/memodi:start` once and register the **parent folder** as the workspace: from then on every repo under `acme/` resolves to that workspace automatically (the longest registered path wins), and each repo becomes its own project inside it, named after its folder.
+Your product is not one repo - it's several. The API, the worker, the billing service. And the decisions that tie them together live in your head, in old PRs, in chat threads... until they don't.
 
-That one decision is what memodi is built around:
-
-- **Memory that crosses repos.** A decision saved while working in `api/` ("the queue contract changed — consumers must ack twice") is findable from `billing/`. Searching inside a repo returns that repo's observations plus anything that lists it in `affects`; searching from the workspace root covers every project at once. `[[topic-key]]` links and `memodi_relate` build the cross-repo graph, so "what breaks if I change X?" has a real answer.
-- **Continuity across sessions and machines.** Close with `/memodi:end` and the next session — tomorrow, or on your other machine after attaching to the same workspace name — opens with your pending next steps on screen and the last summary loaded silently. Monday-morning "where was I?" stops being a question.
-- **Three kinds of recall, one PostgreSQL.** Keyword (tsvector), semantic (pgvector — "have we solved something like this before?"), and graph (Apache AGE), over observations the agent saves proactively: decisions, bugfixes, discoveries, patterns, conventions, architecture notes, and session summaries.
+- **One memory for the whole product.** Point memodi at the folder that holds your repos - once. From then on they all share the same memory: the decision you made in `api/` is right there when you're working in `billing/`, no digging anywhere.
+- **Pick up exactly where you left off.** Close a session and the next one - tomorrow, or on your other machine - opens with your pending work already on screen. The Monday "where was I?" comes pre-answered.
+- **It remembers the way you ask.** By exact word, by idea ("didn't we solve something like this before?"), or by connection ("what breaks if I touch this?"). And it saves as you work - decisions, bugs, discoveries - so you never have to remember to remember.
 
 ## Features
 
-- **Proactive memory** — the agent saves observations without being asked; the instructions ship with the plugin skill
-- **Hybrid search** — keyword + semantic combined with RRF, plus global search across all your projects
-- **Knowledge graph** — cross-repo dependencies and transitive impact analysis ("what breaks if I change X?")
-- **Auto-linking** — writing `[[topic-key]]` in an observation creates the `LINKS_TO` relation in the graph
-- **Multi-machine** — one key per user; registering the same workspace on two machines shares memories between them
-- **Automatic context** — session hooks load memory when you open the repo and inject relevant pointers on every prompt
-- **Session digest** — opening a session prints your pending next steps from the last one, right in the terminal
-- **Inert by default** — an unregistered path returns `not_started`; projects and workspaces are never auto-created
+- **Proactive memory** - the agent saves observations without being asked; the instructions ship with the plugin skill
+- **Hybrid search** - keyword + semantic combined with RRF, plus global search across all your projects
+- **Knowledge graph** - cross-repo dependencies and transitive impact analysis ("what breaks if I change X?")
+- **Auto-linking** - writing `[[topic-key]]` in an observation creates the `LINKS_TO` relation in the graph
+- **Multi-machine** - one key per user; registering the same workspace on two machines shares memories between them
+- **Automatic context** - session hooks load memory when you open the repo and inject relevant pointers on every prompt
+- **Session digest** - opening a session prints your pending next steps from the last one, right in the terminal
+- **Inert by default** - an unregistered path returns `not_started`; projects and workspaces are never auto-created
 
 ## Quick start
 
-You need [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and a memodi API key (one per user). `install.sh` gets you one automatically — it opens a browser to log in with Google and hands the key straight to the installer, nothing to copy or paste.
+You need [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and a memodi API key (one per user). `install.sh` gets you one automatically - it opens a browser to log in with Google and hands the key straight to the installer, nothing to copy or paste.
 
 ### Install
 
@@ -44,7 +42,7 @@ curl -sf https://raw.githubusercontent.com/iam-oov/memodi/main/install.sh | sh
 
 ### What install.sh does
 
-One run drives login, plugin install, MCP wiring, and permissions — no manual steps:
+One run drives login, plugin install, MCP wiring, and permissions - no manual steps:
 
 ```
 $ curl -sf https://raw.githubusercontent.com/iam-oov/memodi/main/install.sh | sh
@@ -67,25 +65,25 @@ Next:
   2. Restart Claude Code, then run:  /memodi:start
 ```
 
-A browser tab opens on that URL automatically. The key itself never appears in the terminal, your shell history, or a paste prompt — it travels from the browser redirect straight to a short-lived listener on `127.0.0.1`.
+A browser tab opens on that URL automatically. The key itself never appears in the terminal, your shell history, or a paste prompt - it travels from the browser redirect straight to a short-lived listener on `127.0.0.1`.
 
-That listener binds to loopback on the machine running the installer, so the printed URL only completes the login when your browser runs on that same machine. Over SSH or on a headless box, the listener times out after 180s and the installer falls back to the paste prompt — or export `MEMODI_API_KEY` beforehand and skip login entirely.
+That listener binds to loopback on the machine running the installer, so the printed URL only completes the login when your browser runs on that same machine. Over SSH or on a headless box, the listener times out after 180s and the installer falls back to the paste prompt - or export `MEMODI_API_KEY` beforehand and skip login entirely.
 
 What it touches on your machine:
 
-- Your shell rc file (`~/.zshrc`, `~/.bash_profile`, or `~/.profile`) — a marker-delimited block with `MEMODI_API_KEY` and `MEMODI_MACHINE`
-- `~/.claude.json` — the `memodi` MCP server entry
-- `~/.claude/settings.json` — the `"mcp__memodi__*"` permission
+- Your shell rc file (`~/.zshrc`, `~/.bash_profile`, or `~/.profile`) - a marker-delimited block with `MEMODI_API_KEY` and `MEMODI_MACHINE`
+- `~/.claude.json` - the `memodi` MCP server entry
+- `~/.claude/settings.json` - the `"mcp__memodi__*"` permission
 - The `iam-oov/memodi` marketplace and plugin registration
 
 Fallbacks:
 
-| Condition | Result |
-|---|---|
-| `MEMODI_API_KEY` already exported | Login is skipped entirely |
-| No `python3` on the machine | Falls back to the paste prompt |
-| No local browser (SSH, headless) | The listener times out, then the paste prompt takes over |
-| Listener times out (180s) | Falls back to the paste prompt |
+| Condition                         | Result                                                   |
+| --------------------------------- | -------------------------------------------------------- |
+| `MEMODI_API_KEY` already exported | Login is skipped entirely                                |
+| No `python3` on the machine       | Falls back to the paste prompt                           |
+| No local browser (SSH, headless)  | The listener times out, then the paste prompt takes over |
+| Listener times out (180s)         | Falls back to the paste prompt                           |
 
 The loopback hand-off is a real HTTP redirect, so the one-time-use URL can land in your local browser history. `/memodi:logout` revokes the key server-side if that's a concern.
 
@@ -112,19 +110,19 @@ Adding `"mcp__memodi__*"` to `permissions.allow` in `~/.claude/settings.json` av
 
 </details>
 
-Restart Claude Code and run `/memodi:start`: it registers the workspace on this machine (or attaches to an existing one from another machine — same name = shared memories) and loads its memory. Once per (machine, folder); after that, memory loads silently every time you open the repo.
+Restart Claude Code and run `/memodi:start`: it registers the workspace on this machine (or attaches to an existing one from another machine - same name = shared memories) and loads its memory. Once per (machine, folder); after that, memory loads silently every time you open the repo.
 
-> **Tip — the folder you register decides how much your repos share.** `/memodi:start` suggests the **parent folder** of the current repo by default. Accept it when sibling repos belong to the same product: every repo under it shares the workspace with zero further setup, each one becoming its own project named after its folder. Working out of one lone repo? Registering the repo folder itself is fine. On a second machine, pick the **same workspace name** to share memories — a different name creates a separate workspace. And avoid registering a subfolder of an already-registered workspace: it does not fail, it silently creates a nested workspace that shadows the parent for that subtree.
+> **Tip - the folder you register decides how much your repos share.** `/memodi:start` suggests the **parent folder** of the current repo by default. Accept it when sibling repos belong to the same product: every repo under it shares the workspace with zero further setup, each one becoming its own project named after its folder. Working out of one lone repo? Registering the repo folder itself is fine. On a second machine, pick the **same workspace name** to share memories - a different name creates a separate workspace. And avoid registering a subfolder of an already-registered workspace: it does not fail, it silently creates a nested workspace that shadows the parent for that subtree.
 
-`/memodi:end` closes the session with a structured summary (Goal / Accomplished / Next Steps). A `SessionEnd` hook also runs on every exit as a safety net — it never overwrites a real summary.
+`/memodi:end` closes the session with a structured summary (Goal / Accomplished / Next Steps). A `SessionEnd` hook also runs on every exit as a safety net - it never overwrites a real summary.
 
-`/memodi:logout` revokes this machine's api key and cleans up the local config — use it to switch to a different account on this machine, or to test the login flow from scratch.
+`/memodi:logout` revokes this machine's api key and cleans up the local config - use it to switch to a different account on this machine, or to test the login flow from scratch.
 
-`/memodi:login` logs back in without restarting from scratch — same browser hand-off as `install.sh`, no need to re-run the whole installer. It needs a browser on the same machine as Claude Code; over SSH it has no paste fallback and will fail, so use `install.sh` in a terminal there instead.
+`/memodi:login` logs back in without restarting from scratch - same browser hand-off as `install.sh`, no need to re-run the whole installer. It needs a browser on the same machine as Claude Code; over SSH it has no paste fallback and will fail, so use `install.sh` in a terminal there instead.
 
 ### Upgrade
 
-The installer is idempotent — running it again pulls the latest plugin version:
+The installer is idempotent - running it again pulls the latest plugin version:
 
 ```bash
 curl -sf https://raw.githubusercontent.com/iam-oov/memodi/main/install.sh | sh
@@ -152,20 +150,20 @@ Claude Code ──HTTPS──► Cloudflare Tunnel ──► memodi-server (uv +
 
 Claude decides what is worth remembering; memodi persists and retrieves.
 
-| Layer | Extension | Purpose |
-|-------|-----------|---------|
-| Document store | JSONB | State, tasks, decisions, metadata |
-| Full-text search | tsvector | Multi-language keywords |
-| Semantic search | pgvector (HNSW, 384d) | "have we solved something like this?" |
-| Knowledge graph | Apache AGE (Cypher) | Dependencies, impact |
+| Layer            | Extension             | Purpose                               |
+| ---------------- | --------------------- | ------------------------------------- |
+| Document store   | JSONB                 | State, tasks, decisions, metadata     |
+| Full-text search | tsvector              | Multi-language keywords               |
+| Semantic search  | pgvector (HNSW, 384d) | "have we solved something like this?" |
+| Knowledge graph  | Apache AGE (Cypher)   | Dependencies, impact                  |
 
 ## Authentication
 
 Real per-user accounts, not a shared key:
 
-- Log in with Google at `/login` (the only route without a key); the `mmd_...` api key is shown ONCE — the server stores only its hash. Each login mints an additional key, so logging in from a second machine never invalidates the first
+- Log in with Google at `/login` (the only route without a key); the `mmd_...` api key is shown ONCE - the server stores only its hash. Each login mints an additional key, so logging in from a second machine never invalidates the first
 - `X-Memodi-Api-Key` identifies the user and is the only access control in front of `/mcp` and `/hooks/*`
-- `X-Memodi-Machine` identifies the machine; paths are registered per (user, machine, path) — the same folder can resolve to different workspaces on different machines
+- `X-Memodi-Machine` identifies the machine; paths are registered per (user, machine, path) - the same folder can resolve to different workspaces on different machines
 - `path` (the caller's cwd) is an explicit parameter on every project-scoped tool
 - Unregistered path → `{"type": "not_started"}`; missing or invalid key → `{"type": "not_authenticated"}`
 - Switching accounts on the same machine needs no new code: a different user's key resolves to its own memories, never the previous user's. Run `/memodi:logout` to revoke this machine's key before logging in as someone else
@@ -175,62 +173,67 @@ Real per-user accounts, not a shared key:
 Every project-scoped tool takes `path` (the caller's cwd) and resolves it against a registered workspace.
 
 ### Memory
-| Tool | Description |
-|------|-------------|
-| `memodi_save` | Save an observation (auto-generates embedding); `affects` attributes one observation to several projects |
-| `memodi_search` | Keyword search |
-| `memodi_search_similar` | Semantic search |
-| `memodi_search_hybrid` | Keyword + semantic with RRF |
-| `memodi_context` | Workspace-wide recent context: last session summary + observation pointers |
-| `memodi_search_global` | Search across all your projects (user-scoped) |
-| `memodi_backfill` | Embeddings for old observations |
-| `memodi_backfill_links` | Reconcile LINKS_TO from before auto-linking (idempotent) |
-| `memodi_find_consolidation_clusters` | Detect clusters of observations ready to consolidate (read-only) |
-| `memodi_list_projects` | Known projects and their workspace |
-| `memodi_delete` | Soft-delete an observation |
-| `memodi_get_observation` | Read an observation by id, including superseded ones |
+
+| Tool                                 | Description                                                                                              |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------- |
+| `memodi_save`                        | Save an observation (auto-generates embedding); `affects` attributes one observation to several projects |
+| `memodi_search`                      | Keyword search                                                                                           |
+| `memodi_search_similar`              | Semantic search                                                                                          |
+| `memodi_search_hybrid`               | Keyword + semantic with RRF                                                                              |
+| `memodi_context`                     | Workspace-wide recent context: last session summary + observation pointers                               |
+| `memodi_search_global`               | Search across all your projects (user-scoped)                                                            |
+| `memodi_backfill`                    | Embeddings for old observations                                                                          |
+| `memodi_backfill_links`              | Reconcile LINKS_TO from before auto-linking (idempotent)                                                 |
+| `memodi_find_consolidation_clusters` | Detect clusters of observations ready to consolidate (read-only)                                         |
+| `memodi_list_projects`               | Known projects and their workspace                                                                       |
+| `memodi_delete`                      | Soft-delete an observation                                                                               |
+| `memodi_get_observation`             | Read an observation by id, including superseded ones                                                     |
 
 ### Knowledge graph
-| Tool | Description |
-|------|-------------|
-| `memodi_relate` | Create a relation (e.g. repo-a DEPENDS_ON repo-b) |
-| `memodi_dependencies` | What depends on what; with `path` includes the workspace's LINKS_TO |
-| `memodi_impact` | Transitive impact; with `path` also traverses LINKS_TO |
-| `memodi_graph_overview` | Summary of nodes and relations |
-| `memodi_remove_relation` | Invalidate a relation (soft delete) |
-| `memodi_delete_relation` | Remove a relation (hard delete) |
+
+| Tool                     | Description                                                         |
+| ------------------------ | ------------------------------------------------------------------- |
+| `memodi_relate`          | Create a relation (e.g. repo-a DEPENDS_ON repo-b)                   |
+| `memodi_dependencies`    | What depends on what; with `path` includes the workspace's LINKS_TO |
+| `memodi_impact`          | Transitive impact; with `path` also traverses LINKS_TO              |
+| `memodi_graph_overview`  | Summary of nodes and relations                                      |
+| `memodi_remove_relation` | Invalidate a relation (soft delete)                                 |
+| `memodi_delete_relation` | Remove a relation (hard delete)                                     |
 
 ### Workspaces
-| Tool | Description |
-|------|-------------|
-| `memodi_workspace_start` | Register a folder as a workspace (triggered by `/memodi:start`) |
-| `memodi_list_workspaces` | List workspaces |
-| `memodi_merge_projects` | Merge duplicate projects (dry_run by default) |
-| `memodi_delete_workspace` | Delete a workspace |
-| `memodi_rename_workspace` | Rename a workspace |
-| `memodi_purge_workspace` | Empty a workspace (destructive, dry_run by default) |
+
+| Tool                      | Description                                                     |
+| ------------------------- | --------------------------------------------------------------- |
+| `memodi_workspace_start`  | Register a folder as a workspace (triggered by `/memodi:start`) |
+| `memodi_list_workspaces`  | List workspaces                                                 |
+| `memodi_merge_projects`   | Merge duplicate projects (dry_run by default)                   |
+| `memodi_delete_workspace` | Delete a workspace                                              |
+| `memodi_rename_workspace` | Rename a workspace                                              |
+| `memodi_purge_workspace`  | Empty a workspace (destructive, dry_run by default)             |
 
 ### Workflow
-| Tool | Description |
-|------|-------------|
-| `memodi_plan` | Create a plan |
-| `memodi_update_plan` | Define criteria and tasks |
+
+| Tool                  | Description                     |
+| --------------------- | ------------------------------- |
+| `memodi_plan`         | Create a plan                   |
+| `memodi_update_plan`  | Define criteria and tasks       |
 | `memodi_approve_plan` | Approve the plan, move to apply |
-| `memodi_apply_done` | Mark apply as done |
-| `memodi_verify` | Verify the result |
-| `memodi_unify` | Close the loop |
-| `memodi_progress` | Active workflow status |
-| `memodi_task_update` | Update a task |
+| `memodi_apply_done`   | Mark apply as done              |
+| `memodi_verify`       | Verify the result               |
+| `memodi_unify`        | Close the loop                  |
+| `memodi_progress`     | Active workflow status          |
+| `memodi_task_update`  | Update a task                   |
 
 ### Sessions and system
-| Tool | Description |
-|------|-------------|
-| `memodi_session_start` | Start a session (observations auto-attach) |
-| `memodi_session_end` | Close a session with a structured summary (required) |
-| `memodi_logout` | Revoke the calling api key server-side (backs `/memodi:logout`) |
-| `memodi_ping` | Server liveness |
-| `memodi_status` | Server health and PostgreSQL extensions |
-| `memodi_version` | Version running in production |
+
+| Tool                   | Description                                                     |
+| ---------------------- | --------------------------------------------------------------- |
+| `memodi_session_start` | Start a session (observations auto-attach)                      |
+| `memodi_session_end`   | Close a session with a structured summary (required)            |
+| `memodi_logout`        | Revoke the calling api key server-side (backs `/memodi:logout`) |
+| `memodi_ping`          | Server liveness                                                 |
+| `memodi_status`        | Server health and PostgreSQL extensions                         |
+| `memodi_version`       | Version running in production                                   |
 
 ## Graph model
 
@@ -246,7 +249,7 @@ Topic ──LINKS_TO───► Topic
 Apache AGE limitations:
 
 - No type unions in variable-length paths (`[:A|B*1..5]`)
-- No Cypher parameters — values are interpolated
+- No Cypher parameters - values are interpolated
 - Every connection needs `LOAD 'age'` + `SET search_path`
 
 ## Local development
@@ -264,7 +267,7 @@ PR to `main` → `ci.yml` runs lint + the full test suite → on merge, `deploy.
 
 ## Production
 
-Runs natively on an always-on x86 home server (PostgreSQL + pgvector + AGE, uv + systemd) behind a Cloudflare Tunnel, with push-based deploys via GitHub Actions. Setup and day-2 operations: [`docs/pi-setup.md`](docs/pi-setup.md) — written for the original Raspberry Pi host, the same steps apply.
+Runs natively on an always-on x86 home server (PostgreSQL + pgvector + AGE, uv + systemd) behind a Cloudflare Tunnel, with push-based deploys via GitHub Actions. Setup and day-2 operations: [`docs/pi-setup.md`](docs/pi-setup.md) - written for the original Raspberry Pi host, the same steps apply.
 
 ## License
 

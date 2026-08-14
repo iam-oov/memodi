@@ -7,34 +7,32 @@
 
 [English](README.md) | Español
 
-**Memoria Distribuida** — servidor MCP que le da a Claude Code memoria persistente entre workspaces, proyectos y maquinas. Guarda decisiones, bugs y descubrimientos de forma proactiva y los recupera por keyword, semantica o grafo — sin llamadas extra a LLMs.
+**Memoria Distribuida** - servidor MCP que le da a Claude Code memoria persistente entre workspaces, proyectos y maquinas. Guarda decisiones, bugs y descubrimientos de forma proactiva y los recupera por keyword, semantica o grafo - sin llamadas extra a LLMs.
 
 Una sola instancia de PostgreSQL hace todo: document store (JSONB), busqueda semantica (pgvector) y grafo de conocimiento (Apache AGE).
 
 ## Donde brilla memodi
 
-Imagina `~/work/acme/` con los repos de un mismo producto — `api/`, `worker/`, `billing/`. Corre `/memodi:start` una sola vez y registra la **carpeta padre** como workspace: desde ese momento cada repo bajo `acme/` resuelve a ese workspace automaticamente (gana el path registrado mas largo), y cada repo se vuelve su propio proyecto adentro, con el nombre de su carpeta.
+Tu producto no es un repo - son varios. El API, el worker, el servicio de billing. Y las decisiones que los conectan viven en tu cabeza, en PRs viejos, en hilos de chat... hasta que dejan de vivir ahi.
 
-Esa unica decision es alrededor de lo que memodi esta construido:
-
-- **Memoria que cruza repos.** Una decision guardada trabajando en `api/` ("cambio el contrato de la cola — los consumers deben hacer ack dos veces") se encuentra desde `billing/`. Buscar adentro de un repo devuelve las observaciones de ese repo mas cualquiera que lo liste en `affects`; buscar desde la raiz del workspace cubre todos los proyectos a la vez. Los links `[[topic-key]]` y `memodi_relate` arman el grafo entre repos, asi que "que se rompe si cambio X?" tiene respuesta real.
-- **Continuidad entre sesiones y maquinas.** Cierra con `/memodi:end` y la siguiente sesion — mañana, o en tu otra maquina despues de engancharte al mismo nombre de workspace — abre con tus pendientes en pantalla y el ultimo resumen cargado en silencio. El "donde me quede?" del lunes deja de ser una pregunta.
-- **Tres tipos de recuperacion, un solo PostgreSQL.** Keyword (tsvector), semantica (pgvector — "ya resolvimos algo parecido antes?") y grafo (Apache AGE), sobre observaciones que el agente guarda proactivamente: decisiones, bugfixes, descubrimientos, patrones, convenciones, notas de arquitectura y resumenes de sesion.
+- **Una sola memoria para todo el producto.** Apunta memodi a la carpeta que contiene tus repos - una sola vez. Desde entonces todos comparten la misma memoria: la decision que tomaste en `api/` esta ahi cuando trabajas en `billing/`, sin escarbar en ningun lado.
+- **Retoma exactamente donde quedaste.** Cierra una sesion y la siguiente - mañana, o en tu otra maquina - abre con tus pendientes ya en pantalla. El "donde me quede?" del lunes llega respondido.
+- **Recuerda como tu preguntas.** Por palabra exacta, por idea ("no resolvimos ya algo parecido?"), o por conexion ("que se rompe si toco esto?"). Y guarda mientras trabajas - decisiones, bugs, descubrimientos - para que nunca tengas que acordarte de recordar.
 
 ## Features
 
-- **Memoria proactiva** — el agente guarda observaciones sin que se lo pidas; las instrucciones viajan con el skill del plugin
-- **Busqueda hibrida** — keyword + semantica combinadas con RRF, ademas de busqueda global entre todos tus proyectos
-- **Grafo de conocimiento** — dependencias entre repos y analisis de impacto transitivo ("que se rompe si cambio X?")
-- **Auto-linking** — escribir `[[topic-key]]` en una observacion crea la relacion `LINKS_TO` en el grafo
-- **Multi-maquina** — una key por usuario; registrar el mismo workspace en dos maquinas comparte las memorias
-- **Contexto automatico** — hooks de sesion cargan la memoria al abrir el repo e inyectan punteros relevantes en cada prompt
-- **Digest de sesion** — abrir una sesion imprime tus pendientes de la sesion anterior, directo en la terminal
-- **Inerte por defecto** — un path no registrado devuelve `not_started`; nunca se auto-crean proyectos ni workspaces
+- **Memoria proactiva** - el agente guarda observaciones sin que se lo pidas; las instrucciones viajan con el skill del plugin
+- **Busqueda hibrida** - keyword + semantica combinadas con RRF, ademas de busqueda global entre todos tus proyectos
+- **Grafo de conocimiento** - dependencias entre repos y analisis de impacto transitivo ("que se rompe si cambio X?")
+- **Auto-linking** - escribir `[[topic-key]]` en una observacion crea la relacion `LINKS_TO` en el grafo
+- **Multi-maquina** - una key por usuario; registrar el mismo workspace en dos maquinas comparte las memorias
+- **Contexto automatico** - hooks de sesion cargan la memoria al abrir el repo e inyectan punteros relevantes en cada prompt
+- **Digest de sesion** - abrir una sesion imprime tus pendientes de la sesion anterior, directo en la terminal
+- **Inerte por defecto** - un path no registrado devuelve `not_started`; nunca se auto-crean proyectos ni workspaces
 
 ## Quick start
 
-Necesitas [Claude Code](https://docs.anthropic.com/en/docs/claude-code) y una API key de memodi (una por usuario). `install.sh` la obtiene automaticamente — abre un navegador para iniciar sesion con Google y le pasa la key directo al instalador, sin copiar ni pegar nada.
+Necesitas [Claude Code](https://docs.anthropic.com/en/docs/claude-code) y una API key de memodi (una por usuario). `install.sh` la obtiene automaticamente - abre un navegador para iniciar sesion con Google y le pasa la key directo al instalador, sin copiar ni pegar nada.
 
 ### Instalar
 
@@ -44,7 +42,7 @@ curl -sf https://raw.githubusercontent.com/iam-oov/memodi/main/install.sh | sh
 
 ### Que hace install.sh
 
-Una sola corrida encadena login, instalacion del plugin, conexion MCP y permisos — sin pasos manuales:
+Una sola corrida encadena login, instalacion del plugin, conexion MCP y permisos - sin pasos manuales:
 
 ```
 $ curl -sf https://raw.githubusercontent.com/iam-oov/memodi/main/install.sh | sh
@@ -67,15 +65,15 @@ Next:
   2. Restart Claude Code, then run:  /memodi:start
 ```
 
-Una pestaña del navegador se abre sola con esa URL. La key nunca aparece en la terminal, en el historial del shell, ni en un prompt para pegarla — viaja directo desde el redirect del navegador hasta un listener efimero en `127.0.0.1`.
+Una pestaña del navegador se abre sola con esa URL. La key nunca aparece en la terminal, en el historial del shell, ni en un prompt para pegarla - viaja directo desde el redirect del navegador hasta un listener efimero en `127.0.0.1`.
 
-Ese listener escucha en loopback de la maquina que corre el instalador, asi que la URL impresa solo completa el login si tu navegador corre en esa misma maquina. Por SSH o en una maquina sin interfaz grafica el listener llega al timeout a los 180s y el instalador cae al prompt para pegar la key — o exporta `MEMODI_API_KEY` de antemano y saltea el login por completo.
+Ese listener escucha en loopback de la maquina que corre el instalador, asi que la URL impresa solo completa el login si tu navegador corre en esa misma maquina. Por SSH o en una maquina sin interfaz grafica el listener llega al timeout a los 180s y el instalador cae al prompt para pegar la key - o exporta `MEMODI_API_KEY` de antemano y saltea el login por completo.
 
 Que toca en tu maquina:
 
-- El rc file de tu shell (`~/.zshrc`, `~/.bash_profile`, o `~/.profile`) — un bloque delimitado por marcadores con `MEMODI_API_KEY` y `MEMODI_MACHINE`
-- `~/.claude.json` — la entrada del server MCP `memodi`
-- `~/.claude/settings.json` — el permiso `"mcp__memodi__*"`
+- El rc file de tu shell (`~/.zshrc`, `~/.bash_profile`, o `~/.profile`) - un bloque delimitado por marcadores con `MEMODI_API_KEY` y `MEMODI_MACHINE`
+- `~/.claude.json` - la entrada del server MCP `memodi`
+- `~/.claude/settings.json` - el permiso `"mcp__memodi__*"`
 - El registro del marketplace y del plugin `iam-oov/memodi`
 
 Casos de respaldo:
@@ -112,19 +110,19 @@ Agregar `"mcp__memodi__*"` a `permissions.allow` en `~/.claude/settings.json` ev
 
 </details>
 
-Reinicia Claude Code y corre `/memodi:start`: registra el workspace en esta maquina (o engancha uno existente de otra — mismo nombre = memorias compartidas) y carga su memoria. Una vez por (maquina, carpeta); despues la memoria se carga sola y en silencio al abrir el repo.
+Reinicia Claude Code y corre `/memodi:start`: registra el workspace en esta maquina (o engancha uno existente de otra - mismo nombre = memorias compartidas) y carga su memoria. Una vez por (maquina, carpeta); despues la memoria se carga sola y en silencio al abrir el repo.
 
-> **Tip — la carpeta que registras decide cuanto comparten tus repos.** `/memodi:start` sugiere por defecto la **carpeta padre** del repo actual. Aceptala cuando los repos hermanos pertenecen al mismo producto: todos los repos debajo comparten el workspace sin mas configuracion, y cada uno se vuelve su propio proyecto con el nombre de su carpeta. Trabajas en un solo repo suelto? Registrar la carpeta del repo esta bien. En una segunda maquina, elige el **mismo nombre de workspace** para compartir memorias — un nombre distinto crea un workspace separado. Y evita registrar una subcarpeta de un workspace ya registrado: no falla, crea en silencio un workspace anidado que tapa al padre en ese subarbol.
+> **Tip - la carpeta que registras decide cuanto comparten tus repos.** `/memodi:start` sugiere por defecto la **carpeta padre** del repo actual. Aceptala cuando los repos hermanos pertenecen al mismo producto: todos los repos debajo comparten el workspace sin mas configuracion, y cada uno se vuelve su propio proyecto con el nombre de su carpeta. Trabajas en un solo repo suelto? Registrar la carpeta del repo esta bien. En una segunda maquina, elige el **mismo nombre de workspace** para compartir memorias - un nombre distinto crea un workspace separado. Y evita registrar una subcarpeta de un workspace ya registrado: no falla, crea en silencio un workspace anidado que tapa al padre en ese subarbol.
 
-`/memodi:end` cierra la sesion con un resumen estructurado (Goal / Accomplished / Next Steps). Un hook `SessionEnd` corre igual en cada salida como red de contencion — nunca pisa un resumen real.
+`/memodi:end` cierra la sesion con un resumen estructurado (Goal / Accomplished / Next Steps). Un hook `SessionEnd` corre igual en cada salida como red de contencion - nunca pisa un resumen real.
 
-`/memodi:logout` revoca la api key de esta maquina y limpia la config local — usalo para cambiar de cuenta en esta maquina, o para probar el flujo de login desde cero.
+`/memodi:logout` revoca la api key de esta maquina y limpia la config local - usalo para cambiar de cuenta en esta maquina, o para probar el flujo de login desde cero.
 
-`/memodi:login` vuelve a iniciar sesion sin arrancar de cero — el mismo hand-off por navegador que `install.sh`, sin necesidad de correr todo el instalador de nuevo. Necesita un navegador en la misma maquina que Claude Code; por SSH no tiene respaldo para pegar la key y falla, asi que ahi conviene correr `install.sh` en una terminal.
+`/memodi:login` vuelve a iniciar sesion sin arrancar de cero - el mismo hand-off por navegador que `install.sh`, sin necesidad de correr todo el instalador de nuevo. Necesita un navegador en la misma maquina que Claude Code; por SSH no tiene respaldo para pegar la key y falla, asi que ahi conviene correr `install.sh` en una terminal.
 
 ### Actualizar
 
-El instalador es idempotente — volver a correrlo trae la ultima version del plugin:
+El instalador es idempotente - volver a correrlo trae la ultima version del plugin:
 
 ```bash
 curl -sf https://raw.githubusercontent.com/iam-oov/memodi/main/install.sh | sh
@@ -163,9 +161,9 @@ Claude decide que vale la pena recordar; memodi persiste y consulta.
 
 Cuentas reales por usuario, no una key compartida:
 
-- Inicio de sesion con Google en `/login` (unica ruta sin key); la api key `mmd_...` se muestra UNA sola vez — el server guarda solo su hash. Cada login genera una key adicional, asi que iniciar sesion desde una segunda maquina nunca invalida la primera
+- Inicio de sesion con Google en `/login` (unica ruta sin key); la api key `mmd_...` se muestra UNA sola vez - el server guarda solo su hash. Cada login genera una key adicional, asi que iniciar sesion desde una segunda maquina nunca invalida la primera
 - `X-Memodi-Api-Key` identifica al usuario y es el unico control de acceso frente a `/mcp` y `/hooks/*`
-- `X-Memodi-Machine` identifica la maquina; los paths se registran por (usuario, maquina, path) — la misma carpeta puede resolver a workspaces distintos en maquinas distintas
+- `X-Memodi-Machine` identifica la maquina; los paths se registran por (usuario, maquina, path) - la misma carpeta puede resolver a workspaces distintos en maquinas distintas
 - `path` (el cwd del caller) es parametro explicito en cada tool de proyecto
 - Path no registrado → `{"type": "not_started"}`; key ausente o invalida → `{"type": "not_authenticated"}`
 - Cambiar de cuenta en la misma maquina no necesita codigo nuevo: la key de otro usuario resuelve a sus propias memorias, nunca a las del usuario anterior. Corre `/memodi:logout` para revocar la key de esta maquina antes de iniciar sesion con otra cuenta
@@ -246,7 +244,7 @@ Topic ──LINKS_TO───► Topic
 Limitaciones de Apache AGE:
 
 - Sin union de tipos en paths variables (`[:A|B*1..5]`)
-- Sin parametros Cypher — los valores se interpolan
+- Sin parametros Cypher - los valores se interpolan
 - Cada conexion necesita `LOAD 'age'` + `SET search_path`
 
 ## Desarrollo local
@@ -264,7 +262,7 @@ PR a `main` → `ci.yml` corre lint + la suite completa de tests → si se merge
 
 ## Produccion
 
-Corre nativo en un home server x86 siempre encendido (PostgreSQL + pgvector + AGE, uv + systemd) detras de un Cloudflare Tunnel, con deploy push-based via GitHub Actions. Setup y operaciones dia 2: [`docs/pi-setup.md`](docs/pi-setup.md) — escrito para el host original (Raspberry Pi), los mismos pasos aplican.
+Corre nativo en un home server x86 siempre encendido (PostgreSQL + pgvector + AGE, uv + systemd) detras de un Cloudflare Tunnel, con deploy push-based via GitHub Actions. Setup y operaciones dia 2: [`docs/pi-setup.md`](docs/pi-setup.md) - escrito para el host original (Raspberry Pi), los mismos pasos aplican.
 
 ## Licencia
 
