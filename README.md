@@ -19,7 +19,30 @@ Your product is not one repo - it's several. The API, the worker, the billing se
 - **Pick up exactly where you left off.** Close a session and the next one - tomorrow, or on your other machine - opens with your pending work already on screen. The Monday "where was I?" comes pre-answered.
 - **It remembers the way you ask.** By exact word, by idea ("didn't we solve something like this before?"), or by connection ("what breaks if I touch this?"). And it saves as you work - decisions, bugs, discoveries - so you never have to remember to remember.
 
-That shared memory is a **workspace** - and you can have as many as you need. One for work, one for your personal projects, one for your thesis: each keeps its own memories, isolated from the rest, with every repo inside it as its own project. `/memodi:start` creates one - or joins one you already use on another machine.
+That shared memory is a **workspace** - have as many as you need (work, personal, thesis), each isolated from the rest. `/memodi:start` creates one - or joins one you already use on another machine.
+
+## Running `/memodi:start`
+
+The folder you register decides how much your repos share - it's the one decision worth getting right. `/memodi:start` suggests the **parent folder** of the current repo by default, and one run per (machine, folder) is all it takes.
+
+```text
+work/            ← /memodi:start here: one workspace, one memory
+├── api/
+├── billing/
+└── worker/
+```
+
+Good calls:
+
+- ✅ **The parent folder, when sibling repos belong to the same product.** Every repo under it shares the workspace with zero further setup, each becoming its own project named after its folder - even repos you clone later.
+- ✅ **The same workspace name on your second machine.** Same name = same workspace: your desktop and your laptop read and write the same memories.
+- ✅ **The repo folder itself, when it's a lone repo.** No siblings, nothing to share - a one-repo workspace is fine.
+
+Bad calls:
+
+- ❌ **`/memodi:start` inside each repo of the same product.** Every run creates its own isolated workspace: the decision saved in `api/` simply does not exist when you ask from `billing/`.
+- ❌ **A different workspace name on the second machine.** A new name creates a fresh, empty workspace - not the one holding your memories.
+- ❌ **A subfolder of an already-registered workspace** - `work/billing/` when `work/` is registered. It does not fail: it silently creates a nested workspace that shadows the parent for that subtree.
 
 ## Features
 
@@ -113,8 +136,6 @@ Adding `"mcp__memodi__*"` to `permissions.allow` in `~/.claude/settings.json` av
 </details>
 
 Restart Claude Code and run `/memodi:start`: it registers the workspace on this machine (or attaches to an existing one from another machine - same name = shared memories) and loads its memory. Once per (machine, folder); after that, memory loads silently every time you open the repo.
-
-> **Tip - the folder you register decides how much your repos share.** `/memodi:start` suggests the **parent folder** of the current repo by default. Accept it when sibling repos belong to the same product: every repo under it shares the workspace with zero further setup, each one becoming its own project named after its folder. Working out of one lone repo? Registering the repo folder itself is fine. On a second machine, pick the **same workspace name** to share memories - a different name creates a separate workspace. And avoid registering a subfolder of an already-registered workspace: it does not fail, it silently creates a nested workspace that shadows the parent for that subtree.
 
 `/memodi:end` closes the session with a structured summary (Goal / Accomplished / Next Steps). A `SessionEnd` hook also runs on every exit as a safety net - it never overwrites a real summary.
 

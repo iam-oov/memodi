@@ -19,7 +19,32 @@ Tu producto no es un repo - son varios. El API, el worker, el servicio de billin
 - **Retoma exactamente donde quedaste.** Cierra una sesion y la siguiente - mañana, o en tu otra maquina - abre con tus pendientes ya en pantalla. El "donde me quede?" del lunes llega respondido.
 - **Recuerda como tu preguntas.** Por palabra exacta, por idea ("no resolvimos ya algo parecido?"), o por conexion ("que se rompe si toco esto?"). Y guarda mientras trabajas - decisiones, bugs, descubrimientos - para que nunca tengas que acordarte de recordar.
 
-Esa memoria compartida es un **workspace** - y puedes tener tantos como necesites. Uno para el trabajo, otro para tus proyectos personales, otro para la tesis: cada uno guarda sus propias memorias, aisladas del resto, y cada repo adentro es su propio proyecto. `/memodi:start` crea uno - o te une al que ya usas en otra maquina.
+Sin comando para guardar, sin comando para buscar. Solo trabajas; preguntar es suficiente.
+
+Esa memoria compartida es un **workspace** - ten tantos como necesites (trabajo, personal, tesis), cada uno aislado del resto. `/memodi:start` crea uno - o te une al que ya usas en otra maquina.
+
+## Correr `/memodi:start`
+
+La carpeta que registras decide cuanto comparten tus repos - es la unica decision que vale la pena pensar bien. `/memodi:start` sugiere por defecto la **carpeta padre** del repo actual, y una sola corrida por (maquina, carpeta) alcanza.
+
+```text
+trabajo/         ← /memodi:start aqui: un workspace, una memoria
+├── api/
+├── billing/
+└── worker/
+```
+
+Buenos usos:
+
+- ✅ **La carpeta padre, cuando los repos hermanos pertenecen al mismo producto.** Todos los repos debajo comparten el workspace sin mas configuracion, cada uno como su propio proyecto con el nombre de su carpeta - incluso los que clones despues.
+- ✅ **El mismo nombre de workspace en tu segunda maquina.** Mismo nombre = mismo workspace: tu desktop y tu laptop leen y escriben las mismas memorias.
+- ✅ **La carpeta del repo, cuando es un repo suelto.** Sin hermanos no hay nada que compartir - un workspace de un solo repo esta bien.
+
+Malos usos:
+
+- ❌ **`/memodi:start` adentro de cada repo del mismo producto.** Cada corrida crea su propio workspace aislado: la decision guardada en `api/` simplemente no existe cuando preguntas desde `billing/`.
+- ❌ **Un nombre de workspace distinto en la segunda maquina.** Un nombre nuevo crea un workspace nuevo y vacio - no el que guarda tus memorias.
+- ❌ **Una subcarpeta de un workspace ya registrado** - `trabajo/billing/` cuando `trabajo/` ya esta registrado. No falla: crea en silencio un workspace anidado que tapa al padre en ese subarbol.
 
 ## Features
 
@@ -80,12 +105,12 @@ Que toca en tu maquina:
 
 Casos de respaldo:
 
-| Condicion | Resultado |
-|---|---|
-| `MEMODI_API_KEY` ya exportada | El login se salta por completo |
-| No hay `python3` en la maquina | Cae al prompt para pegar la key |
+| Condicion                                          | Resultado                                                       |
+| -------------------------------------------------- | --------------------------------------------------------------- |
+| `MEMODI_API_KEY` ya exportada                      | El login se salta por completo                                  |
+| No hay `python3` en la maquina                     | Cae al prompt para pegar la key                                 |
 | No hay navegador local (SSH, sin interfaz grafica) | El listener llega al timeout y toma el prompt para pegar la key |
-| El listener llega al timeout (180s) | Cae al prompt para pegar la key |
+| El listener llega al timeout (180s)                | Cae al prompt para pegar la key                                 |
 
 El hand-off por loopback es un redirect HTTP real, asi que la URL de un solo uso puede quedar en el historial de tu navegador local. `/memodi:logout` revoca la key del lado del server si eso te preocupa.
 
@@ -113,8 +138,6 @@ Agregar `"mcp__memodi__*"` a `permissions.allow` en `~/.claude/settings.json` ev
 </details>
 
 Reinicia Claude Code y corre `/memodi:start`: registra el workspace en esta maquina (o engancha uno existente de otra - mismo nombre = memorias compartidas) y carga su memoria. Una vez por (maquina, carpeta); despues la memoria se carga sola y en silencio al abrir el repo.
-
-> **Tip - la carpeta que registras decide cuanto comparten tus repos.** `/memodi:start` sugiere por defecto la **carpeta padre** del repo actual. Aceptala cuando los repos hermanos pertenecen al mismo producto: todos los repos debajo comparten el workspace sin mas configuracion, y cada uno se vuelve su propio proyecto con el nombre de su carpeta. Trabajas en un solo repo suelto? Registrar la carpeta del repo esta bien. En una segunda maquina, elige el **mismo nombre de workspace** para compartir memorias - un nombre distinto crea un workspace separado. Y evita registrar una subcarpeta de un workspace ya registrado: no falla, crea en silencio un workspace anidado que tapa al padre en ese subarbol.
 
 `/memodi:end` cierra la sesion con un resumen estructurado (Goal / Accomplished / Next Steps). Un hook `SessionEnd` corre igual en cada salida como red de contencion - nunca pisa un resumen real.
 
@@ -152,12 +175,12 @@ Claude Code ──HTTPS──► Cloudflare Tunnel ──► memodi-server (uv +
 
 Claude decide que vale la pena recordar; memodi persiste y consulta.
 
-| Capa | Extension | Para que |
-|------|-----------|----------|
-| Document store | JSONB | Estado, tareas, decisiones, metadata |
-| Busqueda full-text | tsvector | Keywords multi-idioma |
-| Busqueda semantica | pgvector (HNSW, 384d) | "ya resolvimos algo parecido?" |
-| Grafo de conocimiento | Apache AGE (Cypher) | Dependencias, impacto |
+| Capa                  | Extension             | Para que                             |
+| --------------------- | --------------------- | ------------------------------------ |
+| Document store        | JSONB                 | Estado, tareas, decisiones, metadata |
+| Busqueda full-text    | tsvector              | Keywords multi-idioma                |
+| Busqueda semantica    | pgvector (HNSW, 384d) | "ya resolvimos algo parecido?"       |
+| Grafo de conocimiento | Apache AGE (Cypher)   | Dependencias, impacto                |
 
 ## Autenticacion
 
@@ -175,62 +198,67 @@ Cuentas reales por usuario, no una key compartida:
 Todas las tools de proyecto reciben `path` (el cwd del caller) y lo resuelven contra un workspace registrado.
 
 ### Memoria
-| Tool | Descripcion |
-|------|-------------|
-| `memodi_save` | Guardar observacion (auto-genera embedding) |
-| `memodi_search` | Busqueda por keywords |
-| `memodi_search_similar` | Busqueda semantica |
-| `memodi_search_hybrid` | Keyword + semantica con RRF |
-| `memodi_context` | Contexto reciente del workspace completo: ultimo resumen de sesion + punteros a observaciones |
-| `memodi_search_global` | Buscar en todos tus proyectos (scoped al usuario) |
-| `memodi_backfill` | Embeddings para observaciones viejas |
-| `memodi_backfill_links` | Reconciliar LINKS_TO previos al auto-linking (idempotente) |
-| `memodi_find_consolidation_clusters` | Detectar clusters de observaciones listas para consolidar (solo lectura) |
-| `memodi_list_projects` | Proyectos conocidos y su workspace |
-| `memodi_delete` | Soft-delete de una observacion |
-| `memodi_get_observation` | Leer observacion por id, incluidas superseded |
+
+| Tool                                 | Descripcion                                                                                   |
+| ------------------------------------ | --------------------------------------------------------------------------------------------- |
+| `memodi_save`                        | Guardar observacion (auto-genera embedding)                                                   |
+| `memodi_search`                      | Busqueda por keywords                                                                         |
+| `memodi_search_similar`              | Busqueda semantica                                                                            |
+| `memodi_search_hybrid`               | Keyword + semantica con RRF                                                                   |
+| `memodi_context`                     | Contexto reciente del workspace completo: ultimo resumen de sesion + punteros a observaciones |
+| `memodi_search_global`               | Buscar en todos tus proyectos (scoped al usuario)                                             |
+| `memodi_backfill`                    | Embeddings para observaciones viejas                                                          |
+| `memodi_backfill_links`              | Reconciliar LINKS_TO previos al auto-linking (idempotente)                                    |
+| `memodi_find_consolidation_clusters` | Detectar clusters de observaciones listas para consolidar (solo lectura)                      |
+| `memodi_list_projects`               | Proyectos conocidos y su workspace                                                            |
+| `memodi_delete`                      | Soft-delete de una observacion                                                                |
+| `memodi_get_observation`             | Leer observacion por id, incluidas superseded                                                 |
 
 ### Grafo de conocimiento
-| Tool | Descripcion |
-|------|-------------|
-| `memodi_relate` | Crear relacion (ej: repo-a DEPENDS_ON repo-b) |
-| `memodi_dependencies` | Que depende de que; con `path` incluye LINKS_TO del workspace |
-| `memodi_impact` | Impacto transitivo; con `path` recorre tambien LINKS_TO |
-| `memodi_graph_overview` | Resumen de nodos y relaciones |
-| `memodi_remove_relation` | Invalidar relacion (soft delete) |
-| `memodi_delete_relation` | Eliminar relacion (hard delete) |
+
+| Tool                     | Descripcion                                                   |
+| ------------------------ | ------------------------------------------------------------- |
+| `memodi_relate`          | Crear relacion (ej: repo-a DEPENDS_ON repo-b)                 |
+| `memodi_dependencies`    | Que depende de que; con `path` incluye LINKS_TO del workspace |
+| `memodi_impact`          | Impacto transitivo; con `path` recorre tambien LINKS_TO       |
+| `memodi_graph_overview`  | Resumen de nodos y relaciones                                 |
+| `memodi_remove_relation` | Invalidar relacion (soft delete)                              |
+| `memodi_delete_relation` | Eliminar relacion (hard delete)                               |
 
 ### Workspaces
-| Tool | Descripcion |
-|------|-------------|
-| `memodi_workspace_start` | Registrar carpeta como workspace (lo dispara `/memodi:start`) |
-| `memodi_list_workspaces` | Listar workspaces |
-| `memodi_merge_projects` | Fusionar proyectos duplicados (dry_run por defecto) |
-| `memodi_delete_workspace` | Eliminar workspace |
-| `memodi_rename_workspace` | Renombrar workspace |
-| `memodi_purge_workspace` | Vaciar workspace (destructivo, dry_run por defecto) |
+
+| Tool                      | Descripcion                                                   |
+| ------------------------- | ------------------------------------------------------------- |
+| `memodi_workspace_start`  | Registrar carpeta como workspace (lo dispara `/memodi:start`) |
+| `memodi_list_workspaces`  | Listar workspaces                                             |
+| `memodi_merge_projects`   | Fusionar proyectos duplicados (dry_run por defecto)           |
+| `memodi_delete_workspace` | Eliminar workspace                                            |
+| `memodi_rename_workspace` | Renombrar workspace                                           |
+| `memodi_purge_workspace`  | Vaciar workspace (destructivo, dry_run por defecto)           |
 
 ### Workflow
-| Tool | Descripcion |
-|------|-------------|
-| `memodi_plan` | Crear plan |
-| `memodi_update_plan` | Definir criterios y tareas |
+
+| Tool                  | Descripcion                 |
+| --------------------- | --------------------------- |
+| `memodi_plan`         | Crear plan                  |
+| `memodi_update_plan`  | Definir criterios y tareas  |
 | `memodi_approve_plan` | Aprobar plan, pasar a apply |
-| `memodi_apply_done` | Marcar apply hecho |
-| `memodi_verify` | Verificar resultado |
-| `memodi_unify` | Cerrar el loop |
-| `memodi_progress` | Estado del workflow activo |
-| `memodi_task_update` | Actualizar una tarea |
+| `memodi_apply_done`   | Marcar apply hecho          |
+| `memodi_verify`       | Verificar resultado         |
+| `memodi_unify`        | Cerrar el loop              |
+| `memodi_progress`     | Estado del workflow activo  |
+| `memodi_task_update`  | Actualizar una tarea        |
 
 ### Sesiones y sistema
-| Tool | Descripcion |
-|------|-------------|
-| `memodi_session_start` | Iniciar sesion (las observaciones se auto-adjuntan) |
-| `memodi_session_end` | Cerrar sesion con resumen estructurado (obligatorio) |
-| `memodi_logout` | Revocar la api key del caller en el server (respalda `/memodi:logout`) |
-| `memodi_ping` | Server vivo |
-| `memodi_status` | Salud del server y extensiones de PostgreSQL |
-| `memodi_version` | Version en produccion |
+
+| Tool                   | Descripcion                                                            |
+| ---------------------- | ---------------------------------------------------------------------- |
+| `memodi_session_start` | Iniciar sesion (las observaciones se auto-adjuntan)                    |
+| `memodi_session_end`   | Cerrar sesion con resumen estructurado (obligatorio)                   |
+| `memodi_logout`        | Revocar la api key del caller en el server (respalda `/memodi:logout`) |
+| `memodi_ping`          | Server vivo                                                            |
+| `memodi_status`        | Salud del server y extensiones de PostgreSQL                           |
+| `memodi_version`       | Version en produccion                                                  |
 
 ## Modelo del grafo
 
