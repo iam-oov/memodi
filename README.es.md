@@ -8,7 +8,7 @@
 [English](README.md) | Español
 
 <p align="center">
-  <img src="public/img/logo_repo.png" alt="memodi logo" width="220">
+  <img src="public/img/logo_repo.png" alt="memodi logo" width="600">
 </p>
 
 **Memoria Distribuida** - servidor MCP que le da a Claude Code memoria persistente entre workspaces, proyectos y maquinas. Guarda decisiones, bugs y descubrimientos de forma proactiva y los recupera por keyword, semantica o grafo - sin llamadas extra a LLMs.
