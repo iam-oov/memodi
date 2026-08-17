@@ -7,6 +7,10 @@
 
 English | [Español](README.es.md)
 
+<p align="center">
+  <img src="public/img/logo_repo.png" alt="memodi logo" width="220">
+</p>
+
 **Memoria Distribuida** - MCP server that gives Claude Code persistent memory across workspaces, projects, and machines. It saves decisions, bugs, and discoveries proactively and recalls them by keyword, semantics, or graph - with no extra LLM calls.
 
 A single PostgreSQL instance does it all: document store (JSONB), semantic search (pgvector), and knowledge graph (Apache AGE).
