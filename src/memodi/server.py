@@ -400,6 +400,54 @@ def memodi_workspace_start(ctx: Context, path: str, workspace: str) -> str:
 
 
 @mcp.tool()
+def memodi_list_paths(ctx: Context) -> str:
+    """List every path the caller has registered, on every machine.
+
+    Shows machine, path, and the workspace each resolves to — the inventory
+    memodi_list_workspaces and memodi_list_projects do not carry. Use it
+    before repointing or registering, to see what a new path would collide
+    with or shadow (longest prefix wins).
+    """
+    caller = _caller(ctx)
+    if isinstance(caller, str):
+        return caller
+    return memory.list_paths(caller["user_id"])
+
+
+@mcp.tool()
+def memodi_workspace_repoint(ctx: Context, path: str, workspace: str) -> str:
+    """Move this machine's registration of `path` to a different workspace.
+
+    The repair tool for a path registered to the wrong workspace — the only
+    way to change one registration without deleting a whole workspace.
+
+    Only the ADDRESS moves. Projects and their observations stay where they
+    are, so nothing is lost and nothing is silently carried over; use
+    memodi_merge_projects afterwards to move the data itself.
+    """
+    caller = _caller(ctx)
+    if isinstance(caller, str):
+        return caller
+    return memory.workspace_repoint(
+        path, workspace, caller["user_id"], caller["machine"]
+    )
+
+
+@mcp.tool()
+def memodi_workspace_forget(ctx: Context, path: str) -> str:
+    """Drop this machine's registration of `path`, making it dormant again.
+
+    Workspaces, projects and observations are all left intact — this only
+    removes the address, so the path answers not_started until someone runs
+    memodi_workspace_start on it again.
+    """
+    caller = _caller(ctx)
+    if isinstance(caller, str):
+        return caller
+    return memory.workspace_forget(path, caller["user_id"], caller["machine"])
+
+
+@mcp.tool()
 def memodi_merge_projects(
     ctx: Context,
     source_project_id: str,

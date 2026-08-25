@@ -119,7 +119,7 @@ def test_search_hybrid_repo_filters_by_workspace(registered_workspace, project_n
     embedding = generate_embedding("authentication")
 
     same_ws = repository.search_hybrid(
-        project_id=proj["id"],
+        project_ids=[proj["id"]],
         query="authentication",
         embedding=embedding,
         workspace_id=registered_workspace["workspace"]["id"],
@@ -127,7 +127,7 @@ def test_search_hybrid_repo_filters_by_workspace(registered_workspace, project_n
     assert any(r["title"] == "Workspace-scoped hybrid" for r in same_ws)
 
     mismatched = repository.search_hybrid(
-        project_id=proj["id"],
+        project_ids=[proj["id"]],
         query="authentication",
         embedding=embedding,
         workspace_id=str(uuid.uuid4()),

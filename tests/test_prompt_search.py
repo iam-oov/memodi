@@ -385,6 +385,133 @@ def test_search_for_prompt_registered_subpath_creates_no_project(
     assert len(after) == len(before)
 
 
+def test_search_for_prompt_scopes_to_the_caller_project(registered_workspace):
+    """The per-prompt injection must not pull a sibling repo's memory in."""
+    proj_a = f"test-proj-a-{uuid.uuid4()}"
+    proj_b = f"test-proj-b-{uuid.uuid4()}"
+
+    save(
+        path=f"{registered_workspace['root']}/{proj_a}",
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+        title="Kestrel hexagonal note",
+        content="Kestrel adopted hexagonal architecture",
+        type="architecture",
+    )
+
+    rows = json.loads(
+        search_for_prompt(
+            path=f"{registered_workspace['root']}/{proj_b}",
+            user_id=registered_workspace["user_id"],
+            machine=registered_workspace["machine"],
+            query="kestrel hexagonal architecture",
+        )
+    )
+    assert all(r["title"] != "Kestrel hexagonal note" for r in rows)
+
+
+def test_search_for_prompt_at_workspace_root_spans_every_project(
+    registered_workspace,
+):
+    proj_a = f"test-proj-a-{uuid.uuid4()}"
+
+    save(
+        path=f"{registered_workspace['root']}/{proj_a}",
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+        title="Falcon hexagonal note",
+        content="Falcon adopted hexagonal architecture",
+        type="architecture",
+    )
+
+    rows = json.loads(
+        search_for_prompt(
+            path=registered_workspace["root"],
+            user_id=registered_workspace["user_id"],
+            machine=registered_workspace["machine"],
+            query="falcon hexagonal architecture",
+        )
+    )
+    assert any(r["title"] == "Falcon hexagonal note" for r in rows)
+
+
+def test_search_for_prompt_in_a_child_inherits_untargeted_root_memory(
+    registered_workspace,
+):
+    proj_b = f"test-proj-b-{uuid.uuid4()}"
+
+    save(
+        path=registered_workspace["root"],
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+        title="Heron container convention",
+        content="Heron convention saved at the root for every repo",
+        type="pattern",
+    )
+
+    rows = json.loads(
+        search_for_prompt(
+            path=f"{registered_workspace['root']}/{proj_b}",
+            user_id=registered_workspace["user_id"],
+            machine=registered_workspace["machine"],
+            query="heron container convention",
+        )
+    )
+    assert any(r["title"] == "Heron container convention" for r in rows)
+
+
+def test_search_for_prompt_in_a_child_ignores_root_memory_aimed_elsewhere(
+    registered_workspace,
+):
+    proj_b = f"test-proj-b-{uuid.uuid4()}"
+    sibling = f"test-proj-c-{uuid.uuid4()}"
+
+    save(
+        path=registered_workspace["root"],
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+        title="Ibis decision for the sibling",
+        content="Ibis decision saved at the root, targeted at one repo",
+        type="decision",
+        affects=[sibling],
+    )
+
+    rows = json.loads(
+        search_for_prompt(
+            path=f"{registered_workspace['root']}/{proj_b}",
+            user_id=registered_workspace["user_id"],
+            machine=registered_workspace["machine"],
+            query="ibis decision sibling",
+        )
+    )
+    assert all(r["title"] != "Ibis decision for the sibling" for r in rows)
+
+
+def test_search_for_prompt_follows_affects(registered_workspace):
+    proj_a = f"test-proj-a-{uuid.uuid4()}"
+    proj_b = f"test-proj-b-{uuid.uuid4()}"
+
+    save(
+        path=f"{registered_workspace['root']}/{proj_a}",
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+        title="Osprey contract shared with B",
+        content="Osprey contract that also governs project B",
+        type="decision",
+        affects=[proj_b],
+    )
+
+    rows = json.loads(
+        search_for_prompt(
+            path=f"{registered_workspace['root']}/{proj_b}",
+            user_id=registered_workspace["user_id"],
+            machine=registered_workspace["machine"],
+            query="osprey contract governs",
+        )
+    )
+    assert any(r["title"] == "Osprey contract shared with B" for r in rows)
+
+
 @pytest.mark.parametrize("blank_query", ["", "   "])
 def test_search_for_prompt_empty_query_returns_empty_list_without_db(
     registered_workspace, blank_query

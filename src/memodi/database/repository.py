@@ -53,26 +53,80 @@ def get_or_create_workspace(name: str, owner_user_id: str) -> dict:
     return dict(row)
 
 
-def _project_scope(
-    project_id: str | None, project_name: str | None, alias: str = ""
-) -> tuple[str, list]:
-    """Predicate narrowing observations to one project plus anything that lists
-    it in metadata.affects.
+def _id_list(project_ids: str | list[str] | None) -> list[str]:
+    """One id or several, normalized to strings. Single-id callers stay
+    untouched, and a psycopg UUID never reaches the array adapter as an
+    iterable."""
+    if not project_ids:
+        return []
+    if isinstance(project_ids, list | tuple):
+        return [str(value) for value in project_ids]
+    return [str(project_ids)]
 
-    Empty when project_id is None: the caller sits at the registered workspace
-    root, where every project in the workspace is legitimately in scope.
+
+def _project_scope(
+    project_ids: str | list[str] | None,
+    project_name: str | None,
+    alias: str = "",
+    inherited_ids: str | list[str] | None = None,
+) -> tuple[str, list]:
+    """Predicate narrowing observations to what one folder may read:
+
+    - its own project
+    - anything naming it in metadata.affects
+    - the workspace root's UNTARGETED memory (inherited_ids), i.e. the
+      container knowledge a child inherits. A root observation that DID
+      declare affects is addressed to specific repos, so it reaches only
+      those — otherwise affects could widen visibility but never narrow it.
+
+    Empty when project_ids is None: the caller sits at the registered root,
+    where every project in the workspace is in scope.
     """
-    if project_id is None:
+    ids = _id_list(project_ids)
+    if not ids:
         return "", []
     col = f"{alias}." if alias else ""
-    if not project_name:
-        return f"AND {col}project_id = %s", [project_id]
     # ponytail: unindexed JSONB scan. Add an index on ((metadata->'affects'))
     # USING GIN if a workspace ever outgrows a sequential filter.
-    return (
-        f"AND ({col}project_id = %s OR {col}metadata->'affects' ? %s)",
-        [project_id, project_name],
-    )
+    clauses = [f"{col}project_id = ANY(%s::uuid[])"]
+    params: list = [ids]
+    if project_name:
+        clauses.append(f"{col}metadata->'affects' ? %s")
+        params.append(project_name)
+    inherited = _id_list(inherited_ids)
+    if inherited:
+        clauses.append(
+            f"({col}project_id = ANY(%s::uuid[])"
+            f" AND NOT ({col}metadata ? 'affects'))"
+        )
+        params.append(inherited)
+    return "AND (" + " OR ".join(clauses) + ")", params
+
+
+def _project_name_scope(
+    project_names: list[str] | None,
+    affects_name: str | None,
+    inherited_names: list[str] | None = None,
+) -> tuple[str, list]:
+    """Same rule as _project_scope, keyed on project names instead of ids —
+    for read paths that must not create the project row.
+
+    Empty when project_names is None: the caller sits at the registered
+    workspace root, where every project in the workspace is in scope.
+    """
+    if not project_names:
+        return "", []
+    clauses = ["p.name = ANY(%s::text[])"]
+    params: list = [project_names]
+    if affects_name:
+        clauses.append("o.metadata->'affects' ? %s")
+        params.append(affects_name)
+    if inherited_names:
+        clauses.append(
+            "(p.name = ANY(%s::text[]) AND NOT (o.metadata ? 'affects'))"
+        )
+        params.append(inherited_names)
+    return "AND (" + " OR ".join(clauses) + ")", params
 
 
 def get_project_names(workspace_id: str) -> set[str]:
@@ -81,6 +135,15 @@ def get_project_names(workspace_id: str) -> set[str]:
         "SELECT name FROM projects WHERE workspace_id = %s", (workspace_id,)
     ).fetchall()
     return {r["name"] for r in rows}
+
+
+def get_project_by_name(name: str, workspace_id: str) -> dict | None:
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT * FROM projects WHERE name = %s AND workspace_id = %s",
+        (name, workspace_id),
+    ).fetchone()
+    return dict(row) if row else None
 
 
 def get_or_create_project(name: str, workspace_id: str) -> dict:
@@ -200,6 +263,109 @@ def workspace_start(user_id: str, machine: str, path: str, workspace_name: str) 
         conn.rollback()
         raise ValueError("Path already registered on this machine") from e
     return workspace
+
+
+def list_workspace_paths(user_id: str) -> list[dict]:
+    """Every path this owner has registered, on every machine.
+
+    Cross-machine on purpose: planning a move means seeing the registration
+    you are about to collide with, including the one on the laptop you are
+    not sitting at.
+    """
+    conn = get_connection()
+    rows = conn.execute(
+        """
+        SELECT wp.machine, wp.path, w.name AS workspace, wp.created_at
+        FROM workspace_paths wp
+        JOIN workspaces w ON w.id = wp.workspace_id
+        WHERE wp.owner_user_id = %s
+        ORDER BY wp.machine, wp.path
+        """,
+        (user_id,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def workspace_repoint(
+    user_id: str, machine: str, path: str, workspace_name: str
+) -> dict:
+    """Move THIS machine's registration of `path` to another workspace.
+
+    Only the address moves. Projects and observations stay in the workspace
+    that owns them — use merge_projects to carry the data over, so an
+    accidental repoint can never strand memory.
+    """
+    if machine == "legacy":
+        raise ValueError("machine 'legacy' is reserved and cannot be used")
+    conn = get_connection()
+    normalized_path = _normalize_path(path)
+
+    current = conn.execute(
+        """
+        SELECT wp.id, w.id AS workspace_id, w.name AS workspace_name
+        FROM workspace_paths wp
+        JOIN workspaces w ON w.id = wp.workspace_id
+        WHERE wp.machine = %s AND wp.path = %s AND wp.owner_user_id = %s
+        """,
+        (machine, normalized_path, user_id),
+    ).fetchone()
+
+    if current is None:
+        conn.rollback()
+        raise ValueError(
+            f"'{normalized_path}' is not registered on machine '{machine}' — "
+            "nothing to repoint. Use memodi_workspace_start to register it."
+        )
+
+    target = get_or_create_workspace(workspace_name, owner_user_id=user_id)
+    if str(target["id"]) == str(current["workspace_id"]):
+        return {
+            "path": normalized_path,
+            "machine": machine,
+            "workspace": workspace_name,
+            "previous_workspace": current["workspace_name"],
+            "changed": False,
+        }
+
+    conn.execute(
+        "UPDATE workspace_paths SET workspace_id = %s WHERE id = %s",
+        (target["id"], current["id"]),
+    )
+    conn.commit()
+    return {
+        "path": normalized_path,
+        "machine": machine,
+        "workspace": workspace_name,
+        "previous_workspace": current["workspace_name"],
+        "changed": True,
+    }
+
+
+def workspace_forget(user_id: str, machine: str, path: str) -> dict | None:
+    """Drop THIS machine's registration of `path`, leaving every workspace and
+    its memory intact — the path simply goes dormant (not_started) again."""
+    if machine == "legacy":
+        raise ValueError("machine 'legacy' is reserved and cannot be used")
+    conn = get_connection()
+    normalized_path = _normalize_path(path)
+    row = conn.execute(
+        """
+        DELETE FROM workspace_paths wp
+        USING workspaces w
+        WHERE w.id = wp.workspace_id
+          AND wp.machine = %s AND wp.path = %s AND wp.owner_user_id = %s
+        RETURNING w.name AS workspace_name
+        """,
+        (machine, normalized_path, user_id),
+    ).fetchone()
+    conn.commit()
+    if row is None:
+        return None
+    return {
+        "path": normalized_path,
+        "machine": machine,
+        "workspace": row["workspace_name"],
+    }
 
 
 def merge_projects(source_project_id: str, target_project_id: str) -> dict:
@@ -383,37 +549,39 @@ def get_active_session_by_client_id(
 
 
 def get_latest_session_summary(
-    project_id: str | None, workspace_id: str | None = None
+    project_ids: str | list[str] | None, workspace_id: str | None = None
 ) -> dict | None:
-    """Get the most recent completed session with a summary.
+    """Get the most recent completed session with a summary, fenced by
+    workspace_id when given.
 
-    When workspace_id is given, searches across every project in the
-    workspace instead of just project_id, so the session summary is
-    visible to any workspace member regardless of which project resolved
-    the caller's path.
+    project_id=None means the caller sits at the registered workspace root,
+    where the last session of any project in the workspace is in scope.
     """
     conn = get_connection()
     if workspace_id:
+        scope, scope_params = _project_scope(project_ids, None, alias="s")
         row = conn.execute(
-            """
+            f"""
             SELECT s.*, p.name AS project FROM sessions s
             JOIN projects p ON p.id = s.project_id
             WHERE p.workspace_id = %s
               AND s.ended_at IS NOT NULL AND s.summary IS NOT NULL
+              {scope}
             ORDER BY s.ended_at DESC
             LIMIT 1
             """,
-            (workspace_id,),
+            (workspace_id, *scope_params),
         ).fetchone()
     else:
         row = conn.execute(
             """
             SELECT * FROM sessions
-            WHERE project_id = %s AND ended_at IS NOT NULL AND summary IS NOT NULL
+            WHERE project_id = ANY(%s::uuid[])
+              AND ended_at IS NOT NULL AND summary IS NOT NULL
             ORDER BY ended_at DESC
             LIMIT 1
             """,
-            (project_id,),
+            (_id_list(project_ids),),
         ).fetchone()
     return dict(row) if row else None
 
@@ -602,16 +770,19 @@ def save_observation(
 
 
 def search_observations(
-    project_id: str | None,
+    project_ids: str | list[str] | None,
     query: str,
     type: str | None = None,
     limit: int = 10,
     workspace_id: str | None = None,
     project_name: str | None = None,
+    inherited_ids: str | list[str] | None = None,
 ) -> list[dict]:
     conn = get_connection()
     if workspace_id:
-        scope, scope_params = _project_scope(project_id, project_name, alias="o")
+        scope, scope_params = _project_scope(
+            project_ids, project_name, alias="o", inherited_ids=inherited_ids
+        )
         base = f"""
             SELECT o.*, ts_rank(o.search_vector, q) AS rank
             FROM observations o
@@ -625,7 +796,9 @@ def search_observations(
         """
         params: list = [query, workspace_id, *scope_params]
     else:
-        scope, scope_params = _project_scope(project_id, project_name)
+        scope, scope_params = _project_scope(
+            project_ids, project_name, inherited_ids=inherited_ids
+        )
         base = f"""
             SELECT *, ts_rank(search_vector, query) AS rank
             FROM observations, plainto_tsquery('simple', %s) query
@@ -778,10 +951,16 @@ def search_observations_by_workspace(
     workspace_id: str,
     query: str,
     limit: int = 5,
+    project_names: list[str] | None = None,
+    affects_name: str | None = None,
+    inherited_names: list[str] | None = None,
 ) -> list[dict]:
     conn = get_connection()
+    scope, scope_params = _project_name_scope(
+        project_names, affects_name, inherited_names
+    )
     rows = conn.execute(
-        """
+        f"""
         WITH q AS (
             SELECT string_agg(lexeme, ' | ') AS tsq
             FROM unnest(tsvector_to_array(to_tsvector('simple', %s))) AS lexeme
@@ -796,46 +975,53 @@ def search_observations_by_workspace(
           AND p.workspace_id = %s
           AND o.deleted_at IS NULL AND o.superseded_by IS NULL
           AND o.search_vector @@ to_tsquery('simple', q.tsq)
+          {scope}
         ORDER BY rank DESC LIMIT %s
         """,
-        [query, list(PROMPT_STOPWORDS), workspace_id, limit],
+        [query, list(PROMPT_STOPWORDS), workspace_id, *scope_params, limit],
     ).fetchall()
     return [dict(r) for r in rows]
 
 
 def get_recent_observations(
-    project_id: str | None,
+    project_ids: str | list[str] | None,
     limit: int = 20,
     workspace_id: str | None = None,
+    project_name: str | None = None,
+    inherited_ids: str | list[str] | None = None,
 ) -> list[dict]:
-    """Recent observations for a project, or for the whole workspace when
-    workspace_id is given — every project in the workspace, not just
-    project_id, so the same recent history shows up regardless of which
-    project the caller's path resolved to.
+    """Recent observations for a project, always fenced by workspace_id when
+    given. project_ids=None means the caller sits at the registered workspace
+    root, where every project in the workspace is in scope.
     """
     conn = get_connection()
     if workspace_id:
+        scope, scope_params = _project_scope(
+            project_ids, project_name, alias="o", inherited_ids=inherited_ids
+        )
         rows = conn.execute(
-            """
+            f"""
             SELECT o.*, p.name AS project FROM observations o
             JOIN projects p ON p.id = o.project_id
             WHERE p.workspace_id = %s
               AND o.deleted_at IS NULL
               AND o.superseded_by IS NULL
+              {scope}
             ORDER BY COALESCE(o.occurred_at, o.created_at) DESC
             LIMIT %s
             """,
-            (workspace_id, limit),
+            (workspace_id, *scope_params, limit),
         ).fetchall()
     else:
         rows = conn.execute(
             """
             SELECT * FROM observations
-            WHERE project_id = %s AND deleted_at IS NULL AND superseded_by IS NULL
+            WHERE project_id = ANY(%s::uuid[])
+              AND deleted_at IS NULL AND superseded_by IS NULL
             ORDER BY COALESCE(occurred_at, created_at) DESC
             LIMIT %s
             """,
-            (project_id, limit),
+            (_id_list(project_ids), limit),
         ).fetchall()
     return [dict(r) for r in rows]
 
@@ -1053,16 +1239,19 @@ def rename_workspace(old_name: str, new_name: str, owner_user_id: str) -> dict |
 
 
 def search_similar(
-    project_id: str | None,
+    project_ids: str | list[str] | None,
     embedding: list[float],
     limit: int = 10,
     workspace_id: str | None = None,
     project_name: str | None = None,
+    inherited_ids: str | list[str] | None = None,
 ) -> list[dict]:
     conn = get_connection()
     query_embedding = str(embedding)
     if workspace_id:
-        scope, scope_params = _project_scope(project_id, project_name, alias="o")
+        scope, scope_params = _project_scope(
+            project_ids, project_name, alias="o", inherited_ids=inherited_ids
+        )
         rows = conn.execute(
             f"""
             SELECT o.*, 1 - (o.embedding <=> %s::vector) AS similarity
@@ -1085,7 +1274,9 @@ def search_similar(
             ),
         ).fetchall()
     else:
-        scope, scope_params = _project_scope(project_id, project_name)
+        scope, scope_params = _project_scope(
+            project_ids, project_name, inherited_ids=inherited_ids
+        )
         rows = conn.execute(
             f"""
             SELECT *, 1 - (embedding <=> %s::vector) AS similarity
@@ -1379,12 +1570,13 @@ def find_consolidation_clusters(
 
 
 def search_hybrid(
-    project_id: str | None,
+    project_ids: str | list[str] | None,
     query: str,
     embedding: list[float],
     limit: int = 10,
     workspace_id: str | None = None,
     project_name: str | None = None,
+    inherited_ids: str | list[str] | None = None,
 ) -> list[dict]:
     conn = get_connection()
     query_embedding = str(embedding)
@@ -1393,8 +1585,12 @@ def search_hybrid(
     # Both ranking CTEs and the outer join each need the scope: a CTE that
     # still ranked the whole workspace would let foreign rows crowd out the
     # in-scope ones before the outer filter ever runs.
-    scope, scope_params = _project_scope(project_id, project_name)
-    outer_scope, outer_params = _project_scope(project_id, project_name, alias="o")
+    scope, scope_params = _project_scope(
+        project_ids, project_name, inherited_ids=inherited_ids
+    )
+    outer_scope, outer_params = _project_scope(
+        project_ids, project_name, alias="o", inherited_ids=inherited_ids
+    )
 
     cte = f"""
         WITH keyword AS (

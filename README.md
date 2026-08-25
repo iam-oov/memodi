@@ -69,6 +69,20 @@ You need [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and a mem
 curl -sf https://raw.githubusercontent.com/iam-oov/memodi/main/install.sh | sh
 ```
 
+### Headless install (no browser)
+
+The browser hand-off needs a browser on the same machine: the login redirect targets the browser's own `127.0.0.1`, and the callback port is kernel-assigned, so SSH port forwarding cannot rescue it. On a headless box (an Ubuntu server over SSH, a container, CI), log in elsewhere and bring the key with you:
+
+```bash
+# on any machine with a browser: open https://memodi.valdoh.com/login and copy the mmd_... key
+export MEMODI_API_KEY=mmd_...
+curl -sf https://raw.githubusercontent.com/iam-oov/memodi/main/install.sh | sh
+```
+
+With `MEMODI_API_KEY` set, the installer validates it and skips the login step entirely. Without it, the listener waits 180s for a browser that will never answer before falling back to a paste prompt - `MEMODI_LOGIN_TIMEOUT=1` cuts that wait short.
+
+The same key works on as many machines as you want: the key is the identity, and `X-Memodi-Machine` keeps path registration per host.
+
 ### What install.sh does
 
 One run drives login, plugin install, MCP wiring, and permissions - no manual steps:

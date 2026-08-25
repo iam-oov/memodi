@@ -187,10 +187,9 @@ def test_context_returns_recent(registered_workspace, project_name):
     assert result_titles.index("Third obs") < result_titles.index("First obs")
 
 
-def test_context_returns_workspace_wide_observations(registered_workspace):
-    """Regression test for the cross-machine 'what were we working on?' bug:
-    an observation saved via project A must surface in project B's context
-    call when both resolve to the same workspace, labeled with A's name."""
+def test_context_scopes_observations_to_the_caller_project(registered_workspace):
+    """A sibling project's observation must NOT surface in another project's
+    context: below the registered root exactly one repo is in scope."""
     proj_a = f"test-proj-a-{uuid.uuid4()}"
     proj_b = f"test-proj-b-{uuid.uuid4()}"
     path_a = f"{registered_workspace['root']}/{proj_a}"
@@ -201,7 +200,7 @@ def test_context_returns_workspace_wide_observations(registered_workspace):
         user_id=registered_workspace["user_id"],
         machine=registered_workspace["machine"],
         title="Cross-project observation",
-        content="Saved from project A, should surface via project B's context",
+        content="Saved from project A, must stay in project A",
         type="discovery",
     )
 
@@ -212,16 +211,125 @@ def test_context_returns_workspace_wide_observations(registered_workspace):
             machine=registered_workspace["machine"],
         )
     )
+    titles = [o["title"] for o in results["observations"]]
+    assert "Cross-project observation" not in titles
+
+
+def test_context_at_workspace_root_spans_every_project(registered_workspace):
+    """At the registered root no single repo is in scope, so the whole
+    workspace is — that is what makes a multi-root registration usable."""
+    proj_a = f"test-proj-a-{uuid.uuid4()}"
+    path_a = f"{registered_workspace['root']}/{proj_a}"
+
+    save(
+        path=path_a,
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+        title="Root-visible observation",
+        content="Saved from project A, visible from the workspace root",
+        type="discovery",
+    )
+
+    results = json.loads(
+        context(
+            path=registered_workspace["root"],
+            user_id=registered_workspace["user_id"],
+            machine=registered_workspace["machine"],
+        )
+    )
     match = next(
         (
             o
             for o in results["observations"]
-            if o["title"] == "Cross-project observation"
+            if o["title"] == "Root-visible observation"
         ),
         None,
     )
     assert match is not None
     assert match["project"] == proj_a
+
+
+def test_context_in_a_child_inherits_the_untargeted_root_memory(registered_workspace):
+    """Container knowledge saved at the registered root reaches every child
+    folder — that is the shared layer a child is entitled to."""
+    proj_b = f"test-proj-b-{uuid.uuid4()}"
+
+    save(
+        path=registered_workspace["root"],
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+        title="Container-wide convention",
+        content="Saved at the workspace root with no affects declared",
+        type="pattern",
+    )
+
+    results = json.loads(
+        context(
+            path=f"{registered_workspace['root']}/{proj_b}",
+            user_id=registered_workspace["user_id"],
+            machine=registered_workspace["machine"],
+        )
+    )
+    titles = [o["title"] for o in results["observations"]]
+    assert "Container-wide convention" in titles
+
+
+def test_context_in_a_child_ignores_root_memory_targeted_at_a_sibling(
+    registered_workspace,
+):
+    """A root observation that declared affects is addressed to those repos
+    only — inheritance must not defeat the targeting."""
+    proj_b = f"test-proj-b-{uuid.uuid4()}"
+    sibling = f"test-proj-c-{uuid.uuid4()}"
+
+    save(
+        path=registered_workspace["root"],
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+        title="Root decision aimed at the sibling",
+        content="Saved at the root but scoped to one repo via affects",
+        type="decision",
+        affects=[sibling],
+    )
+
+    results = json.loads(
+        context(
+            path=f"{registered_workspace['root']}/{proj_b}",
+            user_id=registered_workspace["user_id"],
+            machine=registered_workspace["machine"],
+        )
+    )
+    titles = [o["title"] for o in results["observations"]]
+    assert "Root decision aimed at the sibling" not in titles
+
+
+def test_context_surfaces_observations_that_declare_affects(registered_workspace):
+    """The cross-repo escape hatch: metadata.affects pulls an observation into
+    the named project's context without widening the scope for everything."""
+    proj_a = f"test-proj-a-{uuid.uuid4()}"
+    proj_b = f"test-proj-b-{uuid.uuid4()}"
+    path_a = f"{registered_workspace['root']}/{proj_a}"
+    path_b = f"{registered_workspace['root']}/{proj_b}"
+
+    save(
+        path=path_a,
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+        title="Contract shared with B",
+        content="Saved from A, declared as affecting B",
+        type="decision",
+        affects=[proj_b],
+    )
+
+    results = json.loads(
+        context(
+            path=path_b,
+            user_id=registered_workspace["user_id"],
+            machine=registered_workspace["machine"],
+        )
+    )
+    titles = [o["title"] for o in results["observations"]]
+    assert "Contract shared with B" in titles
 
 
 def test_context_never_crosses_workspaces(registered_workspace):
@@ -255,7 +363,9 @@ def test_context_never_crosses_workspaces(registered_workspace):
         _cleanup_workspace(other["workspace"])
 
 
-def test_context_last_session_from_another_project_in_workspace(registered_workspace):
+def test_context_last_session_scoped_to_the_caller_project(registered_workspace):
+    """A sibling project's session summary must not answer 'what were we
+    working on?' for a different repo — but it still does at the root."""
     proj_a = f"test-proj-a-{uuid.uuid4()}"
     proj_b = f"test-proj-b-{uuid.uuid4()}"
     path_a = f"{registered_workspace['root']}/{proj_a}"
@@ -273,17 +383,25 @@ def test_context_last_session_from_another_project_in_workspace(registered_works
         summary="Session summary from project A",
     )
 
-    results = json.loads(
+    from_b = json.loads(
         context(
             path=path_b,
             user_id=registered_workspace["user_id"],
             machine=registered_workspace["machine"],
         )
-    )
-    last_session = results["last_session"]
-    assert last_session is not None
-    assert last_session["summary"] == "Session summary from project A"
-    assert last_session["project"] == proj_a
+    )["last_session"]
+    assert from_b is None or from_b["project"] != proj_a
+
+    from_root = json.loads(
+        context(
+            path=registered_workspace["root"],
+            user_id=registered_workspace["user_id"],
+            machine=registered_workspace["machine"],
+        )
+    )["last_session"]
+    assert from_root is not None
+    assert from_root["summary"] == "Session summary from project A"
+    assert from_root["project"] == proj_a
 
 
 def test_list_projects(registered_workspace, project_name):

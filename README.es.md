@@ -71,6 +71,20 @@ Necesitas [Claude Code](https://docs.anthropic.com/en/docs/claude-code) y una AP
 curl -sf https://raw.githubusercontent.com/iam-oov/memodi/main/install.sh | sh
 ```
 
+### Instalar sin navegador (headless)
+
+El hand-off por navegador necesita un navegador en la misma maquina: el login redirige al `127.0.0.1` del propio navegador, y el puerto del callback lo asigna el kernel, asi que un port forward por SSH no lo salva. En una maquina headless (un Ubuntu server por SSH, un contenedor, CI), inicia sesion en otro lado y trae la key:
+
+```bash
+# en cualquier maquina CON navegador: abri https://memodi.valdoh.com/login y copia la key mmd_...
+export MEMODI_API_KEY=mmd_...
+curl -sf https://raw.githubusercontent.com/iam-oov/memodi/main/install.sh | sh
+```
+
+Con `MEMODI_API_KEY` seteada, el instalador la valida y saltea el paso de login por completo. Sin ella, el listener espera 180s a un navegador que nunca va a responder antes de caer al prompt de paste - `MEMODI_LOGIN_TIMEOUT=1` acorta esa espera.
+
+La misma key sirve en todas las maquinas que quieras: la key es la identidad, y `X-Memodi-Machine` mantiene el registro de paths por host.
+
 ### Que hace install.sh
 
 Una sola corrida encadena login, instalacion del plugin, conexion MCP y permisos - sin pasos manuales:

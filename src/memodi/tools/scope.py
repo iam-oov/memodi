@@ -23,6 +23,52 @@ def require_workspace(user_id: str, machine: str, path: str) -> dict:
     return workspace
 
 
+def workspace_root_project(workspace: dict) -> str | None:
+    """Project name a session opened AT the registered root resolves to — the
+    shared layer every child folder in the workspace inherits."""
+    return os.path.basename(workspace.get("matched_path") or "") or None
+
+
+def scoped_project_names(workspace: dict, path: str) -> dict:
+    """Read scope for a path, as project NAMES — ready to splat into
+    repository.search_observations_by_workspace.
+
+    All-None at the registered root, where every project in the workspace is
+    in scope. Name-only on purpose: the per-prompt hook reads on every message
+    and must never write, so it can never take resolve_project's
+    get-or-create path.
+    """
+    normalized = path.rstrip("/")
+    own = os.path.basename(normalized) or None
+    if own is None or normalized == workspace.get("matched_path"):
+        return {"project_names": None, "affects_name": None, "inherited_names": None}
+    root = workspace_root_project(workspace)
+    return {
+        "project_names": [own],
+        "affects_name": own,
+        "inherited_names": [root] if root and root != own else None,
+    }
+
+
+def _inherited_ids(
+    resolved: dict, workspace: dict, project: str | None
+) -> list[str] | None:
+    """The workspace root's project id, whose untargeted memory a child folder
+    inherits. None when there is nothing to inherit.
+
+    An explicit project name is an explicit request to narrow, so it inherits
+    nothing. The root project is looked up, never created — asking a question
+    must not conjure a project row.
+    """
+    if project is not None:
+        return None
+    root_name = workspace_root_project(workspace)
+    if root_name is None or root_name == resolved["name"]:
+        return None
+    root = repository.get_project_by_name(root_name, workspace_id=workspace["id"])
+    return [root["id"]] if root else None
+
+
 def resolve_project(user_id: str, machine: str, path: str, project: str | None) -> dict:
     workspace = require_workspace(user_id, machine, path)
     name = project or os.path.basename(path.rstrip("/"))
@@ -35,4 +81,10 @@ def resolve_project(user_id: str, machine: str, path: str, project: str | None) 
     # An explicit project name is an explicit request to narrow, so it never
     # counts as sitting at the root even when the cwd is the registered path.
     at_root = project is None and path.rstrip("/") == workspace.get("matched_path")
-    return {**resolved, "at_workspace_root": at_root}
+    return {
+        **resolved,
+        "at_workspace_root": at_root,
+        "inherited_ids": None
+        if at_root
+        else _inherited_ids(resolved, workspace, project),
+    }

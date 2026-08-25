@@ -6,7 +6,11 @@ from datetime import UTC, datetime
 from memodi.database import graph_repository, repository
 from memodi.database.connection import ensure_schema, rollback
 from memodi.tools.errors import handle_errors
-from memodi.tools.scope import require_workspace, resolve_project
+from memodi.tools.scope import (
+    require_workspace,
+    resolve_project,
+    scoped_project_names,
+)
 from memodi.tools.serialization import (
     serialize_clusters,
     serialize_context_observations,
@@ -80,11 +84,26 @@ def _ensure_affected_projects(
 
 
 def _search_scope(proj: dict) -> dict:
-    """Project scope for a search. At the registered workspace root no single
-    repo is in scope, so nothing narrows."""
+    """Project scope for a search: the caller's project and the workspace
+    root's, plus whatever names the caller in metadata.affects.
+
+    At the registered root no single repo is in scope, so nothing narrows.
+    """
     if proj.get("at_workspace_root"):
-        return {"project_id": None, "project_name": None}
-    return {"project_id": proj["id"], "project_name": proj["name"]}
+        return {"project_ids": None, "project_name": None, "inherited_ids": None}
+    return {
+        "project_ids": [proj["id"]],
+        "project_name": proj["name"],
+        "inherited_ids": proj["inherited_ids"],
+    }
+
+
+def _session_scope(scope: dict) -> list[str] | None:
+    """Sessions carry no affects, so a child inherits the root's outright —
+    there is no targeting to respect."""
+    if scope["project_ids"] is None:
+        return None
+    return [*scope["project_ids"], *(scope["inherited_ids"] or [])]
 
 
 def parse_links(content: str, own_topic_key: str | None) -> tuple[list[str], int]:
@@ -374,7 +393,9 @@ def search_for_prompt(
     if not query:
         return json.dumps([])
     workspace = require_workspace(user_id, machine, path)
-    results = repository.search_observations_by_workspace(workspace["id"], query, limit)
+    results = repository.search_observations_by_workspace(
+        workspace["id"], query, limit, **scoped_project_names(workspace, path)
+    )
     return json.dumps(serialize_prompt_search(results), default=str)
 
 
@@ -480,13 +501,14 @@ def context(
 ) -> str:
     _ensure()
     proj = resolve_project(user_id, machine, path, project)
+    scope = _search_scope(proj)
     last_session = repository.get_latest_session_summary(
-        proj["id"], workspace_id=proj["workspace_id"]
+        _session_scope(scope), workspace_id=proj["workspace_id"]
     )
     observations = repository.get_recent_observations(
-        project_id=proj["id"],
         limit=limit,
         workspace_id=proj["workspace_id"],
+        **scope,
     )
     return json.dumps(
         {
@@ -566,6 +588,33 @@ def workspace_start(path: str, workspace: str, user_id: str, machine: str) -> st
     _ensure()
     result = repository.workspace_start(user_id, machine, path, workspace)
     return json.dumps(result, default=str)
+
+
+@handle_errors
+def list_paths(user_id: str) -> str:
+    _ensure()
+    return json.dumps(repository.list_workspace_paths(user_id), default=str)
+
+
+@handle_errors
+def workspace_repoint(path: str, workspace: str, user_id: str, machine: str) -> str:
+    _ensure()
+    result = repository.workspace_repoint(user_id, machine, path, workspace)
+    return json.dumps(result, default=str)
+
+
+@handle_errors
+def workspace_forget(path: str, user_id: str, machine: str) -> str:
+    _ensure()
+    result = repository.workspace_forget(user_id, machine, path)
+    if result is None:
+        return json.dumps(
+            {
+                "forgotten": False,
+                "error": f"'{path}' is not registered on machine '{machine}'",
+            }
+        )
+    return json.dumps({"forgotten": True, **result}, default=str)
 
 
 @handle_errors
