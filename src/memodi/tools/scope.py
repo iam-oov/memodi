@@ -24,9 +24,17 @@ def require_workspace(user_id: str, machine: str, path: str) -> dict:
 
 
 def workspace_root_project(workspace: dict) -> str | None:
-    """Project name a session opened AT the registered root resolves to — the
-    shared layer every child folder in the workspace inherits."""
-    return os.path.basename(workspace.get("matched_path") or "") or None
+    """Project name a session opened AT a registered root resolves to — the
+    shared layer every child folder in the workspace inherits.
+
+    It is the WORKSPACE's name, deliberately not the folder's. A workspace may
+    be rooted at many paths — several on one machine, more on others — and
+    those folders rarely share a name (`TirielInc` here, `TirielInc_Automatice`
+    there). Deriving it from the basename gave each root its own container
+    project and split the inherited layer per machine, which is the exact
+    fragmentation multi-path workspaces exist to prevent.
+    """
+    return workspace.get("name") or None
 
 
 def scoped_project_names(workspace: dict, path: str) -> dict:
@@ -71,16 +79,21 @@ def _inherited_ids(
 
 def resolve_project(user_id: str, machine: str, path: str, project: str | None) -> dict:
     workspace = require_workspace(user_id, machine, path)
-    name = project or os.path.basename(path.rstrip("/"))
+    normalized = path.rstrip("/")
+    # An explicit project name is an explicit request to narrow, so it never
+    # counts as sitting at the root even when the cwd is the registered path.
+    at_root = project is None and normalized == workspace.get("matched_path")
+    name = project or (
+        workspace_root_project(workspace)
+        if at_root
+        else os.path.basename(normalized)
+    )
     if not name:
         raise ValueError(
             f"cannot derive project name from path '{path}'; "
             "pass an explicit project name"
         )
     resolved = repository.get_or_create_project(name, workspace_id=workspace["id"])
-    # An explicit project name is an explicit request to narrow, so it never
-    # counts as sitting at the root even when the cwd is the registered path.
-    at_root = project is None and path.rstrip("/") == workspace.get("matched_path")
     return {
         **resolved,
         "at_workspace_root": at_root,
