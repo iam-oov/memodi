@@ -9,6 +9,7 @@ from memodi.tools.errors import handle_errors
 from memodi.tools.scope import (
     require_workspace,
     resolve_project,
+    scoped_project_ids,
     scoped_project_names,
 )
 from memodi.tools.serialization import (
@@ -446,8 +447,15 @@ def digest_for_session_start(path: str, user_id: str, machine: str) -> str:
     _ensure()
     workspace = require_workspace(user_id, machine, path)
 
+    scope_ids = scoped_project_ids(workspace, path)
+    if scope_ids is not None and not scope_ids:
+        # No project here and none at the root: nothing is in scope. Falling
+        # through would hand the whole workspace back and surface a sibling
+        # repo's todo list in a folder that has never been worked in.
+        return json.dumps({"digest": ""})
+
     last_session = repository.get_latest_session_summary(
-        None, workspace_id=workspace["id"]
+        scope_ids, workspace_id=workspace["id"]
     )
     if not last_session:
         return json.dumps({"digest": ""})

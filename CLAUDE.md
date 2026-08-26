@@ -73,6 +73,7 @@ plugin/claude-code/
 ├── commands/end.md               — /memodi:end (user-driven session close with a real summary)
 ├── commands/login.md             — /memodi:login (re-login via the loopback listener)
 ├── commands/logout.md            — /memodi:logout (revoke this machine's key, clean local config)
+├── commands/forget.md            — /memodi:forget (un-register a folder; memories survive)
 └── skills/memory/SKILL.md        — proactive memory instructions
 ```
 

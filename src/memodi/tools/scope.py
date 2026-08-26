@@ -58,6 +58,28 @@ def scoped_project_names(workspace: dict, path: str) -> dict:
     }
 
 
+def scoped_project_ids(workspace: dict, path: str) -> list[str] | None:
+    """Existing project ids a path reads from — its own and the workspace
+    root's — resolved WITHOUT creating anything.
+
+    None means no narrowing at all (the caller is AT a registered root).
+    An empty list means neither project exists yet: nothing is in scope, which
+    is emphatically not the same as everything. Callers must handle the two
+    apart, because the SQL scope predicate treats an empty id list as
+    "no filter".
+    """
+    names = scoped_project_names(workspace, path)
+    if names["project_names"] is None:
+        return None
+    wanted = [*names["project_names"], *(names["inherited_names"] or [])]
+    ids = []
+    for name in wanted:
+        project = repository.get_project_by_name(name, workspace_id=workspace["id"])
+        if project is not None:
+            ids.append(str(project["id"]))
+    return ids
+
+
 def _inherited_ids(
     resolved: dict, workspace: dict, project: str | None
 ) -> list[str] | None:

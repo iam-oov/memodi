@@ -24,6 +24,7 @@ SKILL = PLUGIN / "skills" / "memory" / "SKILL.md"
 START_COMMAND = PLUGIN / "commands" / "start.md"
 END_COMMAND = PLUGIN / "commands" / "end.md"
 LOGOUT_COMMAND = PLUGIN / "commands" / "logout.md"
+FORGET_COMMAND = PLUGIN / "commands" / "forget.md"
 SESSION_START_HOOK = PLUGIN / "scripts" / "session-start.sh"
 SESSION_DIGEST_HOOK = PLUGIN / "scripts" / "session-digest.sh"
 SESSION_END_HOOK = PLUGIN / "scripts" / "session-end.sh"
@@ -587,3 +588,38 @@ def test_login_script_never_prints_the_key_outside_persist_env():
         if "MEMODI_API_KEY" in line:
             assert "echo" not in line
             assert "printf" not in line
+
+
+# --- /memodi:forget ---
+
+
+def test_forget_command_exists_and_is_discoverable():
+    """Commands are auto-discovered from the directory, so the file name IS
+    the registration: commands/forget.md -> /memodi:forget."""
+    assert FORGET_COMMAND.is_file()
+    assert FORGET_COMMAND.read_text().startswith("---")
+
+
+def test_forget_command_reads_the_registrations_before_dropping_one():
+    """Forgetting blind is how you drop the ancestor that every sibling folder
+    depends on. The listing is what tells them apart."""
+    text = FORGET_COMMAND.read_text()
+    assert "memodi_list_paths" in text
+    assert "memodi_workspace_forget" in text
+
+
+def test_forget_command_refuses_to_drop_an_ancestor_on_the_users_behalf():
+    text = FORGET_COMMAND.read_text()
+    assert "Do not forget the ancestor" in text
+
+
+def test_forget_command_waits_for_confirmation():
+    text = FORGET_COMMAND.read_text()
+    assert "WAIT" in text
+
+
+def test_forget_command_states_that_memories_survive():
+    """The whole reason the tool is safe to reach for — if the command does not
+    say it, the user will assume the opposite and never run it."""
+    text = FORGET_COMMAND.read_text()
+    assert "memories are NOT deleted" in text
