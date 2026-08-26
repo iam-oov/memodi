@@ -14,6 +14,7 @@ from memodi.tools.scope import (
 from memodi.tools.serialization import (
     serialize_clusters,
     serialize_context_observations,
+    serialize_merge_collisions,
     serialize_observation,
     serialize_observation_save,
     serialize_observations,
@@ -639,12 +640,17 @@ def merge_projects(
 
     if dry_run:
         would_move = repository.count_project_resources(source_project_id)
+        collisions = repository.topic_key_collisions(
+            source_project_id, target_project_id
+        )
         return json.dumps(
             {
                 "dry_run": True,
                 "source_project_id": source_project_id,
                 "target_project_id": target_project_id,
                 "would_move": would_move,
+                "topic_key_collisions": sorted({c["topic_key"] for c in collisions}),
+                "would_hide": serialize_merge_collisions(collisions),
             },
             default=str,
         )

@@ -255,3 +255,156 @@ def test_tool_merge_rejects_when_target_not_owned_by_caller(
         )
         cleanup_rows("DELETE FROM workspaces WHERE id = %s", (other_ws["id"],))
         cleanup_rows("DELETE FROM users WHERE id = %s", (other["id"],))
+
+
+# --- dry_run must surface what the merge would HIDE ---
+
+
+def test_dry_run_reports_topic_key_collisions_and_both_sides(
+    registered_workspace, projects
+):
+    """The whole reason dry_run exists: a colliding source row is moved AND
+    soft-deleted, so the target's version wins. Counts alone never showed
+    that, which made the destructive case the invisible one."""
+    source = projects("source")
+    target = projects("target")
+    key = f"topic/collide-{uuid.uuid4()}"
+
+    repository.save_observation(
+        target["id"], "Target version", "kept", "decision", topic_key=key
+    )
+    repository.save_observation(
+        source["id"], "Source version", "hidden", "decision", topic_key=key
+    )
+
+    result = json.loads(
+        merge_projects(
+            source_project_id=source["id"],
+            target_project_id=target["id"],
+            user_id=registered_workspace["user_id"],
+        )
+    )
+
+    assert result["dry_run"] is True
+    assert result["topic_key_collisions"] == [key]
+
+    hidden = result["would_hide"]
+    assert len(hidden) == 1
+    assert hidden[0]["topic_key"] == key
+    assert hidden[0]["source_title"] == "Source version"
+    assert hidden[0]["target_title"] == "Target version"
+    # Source was written last, so the merge as proposed buries the fresher row.
+    assert hidden[0]["hidden_side"] == "source (newer)"
+
+
+def test_dry_run_flags_the_harmless_direction_differently(
+    registered_workspace, projects
+):
+    source = projects("source")
+    target = projects("target")
+    key = f"topic/collide-{uuid.uuid4()}"
+
+    repository.save_observation(
+        source["id"], "Older source", "hidden", "decision", topic_key=key
+    )
+    repository.save_observation(
+        target["id"], "Newer target", "kept", "decision", topic_key=key
+    )
+
+    result = json.loads(
+        merge_projects(
+            source_project_id=source["id"],
+            target_project_id=target["id"],
+            user_id=registered_workspace["user_id"],
+        )
+    )
+    assert result["would_hide"][0]["hidden_side"] == "source (older)"
+
+
+def test_dry_run_reports_no_collisions_when_topics_do_not_overlap(
+    registered_workspace, projects
+):
+    source = projects("source")
+    target = projects("target")
+
+    repository.save_observation(
+        source["id"], "A", "a", "decision", topic_key=f"topic/a-{uuid.uuid4()}"
+    )
+    repository.save_observation(
+        target["id"], "B", "b", "decision", topic_key=f"topic/b-{uuid.uuid4()}"
+    )
+
+    result = json.loads(
+        merge_projects(
+            source_project_id=source["id"],
+            target_project_id=target["id"],
+            user_id=registered_workspace["user_id"],
+        )
+    )
+    assert result["topic_key_collisions"] == []
+    assert result["would_hide"] == []
+
+
+def test_dry_run_prediction_matches_what_the_merge_actually_hides(
+    registered_workspace, projects
+):
+    """A prediction nobody checks is a guess. The ids dry_run says would be
+    hidden must be exactly the ids the real merge supersedes."""
+    source = projects("source")
+    target = projects("target")
+    key = f"topic/collide-{uuid.uuid4()}"
+
+    repository.save_observation(
+        target["id"], "Target version", "kept", "decision", topic_key=key
+    )
+    source_obs = repository.save_observation(
+        source["id"], "Source version", "hidden", "decision", topic_key=key
+    )
+
+    predicted = json.loads(
+        merge_projects(
+            source_project_id=source["id"],
+            target_project_id=target["id"],
+            user_id=registered_workspace["user_id"],
+        )
+    )["would_hide"]
+
+    executed = json.loads(
+        merge_projects(
+            source_project_id=source["id"],
+            target_project_id=target["id"],
+            user_id=registered_workspace["user_id"],
+            dry_run=False,
+        )
+    )
+
+    assert [h["source_id"] for h in predicted] == executed["superseded_observation_ids"]
+    assert executed["superseded_observation_ids"] == [str(source_obs["id"])]
+
+
+def test_dry_run_ignores_a_deleted_row_on_either_side(registered_workspace, projects):
+    """A soft-deleted row cannot collide — it no longer surfaces, so counting
+    it would scare the caller off a merge that is in fact clean."""
+    source = projects("source")
+    target = projects("target")
+    key = f"topic/collide-{uuid.uuid4()}"
+
+    stale = repository.save_observation(
+        target["id"], "Deleted target version", "gone", "decision", topic_key=key
+    )
+    repository.delete_observation(
+        stale["id"], registered_workspace["workspace"]["id"]
+    )
+    repository.save_observation(
+        source["id"], "Live source version", "kept", "decision", topic_key=key
+    )
+
+    result = json.loads(
+        merge_projects(
+            source_project_id=source["id"],
+            target_project_id=target["id"],
+            user_id=registered_workspace["user_id"],
+        )
+    )
+    assert result["topic_key_collisions"] == []
+    assert result["would_hide"] == []

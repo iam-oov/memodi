@@ -467,6 +467,13 @@ def memodi_merge_projects(
 
     HIGHLY destructive — defaults to dry_run=True. Inspect the output
     first, then pass dry_run=False to execute.
+
+    The dry run reports topic_key_collisions and would_hide: every topic
+    key both projects hold, with the row on each side. A colliding source
+    observation is moved AND soft-deleted, so the TARGET's version wins and
+    the source's stops surfacing anywhere. Read would_hide before executing
+    — `hidden_side: "source (newer)"` means the merge would bury the fresher
+    of the two, and the merge probably wants to run the other way round.
     """
     caller = _caller(ctx)
     if isinstance(caller, str):

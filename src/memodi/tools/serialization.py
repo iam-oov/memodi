@@ -178,6 +178,34 @@ def serialize_clusters(clusters: list[dict]) -> list[dict]:
     return slim
 
 
+_MERGE_COLLISION_FIELDS = {
+    "topic_key",
+    "source_id",
+    "source_title",
+    "source_created_at",
+    "target_id",
+    "target_title",
+    "target_created_at",
+}
+
+
+def serialize_merge_collisions(collisions: list[dict]) -> list[dict]:
+    """Both sides of every topic_key a merge would collapse, newest flagged.
+
+    `hidden_side` names which row disappears if the merge runs as proposed —
+    always the source, since merge_projects keeps the target's version. It
+    reads "source (newer)" exactly when the merge would hide the fresher of
+    the two, which is the case worth stopping for.
+    """
+    slim = []
+    for c in collisions:
+        entry = _allow(c, _MERGE_COLLISION_FIELDS)
+        source_newer = c["source_created_at"] > c["target_created_at"]
+        entry["hidden_side"] = "source (newer)" if source_newer else "source (older)"
+        slim.append(entry)
+    return slim
+
+
 def serialize_session_summary(session: dict) -> dict:
     return _allow(session, _SESSION_SUMMARY_FIELDS)
 

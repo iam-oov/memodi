@@ -387,6 +387,38 @@ def workspace_forget(user_id: str, machine: str, path: str) -> dict | None:
     }
 
 
+def topic_key_collisions(source_project_id: str, target_project_id: str) -> list[dict]:
+    """Topic keys held by BOTH projects, with the row on each side.
+
+    These are exactly the observations a merge would HIDE: a colliding source
+    row is moved to the target and soft-deleted, so the target's version wins.
+    Reported before the merge, the pair lets a human see which side is newer
+    instead of finding out afterwards.
+    """
+    conn = get_connection()
+    rows = conn.execute(
+        """
+        SELECT s.topic_key,
+               s.id AS source_id,
+               s.title AS source_title,
+               s.created_at AS source_created_at,
+               t.id AS target_id,
+               t.title AS target_title,
+               t.created_at AS target_created_at
+        FROM observations s
+        JOIN observations t ON t.topic_key = s.topic_key
+        WHERE s.project_id = %s
+          AND t.project_id = %s
+          AND s.topic_key IS NOT NULL
+          AND s.deleted_at IS NULL
+          AND t.deleted_at IS NULL
+        ORDER BY s.topic_key
+        """,
+        (source_project_id, target_project_id),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def merge_projects(source_project_id: str, target_project_id: str) -> dict:
     if source_project_id == target_project_id:
         raise ValueError("Cannot merge a project into itself")
@@ -405,23 +437,11 @@ def merge_projects(source_project_id: str, target_project_id: str) -> dict:
         conn.rollback()
         raise ValueError(f"Target project '{target_project_id}' not found")
 
-    collisions = conn.execute(
-        """
-        SELECT DISTINCT s.topic_key
-        FROM observations s
-        JOIN observations t ON t.topic_key = s.topic_key
-        WHERE s.project_id = %s
-          AND t.project_id = %s
-          AND s.topic_key IS NOT NULL
-          AND s.deleted_at IS NULL
-          AND t.deleted_at IS NULL
-        """,
-        (source_project_id, target_project_id),
-    ).fetchall()
-    topic_key_collisions = sorted(r["topic_key"] for r in collisions)
+    collisions = topic_key_collisions(source_project_id, target_project_id)
+    collision_keys = sorted({r["topic_key"] for r in collisions})
 
     superseded_observation_ids: list[str] = []
-    if topic_key_collisions:
+    if collision_keys:
         superseded_rows = conn.execute(
             """
             UPDATE observations
@@ -431,7 +451,7 @@ def merge_projects(source_project_id: str, target_project_id: str) -> dict:
               AND topic_key = ANY(%s)
             RETURNING id
             """,
-            (target_project_id, source_project_id, topic_key_collisions),
+            (target_project_id, source_project_id, collision_keys),
         ).fetchall()
         superseded_observation_ids = [str(r["id"]) for r in superseded_rows]
 
@@ -460,7 +480,7 @@ def merge_projects(source_project_id: str, target_project_id: str) -> dict:
         "observations_moved": observations_moved,
         "sessions_moved": sessions_moved,
         "workflows_moved": workflows_moved,
-        "topic_key_collisions": topic_key_collisions,
+        "topic_key_collisions": collision_keys,
         "superseded_observation_ids": superseded_observation_ids,
     }
 
