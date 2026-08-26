@@ -59,7 +59,7 @@ def _normalize_affects(
         return None, "too_many"
     names: list[str] = []
     for raw in affects:
-        name = raw.strip()
+        name = repository.normalize_name(raw)
         if name and name not in names:
             names.append(name)
     return names, None

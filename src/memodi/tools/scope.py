@@ -17,7 +17,7 @@ def require_workspace(user_id: str, machine: str, path: str) -> dict:
     if workspace is None:
         raise NotStartedError(
             f"memodi is not started for {path} on machine {machine}. "
-            "Run memodi_workspace_start(path=<parent folder>, workspace=<name>) "
+            "Run memodi_workspace_start(path=<this folder>, workspace=<name>) "
             "after confirming the workspace name with the user."
         )
     return workspace
@@ -34,7 +34,7 @@ def workspace_root_project(workspace: dict) -> str | None:
     project and split the inherited layer per machine, which is the exact
     fragmentation multi-path workspaces exist to prevent.
     """
-    return workspace.get("name") or None
+    return repository.normalize_name(workspace.get("name")) or None
 
 
 def scoped_project_names(workspace: dict, path: str) -> dict:
@@ -47,7 +47,7 @@ def scoped_project_names(workspace: dict, path: str) -> dict:
     get-or-create path.
     """
     normalized = path.rstrip("/")
-    own = os.path.basename(normalized) or None
+    own = repository.normalize_name(os.path.basename(normalized)) or None
     if own is None or normalized == workspace.get("matched_path"):
         return {"project_names": None, "affects_name": None, "inherited_names": None}
     root = workspace_root_project(workspace)

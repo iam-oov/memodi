@@ -27,7 +27,7 @@ That shared memory is a **workspace** - have as many as you need (work, personal
 
 ## Running `/memodi:start`
 
-The folder you register decides how much your repos share - it's the one decision worth getting right. `/memodi:start` suggests the **parent folder** of the current repo by default, and one run per (machine, folder) is all it takes.
+The folder you register decides how much your repos share - it's the one decision worth getting right. `/memodi:start` registers the **folder you are standing in** by default, and one run per (machine, folder) is all it takes. Stand where you want the boundary.
 
 ```text
 work/            ← /memodi:start here: one workspace, one memory
@@ -38,7 +38,9 @@ work/            ← /memodi:start here: one workspace, one memory
 
 Good calls:
 
-- ✅ **The parent folder, when sibling repos belong to the same product.** Every repo under it shares the workspace with zero further setup, each becoming its own project named after its folder - even repos you clone later.
+- ✅ **The folder that holds sibling repos of the same product.** Stand in it and register it: every repo under it shares the workspace with zero further setup, each becoming its own project named after its folder - even repos you clone later.
+- ✅ **A sub-tree carved out later.** A deeper registration wins over a broader one without touching it, so a folder inside an existing workspace can become its own boundary whenever you want.
+- ✅ **Several folders pointing at one workspace.** More than one path on this machine, more on others - many paths, one workspace, one memory.
 - ✅ **The same workspace name on your second machine.** Same name = same workspace: your desktop and your laptop read and write the same memories.
 - ✅ **The repo folder itself, when it's a lone repo.** No siblings, nothing to share - a one-repo workspace is fine.
 

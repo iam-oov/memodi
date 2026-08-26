@@ -29,7 +29,7 @@ Esa memoria compartida es un **workspace** - ten tantos como necesites (trabajo,
 
 ## Correr `/memodi:start`
 
-La carpeta que registras decide cuanto comparten tus repos - es la unica decision que vale la pena pensar bien. `/memodi:start` sugiere por defecto la **carpeta padre** del repo actual, y una sola corrida por (maquina, carpeta) alcanza.
+La carpeta que registras decide cuanto comparten tus repos - es la unica decision que vale la pena pensar bien. `/memodi:start` registra por defecto **la carpeta donde estas parado**, y una sola corrida por (maquina, carpeta) alcanza. Parate donde quieras el limite.
 
 ```text
 trabajo/         ← /memodi:start aqui: un workspace, una memoria
@@ -40,7 +40,9 @@ trabajo/         ← /memodi:start aqui: un workspace, una memoria
 
 Buenos usos:
 
-- ✅ **La carpeta padre, cuando los repos hermanos pertenecen al mismo producto.** Todos los repos debajo comparten el workspace sin mas configuracion, cada uno como su propio proyecto con el nombre de su carpeta - incluso los que clones despues.
+- ✅ **La carpeta que contiene repos hermanos del mismo producto.** Parate en ella y registrala: todos los repos debajo comparten el workspace sin mas configuracion, cada uno como su propio proyecto con el nombre de su carpeta - incluso los que clones despues.
+- ✅ **Un subarbol separado mas tarde.** Un registro mas profundo le gana a uno mas amplio sin tocarlo, asi que una carpeta dentro de un workspace existente puede convertirse en su propio limite cuando quieras.
+- ✅ **Varias carpetas apuntando a un mismo workspace.** Mas de una ruta en esta maquina, mas en otras - muchas rutas, un workspace, una memoria.
 - ✅ **El mismo nombre de workspace en tu segunda maquina.** Mismo nombre = mismo workspace: tu desktop y tu laptop leen y escriben las mismas memorias.
 - ✅ **La carpeta del repo, cuando es un repo suelto.** Sin hermanos no hay nada que compartir - un workspace de un solo repo esta bien.
 

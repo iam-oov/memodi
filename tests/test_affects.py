@@ -366,11 +366,10 @@ def test_affects_over_the_cap_still_saves_and_reports_the_reason(
     assert "affects" not in _stored_metadata(ack["id"])
 
 
-def test_affects_strips_whitespace_dedupes_and_keeps_case_distinct(
-    registered_workspace,
-):
-    """Project names are case-sensitive in get_or_create_project, so Foo and
-    foo are genuinely different projects — do not fold them together."""
+def test_affects_strips_whitespace_and_folds_case(registered_workspace):
+    """Project names are case-folded on the way in, so Repo-One and repo-one
+    are the SAME project — the affects list collapses to one entry instead of
+    naming a project that will never be created."""
     ack = json.loads(
         save(
             path=registered_workspace["root"],
@@ -382,7 +381,7 @@ def test_affects_strips_whitespace_dedupes_and_keeps_case_distinct(
             affects=["  Repo-One  ", "repo-one", "Repo-One", "   "],
         )
     )
-    assert _stored_metadata(ack["id"])["affects"] == ["Repo-One", "repo-one"]
+    assert _stored_metadata(ack["id"])["affects"] == ["repo-one"]
 
 
 def test_affects_reports_only_the_projects_it_created(registered_workspace, repos):

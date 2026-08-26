@@ -16,6 +16,20 @@ def _normalize_path(path: str) -> str:
     return path.rstrip("/")
 
 
+def normalize_name(name: str | None) -> str:
+    """Canonical form for a workspace or project name: trimmed and folded to
+    lower case.
+
+    Names are matched byte-for-byte across machines, and the same thing gets
+    typed and spelled differently on each — `Tiriel` in one terminal, `tiriel`
+    in the next, `TirielInc` as a folder here and `tirielinc` after a
+    case-insensitive macOS `cd`. Every drift used to create a SEPARATE
+    workspace or project, splitting memory silently. Folding once, at the
+    boundary, is what makes the name a stable identity.
+    """
+    return (name or "").strip().lower()
+
+
 def _with_affects(meta: dict, affects: list[str]) -> dict:
     out = dict(meta)
     if affects:
@@ -39,6 +53,7 @@ ALLOWED_TYPES = {
 
 def get_or_create_workspace(name: str, owner_user_id: str) -> dict:
     conn = get_connection()
+    name = normalize_name(name)
     row = conn.execute(
         "SELECT * FROM workspaces WHERE name = %s AND owner_user_id = %s",
         (name, owner_user_id),
@@ -139,6 +154,7 @@ def get_project_names(workspace_id: str) -> set[str]:
 
 def get_project_by_name(name: str, workspace_id: str) -> dict | None:
     conn = get_connection()
+    name = normalize_name(name)
     row = conn.execute(
         "SELECT * FROM projects WHERE name = %s AND workspace_id = %s",
         (name, workspace_id),
@@ -148,6 +164,7 @@ def get_project_by_name(name: str, workspace_id: str) -> dict | None:
 
 def get_or_create_project(name: str, workspace_id: str) -> dict:
     conn = get_connection()
+    name = normalize_name(name)
     row = conn.execute(
         "SELECT * FROM projects WHERE name = %s AND workspace_id = %s",
         (name, workspace_id),
@@ -227,6 +244,7 @@ def workspace_start(user_id: str, machine: str, path: str, workspace_name: str) 
         raise ValueError("machine 'legacy' is reserved and cannot be used")
     conn = get_connection()
     normalized_path = _normalize_path(path)
+    workspace_name = normalize_name(workspace_name)
 
     existing_path = conn.execute(
         """
@@ -299,6 +317,7 @@ def workspace_repoint(
         raise ValueError("machine 'legacy' is reserved and cannot be used")
     conn = get_connection()
     normalized_path = _normalize_path(path)
+    workspace_name = normalize_name(workspace_name)
 
     current = conn.execute(
         """
@@ -1215,6 +1234,7 @@ def list_workspaces(owner_user_id: str | None = None) -> list[dict]:
 
 def delete_workspace(workspace_name: str, owner_user_id: str) -> bool:
     conn = get_connection()
+    workspace_name = normalize_name(workspace_name)
     row = conn.execute(
         "SELECT id FROM workspaces WHERE name = %s AND owner_user_id = %s",
         (workspace_name, owner_user_id),
@@ -1227,6 +1247,8 @@ def delete_workspace(workspace_name: str, owner_user_id: str) -> bool:
 
 def rename_workspace(old_name: str, new_name: str, owner_user_id: str) -> dict | None:
     conn = get_connection()
+    old_name = normalize_name(old_name)
+    new_name = normalize_name(new_name)
     row = conn.execute(
         """
         UPDATE workspaces SET name = %s, updated_at = now()
@@ -1700,6 +1722,7 @@ def count_workspace_resources(workspace_name: str, owner_user_id: str) -> dict |
     does not exist (or is not owned by owner_user_id), so callers can
     distinguish 'empty' from 'missing'."""
     conn = get_connection()
+    workspace_name = normalize_name(workspace_name)
     ws_row = conn.execute(
         "SELECT id FROM workspaces WHERE name = %s AND owner_user_id = %s",
         (workspace_name, owner_user_id),
@@ -1785,6 +1808,7 @@ def purge_workspace_data(
     Callers that want graph purge must call graph_repository.purge_all_graph()
     explicitly (opt-in).
     """
+    workspace_name = normalize_name(workspace_name)
     if mode not in ("medium", "hard"):
         raise ValueError("mode must be 'medium' or 'hard'")
 

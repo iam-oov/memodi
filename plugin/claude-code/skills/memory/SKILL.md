@@ -24,7 +24,7 @@ Memodi has **6 core tools** always in your context and **31 deferred tools** ava
 | `memodi_save` | Save observations (auto-generates semantic embedding) |
 | `memodi_search_hybrid` | Best search: keyword + semantic with RRF scoring |
 | `memodi_context` | Load recent observations for a project |
-| `memodi_workspace_start` | Register a parent folder as a workspace — the ONLY onboarding gate |
+| `memodi_workspace_start` | Register a folder as a workspace boundary — the ONLY onboarding gate |
 | `memodi_ping` | Check if server is alive |
 | `memodi_relate` | Create a relationship in the knowledge graph |
 
@@ -125,11 +125,18 @@ that command runs on a `not_started` path, follow these steps.
 
 **⚠️ CRITICAL: Never invent or guess a workspace name. The user decides — you wait.**
 
-memodi models workspaces like VS Code's multi-root workspace: you register the
-**parent folder** that holds multiple related repos (not each repo individually), and a
-path resolves to the workspace whose registered path is the longest matching prefix.
-A repo at `/home/user/work/repo-a` resolves through a workspace registered at
-`/home/user/work` — each repo then becomes its own project inside that workspace.
+Registering a folder makes it a workspace **boundary**. A path resolves to the
+workspace whose registered path is the longest matching prefix, so everything under
+that folder resolves there and each repo below becomes its own project. A repo at
+`/home/user/work/repo-a` resolves through a workspace registered at `/home/user/work`.
+
+**Register the folder the caller is standing in** — it is the one they are looking at
+and the one they mean. Offer the parent only when the cwd is clearly one repo among
+siblings meant to share memory, and ask rather than assume.
+
+A deeper registration wins over a broader one without touching it: that is how a
+sub-tree gets carved out into its own workspace later. And several paths may point at
+ONE workspace — more on this machine, more on others. That is how memory is shared.
 
 1. Load `ToolSearch("select:memodi_list_workspaces")` and call `memodi_list_workspaces`
    — this lists the workspaces already registered for the caller (owner-scoped: only
@@ -138,18 +145,17 @@ A repo at `/home/user/work/repo-a` resolves through a workspace registered at
    workspaces (the user set memodi up elsewhere first): show the list and ask the user
    to pick ONE. Pass the workspace name to `memodi_workspace_start` **EXACTLY as
    returned by the listing** — never retype, translate, or "clean up" it. Any drift
-   (typo, casing, extra whitespace) silently creates a brand-new workspace instead of
-   attaching to the existing one. **You never invent the name — the user always picks
+   drift silently creates a brand-new workspace instead of attaching to the existing
+   one. Case and surrounding whitespace are folded for you; nothing else is. **You never invent the name — the user always picks
    from what the listing returned, or explicitly asks for a new one.**
 3. **First machine / no fit** — if no existing workspace fits, ask the user for a short
-   descriptive name for the parent folder (e.g. "trabajo", "personal", "tesis") —
+   descriptive name for the folder (e.g. "trabajo", "personal", "tesis") —
    never a path, never a project name.
 4. **STOP and WAIT** for the user's answer. Do not proceed, do not assume, do not say
    "voy a crear el workspace X" before they've responded.
-5. Call `memodi_workspace_start(path=<parent folder>, workspace=<name the user gave or
-   picked>)`. Use the parent folder that contains the caller's repos, not the current
-   repo's own path — unless the user genuinely works out of a single repo.
-6. From then on, every path under that parent resolves automatically on this machine —
+5. Call `memodi_workspace_start(path=<cwd>, workspace=<name the user gave or picked>)`.
+   Use the current working directory unless the user asked for the parent.
+6. From then on, every path under that folder resolves automatically on this machine —
    no per-repo registration needed.
 
 ### Workspace naming rules

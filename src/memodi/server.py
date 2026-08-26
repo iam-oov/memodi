@@ -384,14 +384,18 @@ def memodi_list_workspaces(ctx: Context) -> str:
 
 @mcp.tool()
 def memodi_workspace_start(ctx: Context, path: str, workspace: str) -> str:
-    """Register a parent folder as a workspace on this machine.
+    """Register a folder as a workspace boundary on this machine.
 
     This is the ONLY onboarding gate — memodi is inert for unregistered
-    paths. Register the parent folder that contains your repos (VS Code
-    multi-root style); child paths resolve via longest-prefix match.
-    If the machine already lists workspaces, pass the name EXACTLY as
-    returned by memodi_list_workspaces so you attach to it instead of
-    creating a new one.
+    paths. Register the folder the user is standing in; every path under it
+    resolves here by longest-prefix, and each repo below becomes its own
+    project. A deeper registration wins over a broader one without touching
+    it, which is how a sub-tree gets carved out into its own workspace.
+
+    Several paths may point at ONE workspace — more than one on this machine,
+    more on others. That is how memory is shared: pass the name EXACTLY as
+    returned by memodi_list_workspaces to attach instead of creating a new
+    one. Case and surrounding whitespace are folded, nothing else is.
     """
     caller = _caller(ctx)
     if isinstance(caller, str):

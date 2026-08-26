@@ -9,23 +9,31 @@ The user ran `/memodi:start` to activate memodi memory for the current workspace
 - Current working directory: !`pwd`
 - Workspace name argument (may be empty): $ARGUMENTS
 
-The **parent folder** (default workspace root) is the current working
-directory minus its last path segment — derive it from the value above,
-no shell needed (e.g. `/Users/x/Personal/repo` → `/Users/x/Personal`).
+The **current working directory is the default workspace root** — you register
+the folder you are standing in. Its **parent** is that path minus its last
+segment (e.g. `/Users/x/Personal/repo` → `/Users/x/Personal`); offer it only
+when the user is clearly inside one repo of a group they want to share.
 
 Work through these steps in order. Be terse — this is an activation command, not a conversation.
 
 ## 1. Resolve the workspace
 
-Call `memodi_context` with `path` set to the current working directory above. Do NOT pass `project`.
+Load and call `memodi_list_paths` (`ToolSearch("select:memodi_list_paths")`) — every path this user has registered, on every machine. Then call `memodi_context` with `path` set to the current working directory above. Do NOT pass `project`.
 
-- **Resolved** (returns `observations` / `last_session`) → the workspace is ALREADY registered on this machine. Skip step 2 entirely. Do NOT ask for a name. Go to step 3.
+**Resolving is NOT the same as being registered.** A path resolves by longest-prefix from any ANCESTOR registration, so a folder deep under a registered parent answers like it belongs while having no boundary of its own. Read the listing, not just the context result:
+
+- **The cwd appears in the listing** (exact path, this machine) → genuinely registered. Skip step 2. Do NOT ask for a name. Go to step 3.
+- **`memodi_context` resolved, but the cwd is NOT in the listing** → an ancestor is covering it. Say which path and workspace are shadowing it, in one line, then ASK whether to register the cwd as its own workspace boundary, and WAIT. Registering it makes this folder its own root (longest prefix wins) without touching the ancestor. If the user declines, go to step 3.
 - **`{"type": "not_started"}`** → this path has no workspace on this machine. Go to step 2.
 - **`{"type": "not_authenticated"}`** → the api key is missing or invalid. Tell the user in ONE line to re-run `install.sh` with a valid key, then STOP.
 
 ## 2. Register the workspace (only if `not_started`)
 
-memodi groups related repos under a **parent folder** (like VS Code multi-root): you register the parent that holds your repos, and each repo under it becomes its own project. Registering the same workspace **name** on another machine is what makes memories shared cross-machine.
+Registering a folder makes it a workspace **boundary**: that folder is the root, and every repo under it becomes its own project. Register the folder the user is standing in — it is the one they are looking at, and the one they mean.
+
+The exception is standing INSIDE a single repo that belongs to a group meant to share memory (`.../Repos/tiriel-gateway-service` when the whole of `.../Repos` is one workspace). There, offer the parent instead — and ask, never assume.
+
+Registering the same workspace **name** on another machine, or on a second path of this one, is what makes memories shared: many paths, one workspace, one memory.
 
 First, load and call `memodi_list_workspaces` (`ToolSearch("select:memodi_list_workspaces")`) — these are the workspaces the user already owns, across ALL their machines.
 
@@ -37,13 +45,15 @@ Pick the name:
   - Map the selection back to the workspace's **exact stored name** yourself; the user must never have to retype it.
 - Else (no argument, no existing workspaces) → ask for a short descriptive name (e.g. `trabajo`, `personal`, `tesis`). Then WAIT.
 
-**Never invent, translate, or "clean up" a name.** To attach to an existing workspace the name must match byte-for-byte — any drift silently creates a separate one. Selection by number/option exists precisely to make that impossible.
+**Never invent or translate a name.** Case and surrounding whitespace are folded for you (`Tiriel`, `tiriel` and `  TIRIEL ` are one workspace), but nothing else is — `tiriel-automatice` is a different workspace from `tiriel`. Selection by number/option exists so the user never has to retype and drift.
 
-Register with the **parent folder** derived above as `path`, so sibling repos share the workspace:
+Before registering, check the listing from step 1: if the path you are about to register is already covered by an ancestor, say so and name the workspace that covers it, so the user knows this creates a NEW boundary rather than joining the old one.
 
-`memodi_workspace_start(path=<parent folder>, workspace=<name>)`
+Register the **current working directory** as `path`:
 
-State plainly what you registered: `workspace "<name>" → <parent folder> (this repo and its siblings share it)`. If the user actually works out of this single repo only, register the cwd instead — but default to the parent.
+`memodi_workspace_start(path=<cwd>, workspace=<name>)`
+
+State plainly what you registered: `workspace "<name>" → <cwd>`. If the cwd is one repo among siblings that should share the workspace, ask whether to register the parent instead — and WAIT — rather than silently registering a folder the user did not name.
 
 ## 3. Load cross-machine memories
 
