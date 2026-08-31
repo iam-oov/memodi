@@ -2,13 +2,13 @@
 
 ## What is this?
 
-MCP server (Python) that gives Claude Code persistent, distributed memory across workspaces and projects. Claude is the brain — memodi is the persistence layer.
+MCP server (Python) that gives Codex and Claude Code persistent, distributed memory across workspaces and projects. The coding agent is the brain — memodi is the persistence layer.
 
 ## Architecture
 
 ```
-Local dev:  Claude Code ──HTTP──► memodi-server (docker compose) ──► PostgreSQL (docker)
-Production: Claude Code ──HTTPS──► Cloudflare Tunnel ──► memodi-server (uv + systemd, x86 home server) ──► PostgreSQL (native)
+Local dev:  Codex / Claude Code ──HTTP──► memodi-server (docker compose) ──► PostgreSQL (docker)
+Production: Codex / Claude Code ──HTTPS──► Cloudflare Tunnel ──► memodi-server (uv + systemd, x86 home server) ──► PostgreSQL (native)
 ```
 
 ### Storage layers (PostgreSQL)
@@ -78,6 +78,20 @@ plugin/claude-code/
 ```
 
 The skill tells Claude WHEN and WHY to use memory. The MCP server handles HOW.
+
+The Codex distribution is a separate universal plugin:
+
+```
+.agents/plugins/marketplace.json       — repository marketplace
+plugins/memodi/
+├── .codex-plugin/plugin.json          — Codex plugin metadata
+├── .mcp.json                          — remote MCP connection with env-backed headers
+└── skills/memodi/SKILL.md             — activation, orientation, recall, and save workflow
+```
+
+`install-codex.sh` performs login, persists `MEMODI_API_KEY` and
+`MEMODI_MACHINE`, adds this repository as a Codex marketplace, and installs the
+plugin. Codex does not receive the Claude Code-specific hooks or slash commands.
 
 ### Activation flow (user-driven, silent otherwise)
 

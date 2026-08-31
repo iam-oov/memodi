@@ -11,7 +11,7 @@
   <img src="public/img/logo_repo.png" alt="memodi logo" width="600">
 </p>
 
-**Memoria Distribuida** - servidor MCP que le da a Claude Code memoria persistente entre workspaces, proyectos y maquinas. Guarda decisiones, bugs y descubrimientos de forma proactiva y los recupera por keyword, semantica o grafo - sin llamadas extra a LLMs.
+**Memoria Distribuida** - servidor MCP que le da a Codex y Claude Code memoria persistente entre workspaces, proyectos y maquinas. Guarda decisiones, bugs y descubrimientos de forma proactiva y los recupera por keyword, semantica o grafo - sin llamadas extra a LLMs.
 
 Una sola instancia de PostgreSQL hace todo: document store (JSONB), busqueda semantica (pgvector) y grafo de conocimiento (Apache AGE).
 
@@ -25,9 +25,9 @@ Tu producto no es un repo - son varios. El API, el worker, el servicio de billin
 
 Sin comando para guardar, sin comando para buscar. Solo trabajas; preguntar es suficiente.
 
-Esa memoria compartida es un **workspace** - ten tantos como necesites (trabajo, personal, tesis), cada uno aislado del resto. `/memodi:start` crea uno - o te une al que ya usas en otra maquina.
+Esa memoria compartida es un **workspace** - ten tantos como necesites (trabajo, personal, tesis), cada uno aislado del resto. `/memodi:start` en Claude Code o el flujo de activacion de `$memodi` en Codex crea uno - o te une al que ya usas en otra maquina.
 
-## Correr `/memodi:start`
+## Correr `/memodi:start` (Claude Code)
 
 La carpeta que registras decide cuanto comparten tus repos - es la unica decision que vale la pena pensar bien. `/memodi:start` registra por defecto **la carpeta donde estas parado**, y una sola corrida por (maquina, carpeta) alcanza. Parate donde quieras el limite.
 
@@ -59,11 +59,58 @@ Malos usos:
 - **Grafo de conocimiento** - dependencias entre repos y analisis de impacto transitivo ("que se rompe si cambio X?")
 - **Auto-linking** - escribir `[[topic-key]]` en una observacion crea la relacion `LINKS_TO` en el grafo
 - **Multi-maquina** - una key por usuario; registrar el mismo workspace en dos maquinas comparte las memorias
-- **Contexto automatico** - hooks de sesion cargan la memoria al abrir el repo e inyectan punteros relevantes en cada prompt
-- **Digest de sesion** - abrir una sesion imprime tus pendientes de la sesion anterior, directo en la terminal
+- **Contexto automatico en Claude Code** - hooks de sesion cargan la memoria al abrir el repo e inyectan punteros relevantes en cada prompt
+- **Flujo nativo para Codex** - el plugin de Codex empaqueta la conexion MCP y una skill para orientacion, activacion, consultas y guardado proactivo
+- **Digest de sesion en Claude Code** - abrir una sesion imprime tus pendientes de la sesion anterior, directo en la terminal
 - **Inerte por defecto** - un path no registrado devuelve `not_started`; nunca se auto-crean proyectos ni workspaces
 
-## Quick start
+## Quick start para Codex
+
+Necesitas una version reciente de [Codex CLI](https://learn.chatgpt.com/docs/codex/cli) con soporte para `codex plugin`. El instalador usa el mismo login por navegador que el de Claude Code, persiste las dos variables de entorno de Memodi, agrega este repositorio como marketplace de Codex e instala el plugin:
+
+```bash
+curl -sf https://raw.githubusercontent.com/iam-oov/memodi/main/install-codex.sh | sh
+```
+
+Para instalar en una maquina headless, obten una key en `https://memodi.valdoh.com/login` desde una maquina con navegador y corre:
+
+```bash
+export MEMODI_API_KEY=mmd_...
+curl -sf https://raw.githubusercontent.com/iam-oov/memodi/main/install-codex.sh | sh
+```
+
+El plugin lleva la configuracion del MCP remoto usando `MEMODI_API_KEY` y `MEMODI_MACHINE` como headers respaldados por variables de entorno; las credenciales nunca quedan en el manifest. Abre un thread nuevo de Codex en la carpeta que quieras recordar, invoca `$memodi` y pide activar el workspace. Codex mostrara los workspaces existentes antes de crear o enganchar uno.
+
+<details>
+<summary>Instalacion manual en Codex</summary>
+
+```bash
+export MEMODI_API_KEY="mmd_..."
+export MEMODI_MACHINE="$(hostname)"
+codex plugin marketplace add iam-oov/memodi --ref main
+codex plugin add memodi@memodi
+```
+
+Persiste ambas variables en tu shell profile antes de abrir un thread nuevo de Codex.
+
+</details>
+
+Actualiza volviendo a correr `install-codex.sh`, o con:
+
+```bash
+codex plugin marketplace upgrade memodi
+codex plugin add memodi@memodi
+```
+
+Desinstala con:
+
+```bash
+curl -sf https://raw.githubusercontent.com/iam-oov/memodi/main/uninstall-codex.sh | sh
+```
+
+Por ahora el plugin de Codex aporta las tools MCP y el comportamiento dirigido por la skill. Los hooks de sesion y slash commands exclusivos de Claude Code no se instalan en Codex.
+
+## Quick start para Claude Code
 
 Necesitas [Claude Code](https://docs.anthropic.com/en/docs/claude-code) y una API key de memodi (una por usuario). `install.sh` la obtiene automaticamente - abre un navegador para iniciar sesion con Google y le pasa la key directo al instalador, sin copiar ni pegar nada.
 
@@ -189,11 +236,11 @@ curl -sf https://raw.githubusercontent.com/iam-oov/memodi/main/uninstall.sh | sh
 ## Arquitectura
 
 ```
-Claude Code ──HTTPS──► Cloudflare Tunnel ──► memodi-server (uv + systemd) ──► PostgreSQL
+Codex / Claude Code ──HTTPS──► Cloudflare Tunnel ──► memodi-server ──► PostgreSQL
                        memodi.valdoh.com      home server (x86)                pgvector + AGE
 ```
 
-Claude decide que vale la pena recordar; memodi persiste y consulta.
+El agente decide que vale la pena recordar; memodi persiste y consulta.
 
 | Capa                  | Extension             | Para que                             |
 | --------------------- | --------------------- | ------------------------------------ |

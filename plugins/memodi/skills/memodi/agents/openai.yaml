@@ -1,0 +1,4 @@
+interface:
+  display_name: "Memodi"
+  short_description: "Persistent distributed memory for Codex"
+  default_prompt: "Activate Memodi for this workspace and load its context."

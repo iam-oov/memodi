@@ -1,0 +1,40 @@
+{
+  "name": "memodi",
+  "version": "0.29.0",
+  "description": "Persistent distributed memory for Codex across projects, workspaces, and machines.",
+  "author": {
+    "name": "Osvaldo Hinojosa",
+    "email": "osvaldo.javier14@gmail.com",
+    "url": "https://github.com/iam-oov"
+  },
+  "homepage": "https://github.com/iam-oov/memodi",
+  "repository": "https://github.com/iam-oov/memodi",
+  "license": "MIT",
+  "keywords": [
+    "memory",
+    "mcp",
+    "codex",
+    "knowledge-graph",
+    "semantic-search"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Memodi",
+    "shortDescription": "Persistent memory for Codex projects",
+    "longDescription": "Memodi gives Codex shared, persistent memory across repositories and machines, with hybrid search and a knowledge graph.",
+    "developerName": "Osvaldo Hinojosa",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/iam-oov/memodi",
+    "brandColor": "#6D5DFC",
+    "defaultPrompt": [
+      "Activate Memodi for this workspace and load its context.",
+      "What does Memodi remember about this project?",
+      "Search Memodi for prior decisions related to this task."
+    ]
+  },
+  "mcpServers": "./.mcp.json"
+}

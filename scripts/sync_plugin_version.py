@@ -1,4 +1,4 @@
-"""Sync plugin.json version with the package SSoT (src/memodi/__about__.py).
+"""Sync plugin versions with the package SSoT (src/memodi/__about__.py).
 
 Usage:
     python scripts/sync_plugin_version.py           # writes plugin.json
@@ -16,6 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 ABOUT_FILE = ROOT / "src" / "memodi" / "__about__.py"
 PLUGIN_FILE = ROOT / "plugin" / "claude-code" / ".claude-plugin" / "plugin.json"
+CODEX_PLUGIN_FILE = ROOT / "plugins" / "memodi" / ".codex-plugin" / "plugin.json"
 MARKETPLACE_FILE = ROOT / ".claude-plugin" / "marketplace.json"
 
 VERSION_RE = re.compile(r"""^__version__\s*=\s*["']([^"']+)["']""", re.MULTILINE)
@@ -37,7 +38,7 @@ def read_plugin_version(plugin_file: Path) -> str:
 
 
 def write_plugin_version(plugin_file: Path, version: str) -> None:
-    """Update the version field in plugin.json, preserving 2-space indent and trailing newline."""
+    """Update plugin.json's version while preserving its formatting."""
     data = json.loads(plugin_file.read_text())
     data["version"] = version
     plugin_file.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
@@ -69,12 +70,15 @@ def main(argv: list[str] | None = None) -> int:
 
     pkg = read_package_version(ABOUT_FILE)
     plugin = read_plugin_version(PLUGIN_FILE)
+    codex_plugin = read_plugin_version(CODEX_PLUGIN_FILE)
     marketplace = read_marketplace_version(MARKETPLACE_FILE)
 
     if args.check:
         mismatched = []
         if pkg != plugin:
-            mismatched.append(f"plugin.json={plugin}")
+            mismatched.append(f"claude plugin.json={plugin}")
+        if pkg != codex_plugin:
+            mismatched.append(f"codex plugin.json={codex_plugin}")
         if pkg != marketplace:
             mismatched.append(f"marketplace.json={marketplace}")
         if mismatched:
@@ -91,10 +95,16 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if pkg == plugin:
-        print(f"plugin.json already in sync at {pkg}")
+        print(f"Claude plugin.json already in sync at {pkg}")
     else:
         write_plugin_version(PLUGIN_FILE, pkg)
-        print(f"Updated plugin.json: {plugin} -> {pkg}")
+        print(f"Updated Claude plugin.json: {plugin} -> {pkg}")
+
+    if pkg == codex_plugin:
+        print(f"Codex plugin.json already in sync at {pkg}")
+    else:
+        write_plugin_version(CODEX_PLUGIN_FILE, pkg)
+        print(f"Updated Codex plugin.json: {codex_plugin} -> {pkg}")
 
     if pkg == marketplace:
         print(f"marketplace.json already in sync at {pkg}")

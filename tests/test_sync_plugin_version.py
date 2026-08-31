@@ -214,10 +214,13 @@ def _write_fixture_files(
     about.write_text(f'__version__ = "{pkg_version}"\n')
     plugin = tmp_path / "plugin.json"
     plugin.write_text(json.dumps({"version": plugin_version}))
+    codex_plugin = tmp_path / "codex-plugin.json"
+    codex_plugin.write_text(json.dumps({"version": plugin_version}))
     marketplace = tmp_path / "marketplace.json"
     marketplace.write_text(json.dumps({"plugins": [{"version": marketplace_version}]}))
     monkeypatch.setattr(sync_plugin_version, "ABOUT_FILE", about)
     monkeypatch.setattr(sync_plugin_version, "PLUGIN_FILE", plugin)
+    monkeypatch.setattr(sync_plugin_version, "CODEX_PLUGIN_FILE", codex_plugin)
     monkeypatch.setattr(sync_plugin_version, "MARKETPLACE_FILE", marketplace)
 
 
@@ -240,7 +243,22 @@ class TestMainCheck:
     ) -> None:
         _write_fixture_files(tmp_path, monkeypatch, "1.0.0", "0.9.0", "1.0.0")
         assert sync_plugin_version.main(["--check"]) == 1
-        assert "plugin.json=0.9.0" in capsys.readouterr().err
+        error = capsys.readouterr().err
+        assert "claude plugin.json=0.9.0" in error
+        assert "codex plugin.json=0.9.0" in error
+
+    def test_fails_when_only_codex_plugin_json_is_out_of_sync(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture,
+    ) -> None:
+        _write_fixture_files(tmp_path, monkeypatch, "1.0.0", "1.0.0", "1.0.0")
+        sync_plugin_version.CODEX_PLUGIN_FILE.write_text(
+            json.dumps({"version": "0.9.0"})
+        )
+        assert sync_plugin_version.main(["--check"]) == 1
+        assert "codex plugin.json=0.9.0" in capsys.readouterr().err
 
     def test_fails_when_marketplace_json_out_of_sync(
         self,
@@ -254,13 +272,17 @@ class TestMainCheck:
 
 
 class TestMainWrite:
-    def test_writes_both_files_when_out_of_sync(
+    def test_writes_all_files_when_out_of_sync(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _write_fixture_files(tmp_path, monkeypatch, "2.0.0", "1.0.0", "1.0.0")
         assert sync_plugin_version.main([]) == 0
         assert (
             json.loads(sync_plugin_version.PLUGIN_FILE.read_text())["version"]
+            == "2.0.0"
+        )
+        assert (
+            json.loads(sync_plugin_version.CODEX_PLUGIN_FILE.read_text())["version"]
             == "2.0.0"
         )
         assert (

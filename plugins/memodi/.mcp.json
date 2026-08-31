@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "memodi": {
+      "type": "http",
+      "url": "https://memodi.valdoh.com/mcp",
+      "env_http_headers": {
+        "X-Memodi-Api-Key": "MEMODI_API_KEY",
+        "X-Memodi-Machine": "MEMODI_MACHINE"
+      }
+    }
+  }
+}
