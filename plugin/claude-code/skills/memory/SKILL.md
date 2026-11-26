@@ -10,7 +10,7 @@ This protocol is MANDATORY and ALWAYS ACTIVE — not something you activate on d
 
 ## TOOL LOADING
 
-Memodi has **6 core tools** always in your context and **31 deferred tools** available via ToolSearch.
+Memodi has **6 core tools** always in your context and **36 deferred tools** available via ToolSearch.
 
 - **Core tools** — ready to use immediately, no extra steps needed
 - **Deferred tools** — call `ToolSearch("select:memodi_toolname")` to load them first
@@ -35,13 +35,14 @@ Memodi has **6 core tools** always in your context and **31 deferred tools** ava
 - `memodi_search_similar` — semantic search (finds by meaning, not words)
 - `memodi_search_global` — keyword search across ALL of the caller's OWN projects (owner-scoped, not cross-user)
 
-**Workspace admin** — `ToolSearch("select:memodi_list_workspaces,memodi_list_projects,memodi_merge_projects,memodi_delete_workspace,memodi_rename_workspace,memodi_purge_workspace")`
+**Workspace admin** — `ToolSearch("select:memodi_list_workspaces,memodi_list_projects,memodi_merge_projects,memodi_delete_workspace,memodi_rename_workspace,memodi_purge_workspace,memodi_set_coordinator")`
 - `memodi_list_workspaces` — list the caller's own workspaces with project count
 - `memodi_list_projects` — list the caller's own known projects and workspace assignments
 - `memodi_merge_projects` — repair tool: merge one project into another, moving observations/sessions/workflows (destructive, dry_run default)
 - `memodi_delete_workspace` — delete a workspace
 - `memodi_rename_workspace` — rename a workspace
 - `memodi_purge_workspace` — wipe workspace data for dev-loop resets (destructive, dry_run default)
+- `memodi_set_coordinator` — mark the project at `path` as the workspace coordinator (`enabled=False` unmarks); only when the user asks
 
 **Graph queries** — `ToolSearch("select:memodi_dependencies,memodi_impact,memodi_graph_overview,memodi_remove_relation,memodi_delete_relation")`
 - `memodi_dependencies` — show what depends on what (current relationships only). Pass `path` to also see `links_to`/`linked_from` — the LINKS_TO edges auto-created from `[[topic-key]]` wiki-links, scoped to that workspace. Omit `path` for DEPENDS_ON only, same as before.
@@ -374,6 +375,10 @@ Also search memory PROACTIVELY when:
 you pass: from a repo you get that repo's own observations plus any that list it in `affects`;
 from the registered workspace root you get every project in the workspace. So when you need
 the wide view, pass the root as `path` instead of reaching for `memodi_search_global`.
+
+A project marked with `memodi_set_coordinator` reads like the root — every project in the
+workspace — while its own saves stay in its project, which no other project reads. Its
+`last_session` is still its own.
 
 ## Automatic context on your prompts
 

@@ -452,6 +452,24 @@ def memodi_workspace_forget(ctx: Context, path: str) -> str:
 
 
 @mcp.tool()
+def memodi_set_coordinator(ctx: Context, path: str, enabled: bool = True) -> str:
+    """Mark the project at `path` as its workspace's coordinator, or unmark it.
+
+    A coordinator reads every project's observations in the workspace, the
+    way the registered root does, while still saving into its own project —
+    which no other project reads. Its context still resumes only its own
+    sessions. Refused at a registered workspace root, which already reads
+    everything. The flag lives on the project, so it holds on every machine.
+    """
+    caller = _caller(ctx)
+    if isinstance(caller, str):
+        return caller
+    return memory.set_coordinator(
+        path, caller["user_id"], caller["machine"], enabled
+    )
+
+
+@mcp.tool()
 def memodi_merge_projects(
     ctx: Context,
     source_project_id: str,

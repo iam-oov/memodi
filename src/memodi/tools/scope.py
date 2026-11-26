@@ -37,6 +37,10 @@ def workspace_root_project(workspace: dict) -> str | None:
     return repository.normalize_name(workspace.get("name")) or None
 
 
+def is_coordinator(project: dict | None) -> bool:
+    return bool(project and (project.get("metadata") or {}).get("coordinator"))
+
+
 def scoped_project_names(workspace: dict, path: str) -> dict:
     """Read scope for a path, as project NAMES — ready to splat into
     repository.search_observations_by_workspace.
@@ -48,7 +52,11 @@ def scoped_project_names(workspace: dict, path: str) -> dict:
     """
     normalized = path.rstrip("/")
     own = repository.normalize_name(os.path.basename(normalized)) or None
-    if own is None or normalized == workspace.get("matched_path"):
+    if (
+        own is None
+        or normalized == workspace.get("matched_path")
+        or is_coordinator(repository.get_project_by_name(own, workspace["id"]))
+    ):
         return {"project_names": None, "affects_name": None, "inherited_names": None}
     root = workspace_root_project(workspace)
     return {
@@ -106,9 +114,7 @@ def resolve_project(user_id: str, machine: str, path: str, project: str | None) 
     # counts as sitting at the root even when the cwd is the registered path.
     at_root = project is None and normalized == workspace.get("matched_path")
     name = project or (
-        workspace_root_project(workspace)
-        if at_root
-        else os.path.basename(normalized)
+        workspace_root_project(workspace) if at_root else os.path.basename(normalized)
     )
     if not name:
         raise ValueError(
@@ -119,6 +125,7 @@ def resolve_project(user_id: str, machine: str, path: str, project: str | None) 
     return {
         **resolved,
         "at_workspace_root": at_root,
+        "reads_workspace": at_root or (project is None and is_coordinator(resolved)),
         "inherited_ids": None
         if at_root
         else _inherited_ids(resolved, workspace, project),

@@ -162,6 +162,23 @@ def get_project_by_name(name: str, workspace_id: str) -> dict | None:
     return dict(row) if row else None
 
 
+def set_project_coordinator(project_id: str, enabled: bool) -> dict:
+    conn = get_connection()
+    row = conn.execute(
+        """
+        UPDATE projects
+        SET metadata = jsonb_set(
+                COALESCE(metadata, '{}'::jsonb), '{coordinator}', to_jsonb(%s::boolean)
+            ),
+            updated_at = now()
+        WHERE id = %s RETURNING *
+        """,
+        (enabled, project_id),
+    ).fetchone()
+    conn.commit()
+    return dict(row)
+
+
 def get_or_create_project(name: str, workspace_id: str) -> dict:
     conn = get_connection()
     name = normalize_name(name)
