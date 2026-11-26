@@ -10,8 +10,8 @@ from memodi.tools.errors import handle_errors
 from memodi.tools.scope import (
     require_workspace,
     resolve_project,
-    scoped_project_ids,
     scoped_project_names,
+    scoped_session_ids,
 )
 from memodi.tools.serialization import (
     serialize_clusters,
@@ -461,7 +461,7 @@ def digest_for_session_start(path: str, user_id: str, machine: str) -> str:
     _ensure()
     workspace = require_workspace(user_id, machine, path)
 
-    scope_ids = scoped_project_ids(workspace, path)
+    scope_ids = scoped_session_ids(workspace, path)
     if scope_ids is not None and not scope_ids:
         # No project here and none at the root: nothing is in scope. Falling
         # through would hand the whole workspace back and surface a sibling
