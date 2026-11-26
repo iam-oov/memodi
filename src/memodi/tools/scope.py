@@ -50,14 +50,19 @@ def scoped_project_names(workspace: dict, path: str) -> dict:
     and must never write, so it can never take resolve_project's
     get-or-create path.
     """
-    normalized = path.rstrip("/")
-    own = repository.normalize_name(os.path.basename(normalized)) or None
-    if (
-        own is None
-        or normalized == workspace.get("matched_path")
-        or is_coordinator(repository.get_project_by_name(own, workspace["id"]))
+    names = _narrowed_names(workspace, path)
+    if names is None or is_coordinator(
+        repository.get_project_by_name(names["affects_name"], workspace["id"])
     ):
         return {"project_names": None, "affects_name": None, "inherited_names": None}
+    return names
+
+
+def _narrowed_names(workspace: dict, path: str) -> dict | None:
+    normalized = path.rstrip("/")
+    own = repository.normalize_name(os.path.basename(normalized)) or None
+    if own is None or normalized == workspace.get("matched_path"):
+        return None
     root = workspace_root_project(workspace)
     return {
         "project_names": [own],
@@ -66,7 +71,7 @@ def scoped_project_names(workspace: dict, path: str) -> dict:
     }
 
 
-def scoped_project_ids(workspace: dict, path: str) -> list[str] | None:
+def scoped_session_ids(workspace: dict, path: str) -> list[str] | None:
     """Existing project ids a path reads from — its own and the workspace
     root's — resolved WITHOUT creating anything.
 
@@ -76,8 +81,8 @@ def scoped_project_ids(workspace: dict, path: str) -> list[str] | None:
     apart, because the SQL scope predicate treats an empty id list as
     "no filter".
     """
-    names = scoped_project_names(workspace, path)
-    if names["project_names"] is None:
+    names = _narrowed_names(workspace, path)
+    if names is None:
         return None
     wanted = [*names["project_names"], *(names["inherited_names"] or [])]
     ids = []

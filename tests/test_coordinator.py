@@ -8,6 +8,7 @@ from memodi.database.connection import ensure_schema
 from memodi.server import CORE_TOOLS, _list_tools_with_deferred
 from memodi.tools.memory import (
     context,
+    digest_for_session_start,
     save,
     search,
     search_for_prompt,
@@ -186,6 +187,60 @@ def test_coordinator_resumes_only_its_own_session(family):
         "last_session"
     ]
     assert last["summary"] == "Coordinator session summary"
+
+
+def _close_session_with_step(family: dict, path: str, step: str) -> None:
+    session_start(path=path, **_caller(family))
+    session_end(
+        path=path,
+        summary=f"## Goal\ng\n## Accomplished\na\n## Next Steps\n- {step}",
+        **_caller(family),
+    )
+
+
+def _digest(family: dict, path: str) -> str:
+    return json.loads(digest_for_session_start(path=path, **_caller(family)))["digest"]
+
+
+def test_coordinator_digest_shows_only_its_own_next_steps(family):
+    _mark(family)
+    # The child's session ends last, so a workspace-wide session scope would
+    # put the child's pending list under the coordinator's name.
+    _close_session_with_step(family, family["coordinator_path"], "coordinator step")
+    _close_session_with_step(family, family["child_path"], "child step")
+
+    digest = _digest(family, family["coordinator_path"])
+
+    assert "coordinator step" in digest
+    assert "child step" not in digest
+
+
+def test_coordinator_digest_still_lists_a_child_todo(family):
+    _mark(family)
+    ack = json.loads(
+        save(
+            path=family["child_path"],
+            title="Child pending migration",
+            content="Child pending migration body",
+            type="decision",
+            horizon="todo",
+            **_caller(family),
+        )
+    )
+    assert "error" not in ack, ack
+
+    assert "Child pending migration" in _digest(family, family["coordinator_path"])
+
+
+def test_child_digest_never_shows_the_coordinator_next_steps(family):
+    _mark(family)
+    _close_session_with_step(family, family["child_path"], "child step")
+    _close_session_with_step(family, family["coordinator_path"], "coordinator step")
+
+    digest = _digest(family, family["child_path"])
+
+    assert "child step" in digest
+    assert "coordinator step" not in digest
 
 
 @pytest.mark.asyncio
