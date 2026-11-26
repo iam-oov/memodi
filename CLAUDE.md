@@ -63,6 +63,7 @@ Deploy authenticates to Cloudflare Access with a service token (`cloudflared acc
 plugin/claude-code/
 ├── .claude-plugin/plugin.json    — plugin metadata
 ├── hooks/hooks.json              — SessionStart / SubagentStop / SessionEnd hooks
+├── scripts/resolve_path.py       — maps every hook's cwd to the repo root (subfolder, git worktree, MEMODI_PATH)
 ├── scripts/session-start.sh      — silent workspace resolution + session open on session start
 ├── scripts/session-digest.sh     — user-visible pending list (last session's next steps, max 5) at session start
 ├── scripts/session-end.sh        — hygiene session close on session end (plain HTTP)

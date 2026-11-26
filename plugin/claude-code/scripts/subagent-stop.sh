@@ -28,7 +28,9 @@ AGENT_TYPE=$(printf '%s' "$INPUT" | python3 -c "import sys,json; print(json.load
 # Nothing to capture
 [ -z "$MESSAGE" ] && exit 0
 
-CWD="${CWD:-$PWD}"
+RAW_CWD="${CWD:-$PWD}"
+CWD=$(python3 -I "$(dirname "$0")/resolve_path.py" "$RAW_CWD" 2>/dev/null)
+CWD="${CWD:-$RAW_CWD}"
 
 # --- Extract key sections ---
 # Truncated because the server caps the capture body at 64KB: a long

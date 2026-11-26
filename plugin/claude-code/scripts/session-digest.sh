@@ -9,7 +9,9 @@
 
 INPUT=$(cat)
 CWD=$(printf '%s' "$INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('cwd',''))" 2>/dev/null)
-CWD="${CWD:-$PWD}"
+RAW_CWD="${CWD:-$PWD}"
+CWD=$(python3 -I "$(dirname "$0")/resolve_path.py" "$RAW_CWD" 2>/dev/null)
+CWD="${CWD:-$RAW_CWD}"
 
 [ -z "$MEMODI_API_KEY" ] && exit 0
 

@@ -25,7 +25,9 @@ CWD=$(printf '%s' "$INPUT" | python3 -c "import sys,json; print(json.load(sys.st
 # Nothing to search
 [ -z "$PROMPT" ] && exit 0
 
-CWD="${CWD:-$PWD}"
+RAW_CWD="${CWD:-$PWD}"
+CWD=$(python3 -I "$(dirname "$0")/resolve_path.py" "$RAW_CWD" 2>/dev/null)
+CWD="${CWD:-$RAW_CWD}"
 
 # --- Truncate the prompt before it ever leaves this machine ---
 MAX_QUERY=2000

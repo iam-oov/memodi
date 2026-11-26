@@ -16,7 +16,9 @@
 INPUT=$(cat)
 CWD=$(printf '%s' "$INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('cwd',''))" 2>/dev/null)
 SESSION_ID=$(printf '%s' "$INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('session_id',''))" 2>/dev/null)
-CWD="${CWD:-$PWD}"
+RAW_CWD="${CWD:-$PWD}"
+CWD=$(python3 -I "$(dirname "$0")/resolve_path.py" "$RAW_CWD" 2>/dev/null)
+CWD="${CWD:-$RAW_CWD}"
 
 # --- Server URL (env var or production default) ---
 MEMODI_URL="${MEMODI_URL:-https://memodi.valdoh.com}"
@@ -69,6 +71,14 @@ else
 / Next Steps)."
 fi
 
+REPO_NOTE=""
+if [ "$CWD" != "$RAW_CWD" ]; then
+  REPO_NOTE="
+Your folder (${RAW_CWD}) belongs to the repo at ${CWD}. Use path: \"${CWD}\"
+on EVERY memodi call this session, never the folder itself.
+"
+fi
+
 # --- Inject context-loading protocol ---
 cat <<EOF
 ## Memodi Memory — Session Start (resolve silently)
@@ -77,7 +87,7 @@ This hook manages the memodi session for this workspace — do NOT call
 memodi_session_start yourself. Resolve context ONCE this session, before
 responding. Do this SILENTLY — no status line, no announcement, no mention
 of memodi.
-
+${REPO_NOTE}
 1. Call memodi_context with path: "${CWD}" — do NOT pass project; let
    memodi derive it from path.
 

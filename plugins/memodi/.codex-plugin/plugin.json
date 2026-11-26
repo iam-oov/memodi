@@ -1,6 +1,6 @@
 {
   "name": "memodi",
-  "version": "0.31.0",
+  "version": "0.32.0",
   "description": "Persistent distributed memory for Codex across projects, workspaces, and machines.",
   "author": {
     "name": "Osvaldo Hinojosa",
