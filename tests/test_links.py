@@ -21,6 +21,7 @@ SAVE_ACK_FIELDS = {
     "duplicate_count",
     "created_at",
     "updated_at",
+    "horizon",
 }
 
 

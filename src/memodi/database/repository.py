@@ -50,6 +50,19 @@ ALLOWED_TYPES = {
     "session",
 }
 
+ALLOWED_HORIZONS = ("todo", "long", "medium", "short")
+
+_HORIZON_BY_TYPE = {
+    "preference": "long",
+    "pattern": "long",
+    "decision": "medium",
+    "architecture": "medium",
+}
+
+
+def horizon_for_type(type: str) -> str:
+    return _HORIZON_BY_TYPE.get(type, "short")
+
 
 def get_or_create_workspace(name: str, owner_user_id: str) -> dict:
     conn = get_connection()
@@ -653,9 +666,12 @@ def save_observation(
     embedding: list[float] | None = None,
     occurred_at: str | None = None,
     affects: list[str] | None = None,
+    horizon: str | None = None,
 ) -> dict:
     if type not in ALLOWED_TYPES:
         raise ValueError(f"type must be one of: {', '.join(sorted(ALLOWED_TYPES))}")
+    if horizon is not None and horizon not in ALLOWED_HORIZONS:
+        raise ValueError(f"horizon must be one of: {', '.join(ALLOWED_HORIZONS)}")
 
     conn = get_connection()
     base_meta = dict(metadata or {})
@@ -693,6 +709,7 @@ def save_observation(
                         embedding = %s,
                         content_hash = %s,
                         occurred_at = COALESCE(%s, occurred_at),
+                        horizon = COALESCE(%s, horizon),
                         revision_count = revision_count + 1,
                         updated_at = now()
                     WHERE id = %s
@@ -707,6 +724,7 @@ def save_observation(
                         str(embedding),
                         chash,
                         occurred_at,
+                        horizon,
                         existing["id"],
                     ),
                 ).fetchone()
@@ -721,6 +739,7 @@ def save_observation(
                         metadata = %s,
                         content_hash = %s,
                         occurred_at = COALESCE(%s, occurred_at),
+                        horizon = COALESCE(%s, horizon),
                         revision_count = revision_count + 1,
                         updated_at = now()
                     WHERE id = %s
@@ -734,6 +753,7 @@ def save_observation(
                         meta,
                         chash,
                         occurred_at,
+                        horizon,
                         existing["id"],
                     ),
                 ).fetchone()
@@ -778,13 +798,14 @@ def save_observation(
         result["_deduplicated"] = True
         return result
 
+    new_horizon = horizon or horizon_for_type(type)
     if embedding is not None:
         row = conn.execute(
             """
             INSERT INTO observations
                 (project_id, session_id, type, title, content,
-                 topic_key, metadata, embedding, content_hash, occurred_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 topic_key, metadata, embedding, content_hash, occurred_at, horizon)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING *
             """,
             (
@@ -798,6 +819,7 @@ def save_observation(
                 str(embedding),
                 chash,
                 occurred_at,
+                new_horizon,
             ),
         ).fetchone()
     else:
@@ -805,8 +827,8 @@ def save_observation(
             """
             INSERT INTO observations
                 (project_id, session_id, type, title, content,
-                 topic_key, metadata, content_hash, occurred_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 topic_key, metadata, content_hash, occurred_at, horizon)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING *
             """,
             (
@@ -819,6 +841,7 @@ def save_observation(
                 meta,
                 chash,
                 occurred_at,
+                new_horizon,
             ),
         ).fetchone()
     conn.commit()
@@ -1010,11 +1033,13 @@ def search_observations_by_workspace(
     project_names: list[str] | None = None,
     affects_name: str | None = None,
     inherited_names: list[str] | None = None,
+    short_days: int | None = None,
 ) -> list[dict]:
     conn = get_connection()
     scope, scope_params = _project_name_scope(
         project_names, affects_name, inherited_names
     )
+    live, live_params = _live_horizon_filter(short_days)
     rows = conn.execute(
         f"""
         WITH q AS (
@@ -1032,11 +1057,127 @@ def search_observations_by_workspace(
           AND o.deleted_at IS NULL AND o.superseded_by IS NULL
           AND o.search_vector @@ to_tsquery('simple', q.tsq)
           {scope}
+          {live}
         ORDER BY rank DESC LIMIT %s
         """,
-        [query, list(PROMPT_STOPWORDS), workspace_id, *scope_params, limit],
+        [
+            query,
+            list(PROMPT_STOPWORDS),
+            workspace_id,
+            *scope_params,
+            *live_params,
+            limit,
+        ],
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+def get_open_todos_by_workspace(
+    workspace_id: str,
+    limit: int,
+    project_names: list[str] | None = None,
+    affects_name: str | None = None,
+    inherited_names: list[str] | None = None,
+) -> list[dict]:
+    conn = get_connection()
+    scope, scope_params = _project_name_scope(
+        project_names, affects_name, inherited_names
+    )
+    rows = conn.execute(
+        f"""
+        SELECT o.id, o.title, p.name AS project
+        FROM observations o
+        JOIN projects p ON p.id = o.project_id
+        WHERE p.workspace_id = %s
+          AND o.horizon = 'todo'
+          AND o.resolved_at IS NULL
+          AND o.deleted_at IS NULL
+          AND o.superseded_by IS NULL
+          {scope}
+        ORDER BY o.updated_at DESC
+        LIMIT %s
+        """,
+        (workspace_id, *scope_params, limit),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def _live_horizon_filter(short_days: int | None) -> tuple[str, list]:
+    if short_days is None:
+        return "", []
+    return (
+        "AND NOT (o.horizon = 'short'"
+        " AND o.updated_at <= now() - make_interval(days => %s))"
+        " AND NOT (o.horizon = 'todo' AND o.resolved_at IS NOT NULL)",
+        [short_days],
+    )
+
+
+def get_context_observations(
+    project_ids: str | list[str] | None,
+    workspace_id: str,
+    limit: int,
+    short_days: int,
+    project_name: str | None = None,
+    inherited_ids: str | list[str] | None = None,
+) -> list[dict]:
+    conn = get_connection()
+    scope, scope_params = _project_scope(
+        project_ids, project_name, alias="o", inherited_ids=inherited_ids
+    )
+    live, live_params = _live_horizon_filter(short_days)
+    rows = conn.execute(
+        f"""
+        WITH ranked AS (
+            SELECT o.*, p.name AS project,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY o.horizon
+                       ORDER BY CASE
+                           WHEN o.horizon = 'long' THEN o.updated_at
+                           ELSE COALESCE(o.occurred_at, o.created_at)
+                       END DESC
+                   ) AS horizon_rank
+            FROM observations o
+            JOIN projects p ON p.id = o.project_id
+            WHERE p.workspace_id = %s
+              AND o.deleted_at IS NULL
+              AND o.superseded_by IS NULL
+              {scope}
+              {live}
+        )
+        SELECT * FROM ranked
+        WHERE horizon_rank <= %s
+        ORDER BY array_position(%s::text[], horizon), horizon_rank
+        """,
+        (
+            workspace_id,
+            *scope_params,
+            *live_params,
+            limit,
+            list(ALLOWED_HORIZONS),
+        ),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def resolve_todo(observation_id: str, workspace_id: str) -> dict | None:
+    conn = get_connection()
+    row = conn.execute(
+        """
+        UPDATE observations o
+        SET resolved_at = COALESCE(o.resolved_at, now()), updated_at = now()
+        FROM projects p
+        WHERE o.id = %s
+          AND p.id = o.project_id
+          AND p.workspace_id = %s
+          AND o.horizon = 'todo'
+          AND o.deleted_at IS NULL
+        RETURNING o.id, o.title, o.resolved_at
+        """,
+        (observation_id, workspace_id),
+    ).fetchone()
+    conn.commit()
+    return dict(row) if row else None
 
 
 def get_recent_observations(

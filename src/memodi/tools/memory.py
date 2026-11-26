@@ -3,6 +3,7 @@ import re
 import uuid
 from datetime import UTC, datetime
 
+from memodi.config import settings
 from memodi.database import graph_repository, repository
 from memodi.database.connection import ensure_schema, rollback
 from memodi.tools.errors import handle_errors
@@ -25,6 +26,8 @@ from memodi.tools.serialization import (
 )
 
 INVALID_OBSERVATION_ID = "invalid observation id"
+
+CONTEXT_LIMIT_PER_HORIZON = 10
 
 MAX_SUPERSEDES = 20
 
@@ -329,10 +332,15 @@ def save(
     occurred_at: str | None = None,
     supersedes: str | list[str] | None = None,
     affects: list[str] | None = None,
+    horizon: str | None = None,
 ) -> str:
     _ensure()
     from memodi.embeddings import generate_embedding
 
+    if horizon is not None and horizon not in repository.ALLOWED_HORIZONS:
+        raise ValueError(
+            f"horizon must be one of: {', '.join(repository.ALLOWED_HORIZONS)}"
+        )
     affected, affects_reason = _normalize_affects(affects)
     proj = resolve_project(user_id, machine, path, project)
     embedding = generate_embedding(f"{title} {content}")
@@ -351,6 +359,7 @@ def save(
         embedding=embedding,
         occurred_at=occurred_at,
         affects=affected,
+        horizon=horizon,
     )
     ack = serialize_observation_save(obs)
     if affects_reason:
@@ -396,7 +405,11 @@ def search_for_prompt(
         return json.dumps([])
     workspace = require_workspace(user_id, machine, path)
     results = repository.search_observations_by_workspace(
-        workspace["id"], query, limit, **scoped_project_names(workspace, path)
+        workspace["id"],
+        query,
+        limit,
+        short_days=settings.short_horizon_days,
+        **scoped_project_names(workspace, path),
     )
     return json.dumps(serialize_prompt_search(results), default=str)
 
@@ -437,7 +450,8 @@ def _summary_sections(summary: str) -> dict[str, list[str]]:
 
 @handle_errors
 def digest_for_session_start(path: str, user_id: str, machine: str) -> str:
-    """The last session's pending next steps, capped at DIGEST_MAX_STEPS.
+    """Open todos in scope plus the last session's pending next steps, each
+    capped at DIGEST_MAX_STEPS.
 
     Backs the SessionStart digest hook: the model loads its context through
     memodi_context; this short todo list is shown to the USER at startup.
@@ -454,21 +468,28 @@ def digest_for_session_start(path: str, user_id: str, machine: str) -> str:
         # repo's todo list in a folder that has never been worked in.
         return json.dumps({"digest": ""})
 
+    todos = repository.get_open_todos_by_workspace(
+        workspace["id"], DIGEST_MAX_STEPS, **scoped_project_names(workspace, path)
+    )
     last_session = repository.get_latest_session_summary(
         scope_ids, workspace_id=workspace["id"]
     )
-    if not last_session:
-        return json.dumps({"digest": ""})
-
-    sections = _summary_sections(last_session["summary"] or "")
+    sections = _summary_sections((last_session or {}).get("summary") or "")
     steps = sections.get("next steps", [])[:DIGEST_MAX_STEPS]
-    if not steps:
-        return json.dumps({"digest": ""})
 
-    age = _relative_age(last_session["ended_at"], datetime.now(UTC))
-    lines = [f"memodi — {workspace['name']} · pending ({age})"]
-    lines.extend(f"  {i}. {_clip(step)}" for i, step in enumerate(steps, start=1))
+    lines = []
+    if todos:
+        lines.append(f"memodi — {workspace['name']} · open todos")
+        lines.extend(_numbered(todo["title"] for todo in todos))
+    if steps:
+        age = _relative_age(last_session["ended_at"], datetime.now(UTC))
+        lines.append(f"memodi — {workspace['name']} · pending ({age})")
+        lines.extend(_numbered(steps))
     return json.dumps({"digest": "\n".join(lines)})
+
+
+def _numbered(items) -> list[str]:
+    return [f"  {i}. {_clip(item)}" for i, item in enumerate(items, start=1)]
 
 
 @handle_errors
@@ -506,16 +527,17 @@ def context(
     user_id: str,
     machine: str,
     project: str | None = None,
-    limit: int = 20,
+    limit: int = CONTEXT_LIMIT_PER_HORIZON,
 ) -> str:
     _ensure()
     proj = resolve_project(user_id, machine, path, project)
     last_session = repository.get_latest_session_summary(
         _session_scope(proj), workspace_id=proj["workspace_id"]
     )
-    observations = repository.get_recent_observations(
-        limit=limit,
+    observations = repository.get_context_observations(
         workspace_id=proj["workspace_id"],
+        limit=limit,
+        short_days=settings.short_horizon_days,
         **_search_scope(proj),
     )
     return json.dumps(
@@ -540,6 +562,24 @@ def get_observation(path: str, user_id: str, machine: str, observation_id: str) 
     if obs is None:
         return json.dumps({"error": f"Observation '{observation_id}' not found"})
     return json.dumps(serialize_observation(obs), default=str)
+
+
+@handle_errors
+def resolve_todo(path: str, user_id: str, machine: str, observation_id: str) -> str:
+    _ensure()
+    obs_id = _observation_id(observation_id)
+    if obs_id is None:
+        raise ValueError(INVALID_OBSERVATION_ID)
+    workspace = require_workspace(user_id, machine, path)
+    resolved = repository.resolve_todo(obs_id, workspace["id"])
+    if resolved is None:
+        return json.dumps(
+            {
+                "resolved": False,
+                "error": f"No todo '{observation_id}' found in this workspace",
+            }
+        )
+    return json.dumps({"resolved": True, **resolved}, default=str)
 
 
 @handle_errors

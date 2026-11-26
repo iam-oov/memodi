@@ -26,7 +26,8 @@ Treat `$memodi`, “activate Memodi”, and “start Memodi for this workspace�
 ## Recall and saving
 
 - Prefer `memodi_search_hybrid` for ordinary recall. Use exact, semantic, or global search only when the question calls for it.
-- Save durable decisions, architecture, bug causes, non-obvious fixes, configuration changes, and concrete next steps with `memodi_save` as work progresses.
+- Save durable decisions, architecture, bug causes, non-obvious fixes, and configuration changes with `memodi_save` as work progresses.
+- Pass `horizon` on every save: `long` for durable knowledge, `medium` for decisions on how pieces relate, `short` for work status (MR numbers, versions, what is in progress), and `todo` for pending work left for later. Close a todo with `memodi_resolve_todo` once it is done. Omitted, it follows the type, so override it when the default is wrong.
 - Do not save conversational filler, guesses, secrets, credentials, or facts already obvious from the repository.
 - Use a stable `topic_key` when an observation is expected to evolve. Read the old observation before superseding an unknown id.
 - Use `affects` for decisions spanning multiple projects in the same workspace.

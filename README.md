@@ -59,7 +59,8 @@ Bad calls:
 - **Multi-machine** - one key per user; registering the same workspace on two machines shares memories between them
 - **Automatic context in Claude Code** - session hooks load memory when you open the repo and inject relevant pointers on every prompt
 - **Codex-native memory workflow** - the Codex plugin bundles the MCP connection and a skill for orientation, activation, recall, and proactive saves
-- **Session digest in Claude Code** - opening a session prints your pending next steps from the last one, right in the terminal
+- **Memory horizons** - every observation is `long` (durable knowledge), `medium` (decisions on how pieces relate), `short` (the work diary, loaded only for 7 days by default, `MEMODI_SHORT_HORIZON_DAYS`) or `todo` (pending until `memodi_resolve_todo`); `memodi_context` loads by horizon so status updates never bury durable knowledge
+- **Session digest in Claude Code** - opening a session prints your open todos and the pending next steps from the last session, right in the terminal
 - **Inert by default** - an unregistered path returns `not_started`; projects and workspaces are never auto-created
 
 ## Codex quick start
@@ -258,7 +259,7 @@ Real per-user accounts, not a shared key:
 - Unregistered path → `{"type": "not_started"}`; missing or invalid key → `{"type": "not_authenticated"}`
 - Switching accounts on the same machine needs no new code: a different user's key resolves to its own memories, never the previous user's. Run `/memodi:logout` to revoke this machine's key before logging in as someone else
 
-## MCP Tools (38)
+## MCP Tools (43)
 
 Every project-scoped tool takes `path` (the caller's cwd) and resolves it against a registered workspace.
 
@@ -270,7 +271,7 @@ Every project-scoped tool takes `path` (the caller's cwd) and resolves it agains
 | `memodi_search`                      | Keyword search                                                                                           |
 | `memodi_search_similar`              | Semantic search                                                                                          |
 | `memodi_search_hybrid`               | Keyword + semantic with RRF                                                                              |
-| `memodi_context`                     | Workspace-wide recent context: last session summary + observation pointers                               |
+| `memodi_context`                     | Last session summary + observation pointers grouped by horizon (todo, long, medium, recent short)        |
 | `memodi_search_global`               | Search across all your projects (user-scoped)                                                            |
 | `memodi_backfill`                    | Embeddings for old observations                                                                          |
 | `memodi_backfill_links`              | Reconcile LINKS_TO from before auto-linking (idempotent)                                                 |
@@ -301,6 +302,7 @@ Every project-scoped tool takes `path` (the caller's cwd) and resolves it agains
 | `memodi_rename_workspace` | Rename a workspace                                              |
 | `memodi_purge_workspace`  | Empty a workspace (destructive, dry_run by default)             |
 | `memodi_set_coordinator`  | Let one project read every project in its workspace; no other project reads it |
+| `memodi_resolve_todo`     | Close a `todo` observation once the pending work is done        |
 
 ### Workflow
 
