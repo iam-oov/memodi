@@ -91,7 +91,7 @@ def _search_scope(proj: dict) -> dict:
 
     At the registered root no single repo is in scope, so nothing narrows.
     """
-    if proj.get("at_workspace_root"):
+    if proj.get("reads_workspace"):
         return {"project_ids": None, "project_name": None, "inherited_ids": None}
     return {
         "project_ids": [proj["id"]],
@@ -100,12 +100,12 @@ def _search_scope(proj: dict) -> dict:
     }
 
 
-def _session_scope(scope: dict) -> list[str] | None:
+def _session_scope(proj: dict) -> list[str] | None:
     """Sessions carry no affects, so a child inherits the root's outright —
     there is no targeting to respect."""
-    if scope["project_ids"] is None:
+    if proj.get("at_workspace_root"):
         return None
-    return [*scope["project_ids"], *(scope["inherited_ids"] or [])]
+    return [proj["id"], *(proj["inherited_ids"] or [])]
 
 
 def parse_links(content: str, own_topic_key: str | None) -> tuple[list[str], int]:
@@ -510,14 +510,13 @@ def context(
 ) -> str:
     _ensure()
     proj = resolve_project(user_id, machine, path, project)
-    scope = _search_scope(proj)
     last_session = repository.get_latest_session_summary(
-        _session_scope(scope), workspace_id=proj["workspace_id"]
+        _session_scope(proj), workspace_id=proj["workspace_id"]
     )
     observations = repository.get_recent_observations(
         limit=limit,
         workspace_id=proj["workspace_id"],
-        **scope,
+        **_search_scope(proj),
     )
     return json.dumps(
         {
@@ -624,6 +623,24 @@ def workspace_forget(path: str, user_id: str, machine: str) -> str:
             }
         )
     return json.dumps({"forgotten": True, **result}, default=str)
+
+
+@handle_errors
+def set_coordinator(path: str, user_id: str, machine: str, enabled: bool = True) -> str:
+    _ensure()
+    proj = resolve_project(user_id, machine, path, None)
+    if proj["at_workspace_root"]:
+        raise ValueError(
+            f"'{path}' is a registered workspace root, which already reads every "
+            "project; run this from the coordinator's own folder"
+        )
+    updated = repository.set_project_coordinator(proj["id"], enabled)
+    return json.dumps(
+        {
+            "project": updated["name"],
+            "coordinator": bool(updated["metadata"]["coordinator"]),
+        }
+    )
 
 
 @handle_errors

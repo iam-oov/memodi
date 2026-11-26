@@ -300,6 +300,7 @@ Every project-scoped tool takes `path` (the caller's cwd) and resolves it agains
 | `memodi_delete_workspace` | Delete a workspace                                              |
 | `memodi_rename_workspace` | Rename a workspace                                              |
 | `memodi_purge_workspace`  | Empty a workspace (destructive, dry_run by default)             |
+| `memodi_set_coordinator`  | Let one project read every project in its workspace; no other project reads it |
 
 ### Workflow
 
