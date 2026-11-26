@@ -10,7 +10,7 @@ This protocol is MANDATORY and ALWAYS ACTIVE — not something you activate on d
 
 ## TOOL LOADING
 
-Memodi has **6 core tools** always in your context and **36 deferred tools** available via ToolSearch.
+Memodi has **6 core tools** always in your context and **37 deferred tools** available via ToolSearch.
 
 - **Core tools** — ready to use immediately, no extra steps needed
 - **Deferred tools** — call `ToolSearch("select:memodi_toolname")` to load them first
@@ -74,7 +74,8 @@ Memodi has **6 core tools** always in your context and **36 deferred tools** ava
 - `memodi_backfill_links` — catch up LINKS_TO edges for observations saved before [[topic-key]] auto-linking existed. Idempotent — re-running reports edges_created: 0 once caught up.
 - `memodi_find_consolidation_clusters` — mechanically detect clusters of similar, aged, live observations ("breadcrumbs") ripe for a compressed-logbook rollup. Read-only: recommends, never writes. See BREADCRUMB COMPRESSION below.
 
-**Correcting memory** — `ToolSearch("select:memodi_delete,memodi_get_observation")`
+**Correcting memory** — `ToolSearch("select:memodi_delete,memodi_get_observation,memodi_resolve_todo")`
+- `memodi_resolve_todo` — close a `horizon="todo"` observation once the work is done
 - `memodi_delete` — for junk, test, or wrong observations only
 - `memodi_get_observation` — read one observation by id, superseded ones included (audit path)
 
@@ -219,12 +220,37 @@ to another, write `[[topic-key]]` in content instead (see FORMAT below).
 ### Self-check — ask yourself after EVERY task:
 > "Did I or the user just make a decision, confirm a recommendation, express a preference, fix a bug, learn something non-obvious, or establish a convention? If yes, call memodi_save NOW."
 
+## HORIZONS — how long a memory stays in front of you
+
+Every save has a `horizon`. `type` says WHAT a note is; `horizon` says HOW LONG it lives.
+`memodi_context` loads by horizon, so a wrong horizon either buries knowledge or floods
+every future session with stale status. Pick it deliberately:
+
+| horizon | Use it for | Loaded by `memodi_context` |
+|---|---|---|
+| `long` | Durable knowledge: conventions, gotchas, how the system works, user preferences | Always |
+| `medium` | Decisions about how pieces relate: "for problem X we chose Y", "A calls B through C" | The most recent ones |
+| `short` | The work diary: current status, MR/PR numbers, versions, what another session is doing | Only for a few days, then search-only |
+| `todo` | Pending work recorded on purpose for later | Until closed with `memodi_resolve_todo` |
+
+- Omitted, horizon follows type: preference/pattern → long, decision/architecture → medium,
+  everything else → short. Override it whenever the default is wrong — a durable gotcha
+  found as a `discovery` is `long`; a "decision" that only records today's MR status is `short`.
+- Status of the work, dates, MR numbers and "deployed X" belong in `short` (or in the
+  session summary) — NEVER in `long`.
+- When something is left for later, save it with `horizon="todo"`. When it gets done, close
+  it with `memodi_resolve_todo(path, observation_id)` (load via
+  `ToolSearch("select:memodi_resolve_todo")`).
+- On a `topic_key` upsert, omitting `horizon` keeps the stored one.
+
 ## Format for memodi_save
 
 - **path**: the caller's cwd — ALWAYS pass this, on every call. See the CRITICAL note
   above about `project` — do not derive or invent one.
 - **title**: Verb + what — short, searchable (e.g. "Chose LiveKit over Twilio for WebRTC")
 - **type**: decision | bugfix | discovery | pattern | config | preference | architecture
+- **horizon**: long | medium | short | todo — see HORIZONS above; pass it whenever the
+  type-based default is wrong
 - **topic_key** (recommended for evolving topics): stable key like "architecture/auth-model". Same topic_key = upsert (updates existing, tracks revisions)
 - **affects** (pass whenever the work touched more than one repo): the directory names of
   every repo involved, e.g. `affects=["load-matching-worker", "celery-service"]`. Saves ONE

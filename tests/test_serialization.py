@@ -45,6 +45,7 @@ SAVE_ACK_FIELDS = {
     "duplicate_count",
     "created_at",
     "updated_at",
+    "horizon",
 }
 
 OBSERVATION_READ_ALLOWLIST = {
@@ -67,6 +68,8 @@ OBSERVATION_READ_ALLOWLIST = {
     "_deduplicated",
     "superseded_by",
     "supersedes",
+    "horizon",
+    "resolved_at",
 }
 
 _NON_PERSISTED_READ_FIELDS = {
@@ -80,7 +83,7 @@ _NON_PERSISTED_READ_FIELDS = {
 }
 
 
-_CONDITIONALLY_EXPOSED_READ_FIELDS = {"superseded_by", "supersedes"}
+_CONDITIONALLY_EXPOSED_READ_FIELDS = {"superseded_by", "supersedes", "resolved_at"}
 
 OBSERVATION_ROW_FIELDS = (
     OBSERVATION_READ_ALLOWLIST
@@ -545,6 +548,7 @@ def test_context_fields_allowlist_is_pinned():
         "project",
         "created_at",
         "occurred_at",
+        "horizon",
     } == _CONTEXT_OBSERVATION_FIELDS
 
 
@@ -568,7 +572,14 @@ def test_context_observation_exact_field_set(registered_workspace, project_name)
     assert payload["observations"], "expected at least one recent observation"
     row = payload["observations"][0]
 
-    assert set(row.keys()) == {"id", "type", "title", "project", "created_at"}
+    assert set(row.keys()) == {
+        "id",
+        "type",
+        "title",
+        "project",
+        "created_at",
+        "horizon",
+    }
     assert "content" not in row
     assert row["title"]
 

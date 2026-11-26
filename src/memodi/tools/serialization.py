@@ -16,6 +16,7 @@ _OBSERVATION_SAVE_FIELDS = {
     "created_at",
     "updated_at",
     "_deduplicated",
+    "horizon",
 }
 
 _OBSERVATION_READ_FIELDS = {
@@ -38,6 +39,8 @@ _OBSERVATION_READ_FIELDS = {
     "_deduplicated",
     "superseded_by",
     "supersedes",
+    "horizon",
+    "resolved_at",
 }
 
 _RELATED_FIELDS = {
@@ -56,6 +59,7 @@ _CONTEXT_OBSERVATION_FIELDS = {
     "project",
     "created_at",
     "occurred_at",
+    "horizon",
 }
 
 _PROMPT_SEARCH_FIELDS = {
@@ -116,6 +120,8 @@ def serialize_observation(obs: dict) -> dict:
         slim.pop("superseded_by", None)
     if not obs.get("supersedes"):
         slim.pop("supersedes", None)
+    if not obs.get("resolved_at"):
+        slim.pop("resolved_at", None)
     return slim
 
 

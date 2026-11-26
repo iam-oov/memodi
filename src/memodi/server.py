@@ -121,12 +121,27 @@ def memodi_save(
     occurred_at: str | None = None,
     supersedes: str | list[str] | None = None,
     affects: list[str] | None = None,
+    horizon: str | None = None,
 ) -> str:
     """Persist an observation to memory.
 
     type must be one of: decision, discovery, bugfix, pattern,
     config, preference, architecture, or session (an
     end-of-session summary).
+
+    horizon says how long the observation stays in front of the agent —
+    type says what it is, horizon says how long it lives:
+    - long: durable knowledge (conventions, gotchas, how the system works).
+      Always loaded by memodi_context.
+    - medium: a decision on how pieces relate ("for problem X we chose Y").
+      The most recent ones are loaded.
+    - short: the work diary — current status, MR numbers, what another
+      session is doing. Loaded only while recent, then found only by search.
+    - todo: pending work recorded on purpose for later. Loaded until closed
+      with memodi_resolve_todo.
+    Omitted, it follows type: preference/pattern -> long,
+    decision/architecture -> medium, anything else -> short. A topic_key
+    upsert keeps the stored horizon unless you pass one.
 
     Call PROACTIVELY after any significant event — don't wait
     to be asked. path is the caller's cwd — memodi resolves it to a
@@ -229,6 +244,7 @@ def memodi_save(
         occurred_at,
         supersedes,
         affects=affects,
+        horizon=horizon,
     )
 
 
@@ -256,16 +272,21 @@ def memodi_search(
 
 @mcp.tool()
 def memodi_context(
-    ctx: Context, path: str, project: str | None = None, limit: int = 20
+    ctx: Context, path: str, project: str | None = None, limit: int = 10
 ) -> str:
-    """Load the last session summary plus pointers to recent
-    observations (id, type, title, topic_key, project, dates — no
-    content) for a project.
+    """Load the last session summary plus pointers to observations
+    (id, type, title, topic_key, project, horizon, dates — no content)
+    for a project.
 
     This is the primary orientation tool — your FIRST call when
     joining a project, before git log, TODO files, or READMEs.
     memodi holds cross-session context that doesn't exist anywhere
     else: what was decided, what was learned, what was tried.
+
+    Observations come grouped by horizon, up to `limit` each, in this
+    order: open todos, long-term knowledge, the most recent medium-term
+    decisions, and the short-term diary from the last few days. Older
+    diary entries are left out but still found by search.
 
     Observations arrive as pointers to keep the once-per-session
     load cheap. Read any that matters with memodi_get_observation(id),
@@ -452,6 +473,22 @@ def memodi_workspace_forget(ctx: Context, path: str) -> str:
 
 
 @mcp.tool()
+def memodi_resolve_todo(ctx: Context, path: str, observation_id: str) -> str:
+    """Close a todo-horizon observation once the pending work is done.
+
+    The todo stops surfacing in memodi_context and the session-start
+    digest; it stays readable with memodi_get_observation and searchable.
+    Only observations saved with horizon="todo" can be resolved.
+    """
+    caller = _caller(ctx)
+    if isinstance(caller, str):
+        return caller
+    return memory.resolve_todo(
+        path, caller["user_id"], caller["machine"], observation_id
+    )
+
+
+@mcp.tool()
 def memodi_set_coordinator(ctx: Context, path: str, enabled: bool = True) -> str:
     """Mark the project at `path` as its workspace's coordinator, or unmark it.
 
@@ -464,9 +501,7 @@ def memodi_set_coordinator(ctx: Context, path: str, enabled: bool = True) -> str
     caller = _caller(ctx)
     if isinstance(caller, str):
         return caller
-    return memory.set_coordinator(
-        path, caller["user_id"], caller["machine"], enabled
-    )
+    return memory.set_coordinator(path, caller["user_id"], caller["machine"], enabled)
 
 
 @mcp.tool()

@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     google_client_secret: str | None = None
     google_redirect_uri: str | None = None
 
+    short_horizon_days: int = 7
+
     @property
     def db_url(self) -> str:
         return (
