@@ -20,7 +20,9 @@ CWD=$(printf '%s' "$INPUT" | python3 -c "import sys,json; print(json.load(sys.st
 SESSION_ID=$(printf '%s' "$INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('session_id',''))" 2>/dev/null)
 REASON=$(printf '%s' "$INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('reason',''))" 2>/dev/null)
 
-CWD="${CWD:-$PWD}"
+RAW_CWD="${CWD:-$PWD}"
+CWD=$(python3 -I "$(dirname "$0")/resolve_path.py" "$RAW_CWD" 2>/dev/null)
+CWD="${CWD:-$RAW_CWD}"
 
 # On resume the conversation continues elsewhere and SessionStart will not
 # re-fire for it — closing here would end a session still in use.

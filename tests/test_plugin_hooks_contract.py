@@ -186,7 +186,9 @@ def hook_server():
     server.server_close()
 
 
-def _run_hook(script: Path, payload: dict, url: str) -> str:
+def _run_hook(
+    script: Path, payload: dict, url: str, extra_env: dict | None = None
+) -> str:
     """Run a shipped hook script for real and return what it injects.
 
     Rendered output is the only honest contract for these files: reading the
@@ -194,6 +196,8 @@ def _run_hook(script: Path, payload: dict, url: str) -> str:
     <<'EOF' the model would receive the literal ${SESSION_ID} instead of an
     id.
     """
+    # A developer shell exporting MEMODI_PATH would override every payload cwd.
+    env = {k: v for k, v in os.environ.items() if k != "MEMODI_PATH"}
     result = subprocess.run(
         ["sh", str(script)],
         input=json.dumps(payload),
@@ -201,10 +205,11 @@ def _run_hook(script: Path, payload: dict, url: str) -> str:
         text=True,
         timeout=30,
         env={
-            **os.environ,
+            **env,
             "MEMODI_URL": url,
             "MEMODI_API_KEY": "test-key",
             "MEMODI_MACHINE": "test-machine",
+            **(extra_env or {}),
         },
     )
     assert result.returncode == 0

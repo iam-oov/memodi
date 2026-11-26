@@ -9,7 +9,7 @@ Memodi is the persistence layer; Codex decides what is worth loading or saving.
 
 ## Project orientation
 
-- Use the caller's current working directory as `path`. Never invent or normalize it to a different machine's path.
+- Use the root of the repo you are working in as `path`, not a subfolder of it. Inside a git worktree, use the main repository instead: the output of `git rev-parse --path-format=absolute --git-common-dir` without its trailing `/.git`. If `MEMODI_PATH` is set in the environment, use that value. Outside git, use the current working directory. Never invent or normalize it to a different machine's path.
 - On the first substantive task in a project, call `memodi_context` before inspecting git history, TODO files, or repository documentation. Read relevant observation pointers with `memodi_get_observation`.
 - If context returns `not_started`, keep Memodi inert for this path. Do not register anything unless the user explicitly asks to activate or configure Memodi.
 - If a tool returns `not_authenticated`, tell the user to rerun `install-codex.sh` with a valid account and stop making Memodi calls for that turn.

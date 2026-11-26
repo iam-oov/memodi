@@ -115,10 +115,26 @@ explicit project name with omitted-project calls for the SAME repo silently spli
 memories across two projects inside the same workspace. **When in doubt, omit
 `project` and let `path` drive it.**
 
+### Which `path`: the repo root, not a subfolder or worktree
+
+`path` is the root of the repo you are working in, which is NOT always your cwd. The
+SessionStart protocol already resolved it — use exactly the path it gave you:
+
+- In a **subfolder** of a repo (`repo/src/billing`), `path` is the repo root (`repo`).
+  Passing the subfolder creates a project named `billing` and splits the repo's memory.
+- In a **git worktree** (e.g. an Orca worker at `~/orca/workspaces/<repo>/<branch>`),
+  `path` is the MAIN repo (`git rev-parse --path-format=absolute --git-common-dir`
+  without the trailing `/.git`), so the worker reads and writes the repo's own memory.
+- When `MEMODI_PATH` is set (an agent that does not run inside the repo, such as a
+  coordinator bot), `path` is that value.
+
+The hooks apply these same rules, so when a protocol says "Your folder … belongs to the
+repo at X", pass X on every call.
+
 `affects` is NOT this rule — it is a different axis. `project` answers "whose memory is
 this", `affects` answers "who else needs to find it". You still never invent an `affects`
 name: use the directory names of the repos you actually changed. When work spans repos,
-keep passing `path` as your cwd and add `affects` — see the `affects` bullet below.
+keep passing your repo `path` (see below) and add `affects` — see the `affects` bullet below.
 
 ## WORKSPACE ONBOARDING (runs only via `/memodi:start`)
 
@@ -245,7 +261,7 @@ every future session with stale status. Pick it deliberately:
 
 ## Format for memodi_save
 
-- **path**: the caller's cwd — ALWAYS pass this, on every call. See the CRITICAL note
+- **path**: the repo root the SessionStart protocol gave you (see "Which `path`") — ALWAYS pass this, on every call. See the CRITICAL note
   above about `project` — do not derive or invent one.
 - **title**: Verb + what — short, searchable (e.g. "Chose LiveKit over Twilio for WebRTC")
 - **type**: decision | bugfix | discovery | pattern | config | preference | architecture

@@ -50,6 +50,15 @@ Bad calls:
 - ❌ **A different workspace name on the second machine.** A new name creates a fresh, empty workspace - not the one holding your memories.
 - ❌ **A subfolder of an already-registered workspace** - `work/billing/` when `work/` is registered. It does not fail: it silently creates a nested workspace that shadows the parent for that subtree.
 
+### Worktrees, subfolders and agents
+
+The Claude Code hooks send memodi the **repo root**, not the raw folder you are standing in, so one repo always maps to one project:
+
+- **Subfolder of a repo** (`work/api/src/billing`): resolves to `work/api`.
+- **Git worktree, wherever it lives** (`~/orca/workspaces/api/fix-branch`): resolves to the main repo it was created from, so worktree workers read and write the repo's own memory with no extra registration.
+- **An agent that does not run inside a repo** (a coordinator bot, a scheduled job): set `MEMODI_PATH` to the folder it should act as, e.g. `MEMODI_PATH=/home/me/work/System`.
+- **Anything else** (a folder outside git): unchanged, the folder itself.
+
 ## Features
 
 - **Proactive memory** - the agent saves observations without being asked; the instructions ship with the plugin skill
