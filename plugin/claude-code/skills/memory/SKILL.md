@@ -10,7 +10,7 @@ This protocol is MANDATORY and ALWAYS ACTIVE — not something you activate on d
 
 ## TOOL LOADING
 
-Memodi has **6 core tools** always in your context and **38 deferred tools** available via ToolSearch.
+Memodi has **6 core tools** always in your context and **41 deferred tools** available via ToolSearch.
 
 - **Core tools** — ready to use immediately, no extra steps needed
 - **Deferred tools** — call `ToolSearch("select:memodi_toolname")` to load them first
@@ -77,6 +77,11 @@ Memodi has **6 core tools** always in your context and **38 deferred tools** ava
 **Correcting memory** — `ToolSearch("select:memodi_delete,memodi_get_observation,memodi_resolve_todo,memodi_reopen_todo")`
 - `memodi_resolve_todo` — close a `horizon="todo"` observation once the work is done
 - `memodi_reopen_todo` — reopen a resolved todo (an incident that came back)
+
+**Working a todo** — `ToolSearch("select:memodi_claim_todo,memodi_todo_progress,memodi_release_todo")`
+- `memodi_claim_todo` — take a todo so no other session works on it (atomic, expires)
+- `memodi_todo_progress` — record the plan's current phase; renews the claim
+- `memodi_release_todo` — give a claimed todo up without finishing it
 - `memodi_delete` — for junk, test, or wrong observations only
 - `memodi_get_observation` — read one observation by id, superseded ones included (audit path)
 
@@ -264,6 +269,31 @@ every future session with stale status. Pick it deliberately:
   structured fields (status, vendor, error) in `metadata`; `memodi_search(type="incident")`
   finds only cases.
 - On a `topic_key` upsert, omitting `horizon` keeps the stored one.
+
+### Working a todo (load via `ToolSearch("select:memodi_claim_todo,memodi_todo_progress,memodi_release_todo,memodi_resolve_todo")`)
+
+1. **Claim it before you start**: `memodi_claim_todo(path, observation_id, client_session_id,
+   holder_label?, lease_minutes?, plan_ref?, phase_total?)`. `client_session_id` is this
+   session's id from the SessionStart protocol; `holder_label` says who you are in words
+   ("Mi Todo Slack · worker compliance"); `plan_ref` is where the plan lives (a path or URL).
+   If it answers `claimed: false` with `held_by_another`, another session is on it — pick
+   another todo and tell the user who holds it.
+2. **A claim means "I am looking at this", NEVER "I have permission to act".** Approvals still
+   come from the user (the owner), exactly as without a claim.
+3. **Report the phase** with `memodi_todo_progress(..., phase_current=2, phase_label="Fix")`.
+   Every call renews the claim. The claim lasts 120 minutes by default; ask for a longer
+   `lease_minutes` (up to 1440) when a phase waits on something slow, like a pipeline and a
+   deploy.
+4. **Giving up** without finishing: `memodi_release_todo`. The plan and phase stay, so the
+   next session continues from there.
+5. **Finishing**: first save the results and conclusions as NEW observations, each with its own
+   horizon (a gotcha → `long`, a decision → `medium`) and `[[<the todo's topic_key>]]` in the
+   content. Then `memodi_resolve_todo(path, observation_id, outcome="<one line: what happened,
+   where the conclusions live>")`. Never turn the todo itself into the conclusion.
+
+The session-start digest shows each open todo with a short id in brackets (`[be37]`), its
+holder, phase (`F-2/4 (Fix)`) and plan; the todo tools accept that short id (4+ hex
+characters) as well as the full one.
 
 ## Format for memodi_save
 

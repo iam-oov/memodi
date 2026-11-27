@@ -6,6 +6,8 @@ index helper, an embedding variant, ...) stays hidden by default — someone
 has to deliberately widen one of these sets to expose it.
 """
 
+from datetime import UTC, datetime
+
 _OBSERVATION_SAVE_FIELDS = {
     "id",
     "title",
@@ -41,7 +43,40 @@ _OBSERVATION_READ_FIELDS = {
     "supersedes",
     "horizon",
     "resolved_at",
+    "claimed_by",
+    "claimed_label",
+    "claimed_until",
+    "plan_ref",
+    "phase_current",
+    "phase_total",
+    "phase_label",
+    "outcome",
 }
+
+_TODO_WORK_FIELDS = (
+    "resolved_at",
+    "claimed_by",
+    "claimed_label",
+    "claimed_until",
+    "plan_ref",
+    "phase_current",
+    "phase_total",
+    "phase_label",
+    "outcome",
+)
+
+
+def _drop_empty_todo_work(entry: dict) -> dict:
+    until = entry.get("claimed_until")
+    if until is not None and until <= datetime.now(UTC):
+        entry.pop("claimed_by", None)
+        entry.pop("claimed_label", None)
+        entry.pop("claimed_until", None)
+    for field in _TODO_WORK_FIELDS:
+        if entry.get(field) is None:
+            entry.pop(field, None)
+    return entry
+
 
 _RELATED_FIELDS = {
     "id",
@@ -60,6 +95,13 @@ _CONTEXT_OBSERVATION_FIELDS = {
     "created_at",
     "occurred_at",
     "horizon",
+    "claimed_by",
+    "claimed_label",
+    "claimed_until",
+    "plan_ref",
+    "phase_current",
+    "phase_total",
+    "phase_label",
 }
 
 _PROMPT_SEARCH_FIELDS = {
@@ -120,9 +162,7 @@ def serialize_observation(obs: dict) -> dict:
         slim.pop("superseded_by", None)
     if not obs.get("supersedes"):
         slim.pop("supersedes", None)
-    if not obs.get("resolved_at"):
-        slim.pop("resolved_at", None)
-    return slim
+    return _drop_empty_todo_work(slim)
 
 
 def serialize_observations(observations: list[dict]) -> list[dict]:
@@ -142,6 +182,7 @@ def serialize_context_observations(observations: list[dict]) -> list[dict]:
             entry.pop("topic_key", None)
         if not entry.get("occurred_at"):
             entry.pop("occurred_at", None)
+        _drop_empty_todo_work(entry)
     return slim
 
 

@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     google_redirect_uri: str | None = None
 
     short_horizon_days: int = 7
+    todo_claim_minutes: int = 120
 
     @property
     def db_url(self) -> str:

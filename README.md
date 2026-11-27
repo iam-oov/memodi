@@ -70,6 +70,7 @@ The Claude Code hooks send memodi the **repo root**, not the raw folder you are 
 - **Codex-native memory workflow** - the Codex plugin bundles the MCP connection and a skill for orientation, activation, recall, and proactive saves
 - **Memory horizons** - every observation is `long` (durable knowledge), `medium` (decisions on how pieces relate), `short` (the work diary, loaded only for 7 days by default, `MEMODI_SHORT_HORIZON_DAYS`) or `todo` (pending until `memodi_resolve_todo`, reopened with `memodi_reopen_todo`); `memodi_context` loads by horizon so status updates never bury durable knowledge
 - **Incidents** - `type="incident"` tracks a case (a production bug, an outage) as an open `todo` until it is resolved; each phase upserts the same `topic_key`, its structured `metadata` survives upserts that omit it, and `memodi_search(type="incident")` finds only cases
+- **Todo claims** - a session claims a `todo` before working on it (`memodi_claim_todo`), so two sessions never take the same one; the claim expires on its own (120 minutes by default, `MEMODI_TODO_CLAIM_MINUTES`, or a per-claim `lease_minutes`), carries a readable holder label, the plan's location and its current phase, and the session-start digest shows it as `[be37] Rotate the key · in progress F-2/4 (Fix) · Mi Todo Slack, 1h20m left · plan: …`. A claim means "I am looking at this", never permission to act. Resolving takes a one-line `outcome` that points to the conclusions
 - **Session digest in Claude Code** - opening a session prints your open todos and the pending next steps from the last session, right in the terminal
 - **Inert by default** - an unregistered path returns `not_started`; projects and workspaces are never auto-created
 
@@ -269,7 +270,7 @@ Real per-user accounts, not a shared key:
 - Unregistered path → `{"type": "not_started"}`; missing or invalid key → `{"type": "not_authenticated"}`
 - Switching accounts on the same machine needs no new code: a different user's key resolves to its own memories, never the previous user's. Run `/memodi:logout` to revoke this machine's key before logging in as someone else
 
-## MCP Tools (44)
+## MCP Tools (47)
 
 Every project-scoped tool takes `path` (the caller's cwd) and resolves it against a registered workspace.
 
@@ -314,6 +315,9 @@ Every project-scoped tool takes `path` (the caller's cwd) and resolves it agains
 | `memodi_set_coordinator`  | Let one project read every project in its workspace; no other project reads it |
 | `memodi_resolve_todo`     | Close a `todo` observation once the pending work is done        |
 | `memodi_reopen_todo`      | Reopen a resolved `todo`, such as an incident that came back    |
+| `memodi_claim_todo`       | Take a `todo` so no other session works on it (atomic, expires)  |
+| `memodi_todo_progress`    | Record the current phase of a claimed `todo`'s plan             |
+| `memodi_release_todo`     | Give a claimed `todo` up without finishing it                   |
 
 ### Workflow
 
