@@ -1406,6 +1406,56 @@ def plan_is_live(row: dict, grace_days: int) -> bool:
     return (datetime.now(UTC) - resolved).total_seconds() < grace_days * 86400
 
 
+def get_todos_for_owner(
+    user_id: str,
+    limit: int,
+    resolved_within_days: int | None = None,
+    workspace_id: str | None = None,
+    project_names: list[str] | None = None,
+    affects_name: str | None = None,
+    inherited_names: list[str] | None = None,
+) -> list[dict]:
+    params: list = [user_id]
+    if resolved_within_days is None:
+        state = "AND o.resolved_at IS NULL"
+    else:
+        state = "AND o.resolved_at > now() - make_interval(days => %s)"
+        params.append(resolved_within_days)
+    if workspace_id is not None:
+        scope, scope_params = _project_name_scope(
+            project_names, affects_name, inherited_names
+        )
+        state += f" AND w.id = %s {scope}"
+        params += [workspace_id, *scope_params]
+    params.append(limit)
+    rows = (
+        get_connection()
+        .execute(
+            f"""
+            SELECT o.id, o.title, o.type, o.topic_key, o.resolved_at, o.outcome,
+                   o.claimed_by, o.claimed_label, o.claimed_until, o.plan_ref,
+                   o.phase_current, o.phase_total, o.phase_label,
+                   (o.plan_md IS NOT NULL) AS has_plan,
+                   p.name AS project, w.name AS workspace
+            FROM observations o
+            JOIN projects p ON p.id = o.project_id
+            JOIN workspaces w ON w.id = p.workspace_id
+            WHERE w.owner_user_id = %s
+              AND o.horizon = 'todo'
+              AND o.deleted_at IS NULL
+              AND o.superseded_by IS NULL
+              {state}
+            ORDER BY COALESCE(o.resolved_at, o.updated_at) DESC
+            LIMIT %s
+            """,
+            tuple(params),
+        )
+        .fetchall()
+    )
+    get_connection().rollback()
+    return [dict(r) for r in rows]
+
+
 def get_observation_for_owner(observation_id: str, user_id: str) -> dict | None:
     row = (
         get_connection()
