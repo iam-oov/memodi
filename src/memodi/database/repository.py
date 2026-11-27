@@ -48,6 +48,7 @@ ALLOWED_TYPES = {
     "preference",
     "architecture",
     "session",
+    "incident",
 }
 
 ALLOWED_HORIZONS = ("todo", "long", "medium", "short")
@@ -57,6 +58,7 @@ _HORIZON_BY_TYPE = {
     "pattern": "long",
     "decision": "medium",
     "architecture": "medium",
+    "incident": "todo",
 }
 
 
@@ -691,12 +693,14 @@ def save_observation(
             (project_id, topic_key),
         ).fetchone()
         if existing:
-            # This branch replaces metadata wholesale, so an omitted affects
-            # has to carry the stored list forward or a later revision would
-            # silently strip the observation's cross-project visibility.
-            if affects is None:
-                stored = (existing["metadata"] or {}).get("affects")
-                meta = json.dumps(_with_affects(base_meta, stored or []))
+            stored_meta = existing["metadata"] or {}
+            own = (
+                metadata
+                if metadata is not None
+                else {k: v for k, v in stored_meta.items() if k != "affects"}
+            )
+            routed = affects if affects is not None else stored_meta.get("affects")
+            meta = json.dumps(_with_affects(dict(own), routed or []))
             if embedding is not None:
                 row = conn.execute(
                     """
@@ -1173,6 +1177,26 @@ def resolve_todo(observation_id: str, workspace_id: str) -> dict | None:
           AND o.horizon = 'todo'
           AND o.deleted_at IS NULL
         RETURNING o.id, o.title, o.resolved_at
+        """,
+        (observation_id, workspace_id),
+    ).fetchone()
+    conn.commit()
+    return dict(row) if row else None
+
+
+def reopen_todo(observation_id: str, workspace_id: str) -> dict | None:
+    conn = get_connection()
+    row = conn.execute(
+        """
+        UPDATE observations o
+        SET resolved_at = NULL, updated_at = now()
+        FROM projects p
+        WHERE o.id = %s
+          AND p.id = o.project_id
+          AND p.workspace_id = %s
+          AND o.horizon = 'todo'
+          AND o.deleted_at IS NULL
+        RETURNING o.id, o.title
         """,
         (observation_id, workspace_id),
     ).fetchone()

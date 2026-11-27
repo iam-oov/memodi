@@ -583,6 +583,24 @@ def resolve_todo(path: str, user_id: str, machine: str, observation_id: str) -> 
 
 
 @handle_errors
+def reopen_todo(path: str, user_id: str, machine: str, observation_id: str) -> str:
+    _ensure()
+    obs_id = _observation_id(observation_id)
+    if obs_id is None:
+        raise ValueError(INVALID_OBSERVATION_ID)
+    workspace = require_workspace(user_id, machine, path)
+    reopened = repository.reopen_todo(obs_id, workspace["id"])
+    if reopened is None:
+        return json.dumps(
+            {
+                "reopened": False,
+                "error": f"No todo '{observation_id}' found in this workspace",
+            }
+        )
+    return json.dumps({"reopened": True, **reopened}, default=str)
+
+
+@handle_errors
 def delete(path: str, user_id: str, machine: str, observation_id: str) -> str:
     _ensure()
     obs_id = _observation_id(observation_id)

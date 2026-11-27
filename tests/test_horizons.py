@@ -8,8 +8,10 @@ from memodi.tools.memory import (
     context,
     digest_for_session_start,
     get_observation,
+    reopen_todo,
     resolve_todo,
     save,
+    search,
     search_for_prompt,
     search_hybrid,
     set_coordinator,
@@ -81,6 +83,7 @@ def _age(observation_id: str, days: int) -> None:
         ("discovery", "short"),
         ("config", "short"),
         ("bugfix", "short"),
+        ("incident", "todo"),
     ],
 )
 def test_horizon_defaults_from_type(repo, type_, expected):
@@ -250,6 +253,94 @@ def test_resolve_todo_cannot_reach_another_workspace(repo):
         assert ack["resolved"] is False
     finally:
         _cleanup_workspace(other["workspace"])
+
+
+def _resolve(ws: dict, observation_id: str) -> dict:
+    return json.loads(
+        resolve_todo(path=ws["path"], observation_id=observation_id, **_caller(ws))
+    )
+
+
+def _reopen(ws: dict, observation_id: str) -> dict:
+    return json.loads(
+        reopen_todo(path=ws["path"], observation_id=observation_id, **_caller(ws))
+    )
+
+
+def test_reopened_todo_surfaces_again(repo):
+    todo = _save(repo, "Quota storm on the vendor", type="incident")
+    _resolve(repo, todo["id"])
+
+    ack = _reopen(repo, todo["id"])
+    stored = json.loads(
+        get_observation(path=repo["path"], observation_id=todo["id"], **_caller(repo))
+    )
+
+    assert ack["reopened"] is True
+    assert "Quota storm on the vendor" in _titles(_context(repo))
+    assert "resolved_at" not in stored
+
+
+def test_upsert_does_not_reopen_a_resolved_todo(repo):
+    # A case closed and then annotated (a new occurrence recorded on it)
+    # must stay closed until someone reopens it on purpose.
+    todo = _save(repo, "Quota storm", type="incident", topic_key="cases/T-1")
+    _resolve(repo, todo["id"])
+
+    _save(repo, "Quota storm, seen again", type="incident", topic_key="cases/T-1")
+
+    assert "Quota storm, seen again" not in _titles(_context(repo))
+
+
+def test_reopen_todo_refuses_a_note_that_is_not_a_todo(repo):
+    note = _save(repo, "Plain decision", type="decision")
+
+    assert _reopen(repo, note["id"])["reopened"] is False
+
+
+def test_reopen_todo_rejects_an_invalid_id(repo):
+    assert _reopen(repo, "nope")["type"] == "validation"
+
+
+def test_reopen_todo_cannot_reach_another_workspace(repo):
+    other = _extra_workspace(repo["user_id"])
+    try:
+        todo = json.loads(
+            save(
+                path=f"{other['root']}/elsewhere",
+                title="Foreign incident",
+                content="Lives in another workspace",
+                type="incident",
+                user_id=other["user_id"],
+                machine=other["machine"],
+            )
+        )
+        resolve_todo(
+            path=f"{other['root']}/elsewhere",
+            observation_id=todo["id"],
+            user_id=other["user_id"],
+            machine=other["machine"],
+        )
+
+        assert _reopen(repo, todo["id"])["reopened"] is False
+    finally:
+        _cleanup_workspace(other["workspace"])
+
+
+def test_incident_type_filter_finds_only_incidents(repo):
+    _save(repo, "Wombat vendor quota incident", type="incident")
+    _save(repo, "Wombat vendor quota discovery", type="discovery")
+
+    rows = json.loads(
+        search(
+            path=repo["path"],
+            query="wombat vendor quota",
+            type="incident",
+            **_caller(repo),
+        )
+    )
+
+    assert _titles(rows) == ["Wombat vendor quota incident"]
 
 
 def test_scope_rules_still_apply_per_horizon(registered_workspace):

@@ -10,7 +10,7 @@ This protocol is MANDATORY and ALWAYS ACTIVE — not something you activate on d
 
 ## TOOL LOADING
 
-Memodi has **6 core tools** always in your context and **37 deferred tools** available via ToolSearch.
+Memodi has **6 core tools** always in your context and **38 deferred tools** available via ToolSearch.
 
 - **Core tools** — ready to use immediately, no extra steps needed
 - **Deferred tools** — call `ToolSearch("select:memodi_toolname")` to load them first
@@ -74,8 +74,9 @@ Memodi has **6 core tools** always in your context and **37 deferred tools** ava
 - `memodi_backfill_links` — catch up LINKS_TO edges for observations saved before [[topic-key]] auto-linking existed. Idempotent — re-running reports edges_created: 0 once caught up.
 - `memodi_find_consolidation_clusters` — mechanically detect clusters of similar, aged, live observations ("breadcrumbs") ripe for a compressed-logbook rollup. Read-only: recommends, never writes. See BREADCRUMB COMPRESSION below.
 
-**Correcting memory** — `ToolSearch("select:memodi_delete,memodi_get_observation,memodi_resolve_todo")`
+**Correcting memory** — `ToolSearch("select:memodi_delete,memodi_get_observation,memodi_resolve_todo,memodi_reopen_todo")`
 - `memodi_resolve_todo` — close a `horizon="todo"` observation once the work is done
+- `memodi_reopen_todo` — reopen a resolved todo (an incident that came back)
 - `memodi_delete` — for junk, test, or wrong observations only
 - `memodi_get_observation` — read one observation by id, superseded ones included (audit path)
 
@@ -247,16 +248,21 @@ every future session with stale status. Pick it deliberately:
 | `long` | Durable knowledge: conventions, gotchas, how the system works, user preferences | Always |
 | `medium` | Decisions about how pieces relate: "for problem X we chose Y", "A calls B through C" | The most recent ones |
 | `short` | The work diary: current status, MR/PR numbers, versions, what another session is doing | Only for a few days, then search-only |
-| `todo` | Pending work recorded on purpose for later | Until closed with `memodi_resolve_todo` |
+| `todo` | Pending work recorded on purpose for later, and open incidents | Until closed with `memodi_resolve_todo` |
 
 - Omitted, horizon follows type: preference/pattern → long, decision/architecture → medium,
-  everything else → short. Override it whenever the default is wrong — a durable gotcha
+  incident → todo, everything else → short. Override it whenever the default is wrong — a durable gotcha
   found as a `discovery` is `long`; a "decision" that only records today's MR status is `short`.
 - Status of the work, dates, MR numbers and "deployed X" belong in `short` (or in the
   session summary) — NEVER in `long`.
 - When something is left for later, save it with `horizon="todo"`. When it gets done, close
   it with `memodi_resolve_todo(path, observation_id)` (load via
-  `ToolSearch("select:memodi_resolve_todo")`).
+  `ToolSearch("select:memodi_resolve_todo")`). A resolved todo that comes back (an incident
+  that recurs) is reopened with `memodi_reopen_todo` — a `topic_key` upsert never reopens it.
+- Track a case (a production bug, an incident) as `type="incident"`: it opens as a `todo`,
+  each phase upserts the same `topic_key`, and the terminal status resolves it. Keep the
+  structured fields (status, vendor, error) in `metadata`; `memodi_search(type="incident")`
+  finds only cases.
 - On a `topic_key` upsert, omitting `horizon` keeps the stored one.
 
 ## Format for memodi_save
@@ -264,7 +270,7 @@ every future session with stale status. Pick it deliberately:
 - **path**: the repo root the SessionStart protocol gave you (see "Which `path`") — ALWAYS pass this, on every call. See the CRITICAL note
   above about `project` — do not derive or invent one.
 - **title**: Verb + what — short, searchable (e.g. "Chose LiveKit over Twilio for WebRTC")
-- **type**: decision | bugfix | discovery | pattern | config | preference | architecture
+- **type**: decision | bugfix | discovery | pattern | config | preference | architecture | incident
 - **horizon**: long | medium | short | todo — see HORIZONS above; pass it whenever the
   type-based default is wrong
 - **topic_key** (recommended for evolving topics): stable key like "architecture/auth-model". Same topic_key = upsert (updates existing, tracks revisions)
@@ -275,6 +281,10 @@ every future session with stale status. Pick it deliberately:
   directory names. New names are created and echoed back as `projects_created`, so check
   that field for typos. On a `topic_key` upsert, omitting `affects` keeps the stored list;
   pass `affects=[]` only when you mean to clear it. Cap is 20 names.
+- **metadata** (optional): structured keys such as `{"status": "open", "vendor": "x"}`. On a
+  `topic_key` upsert, omitting `metadata` keeps the stored keys; passing it replaces them
+  all (so send every key you want to keep), and `metadata={}` clears them. `affects` is
+  never touched by `metadata`.
 - **content**: structured as:
   - **What**: One sentence — what was done
   - **Why**: What motivated it
