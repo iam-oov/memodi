@@ -2,7 +2,7 @@ import hashlib
 import json
 from datetime import UTC, datetime
 
-from psycopg.errors import InvalidTextRepresentation, UniqueViolation
+from psycopg.errors import CheckViolation, InvalidTextRepresentation, UniqueViolation
 
 from memodi.database.connection import get_connection
 
@@ -1089,7 +1089,9 @@ def get_open_todos_by_workspace(
     )
     rows = conn.execute(
         f"""
-        SELECT o.id, o.title, p.name AS project
+        SELECT o.id, o.title, p.name AS project, o.claimed_by, o.claimed_label,
+               o.claimed_until,
+               o.plan_ref, o.phase_current, o.phase_total, o.phase_label
         FROM observations o
         JOIN projects p ON p.id = o.project_id
         WHERE p.workspace_id = %s
@@ -1164,21 +1166,29 @@ def get_context_observations(
     return [dict(r) for r in rows]
 
 
-def resolve_todo(observation_id: str, workspace_id: str) -> dict | None:
+def resolve_todo(
+    observation_id: str, workspace_id: str, outcome: str | None = None
+) -> dict | None:
     conn = get_connection()
     row = conn.execute(
         """
         UPDATE observations o
-        SET resolved_at = COALESCE(o.resolved_at, now()), updated_at = now()
+        SET resolved_at = COALESCE(o.resolved_at, now()),
+            updated_at = now(),
+            claimed_by = NULL,
+            claimed_label = NULL,
+            claimed_until = NULL,
+            claim_minutes = NULL,
+            outcome = COALESCE(%s, o.outcome)
         FROM projects p
         WHERE o.id = %s
           AND p.id = o.project_id
           AND p.workspace_id = %s
           AND o.horizon = 'todo'
           AND o.deleted_at IS NULL
-        RETURNING o.id, o.title, o.resolved_at
+        RETURNING o.id, o.title, o.resolved_at, o.outcome
         """,
-        (observation_id, workspace_id),
+        (outcome, observation_id, workspace_id),
     ).fetchone()
     conn.commit()
     return dict(row) if row else None
@@ -1189,7 +1199,13 @@ def reopen_todo(observation_id: str, workspace_id: str) -> dict | None:
     row = conn.execute(
         """
         UPDATE observations o
-        SET resolved_at = NULL, updated_at = now()
+        SET resolved_at = NULL,
+            updated_at = now(),
+            outcome = NULL,
+            claimed_by = NULL,
+            claimed_label = NULL,
+            claimed_until = NULL,
+            claim_minutes = NULL
         FROM projects p
         WHERE o.id = %s
           AND p.id = o.project_id
@@ -1202,6 +1218,176 @@ def reopen_todo(observation_id: str, workspace_id: str) -> dict | None:
     ).fetchone()
     conn.commit()
     return dict(row) if row else None
+
+
+_TODO_STATE = (
+    "o.id, o.title, o.resolved_at, o.claimed_by, o.claimed_label, "
+    "o.claimed_until, o.plan_ref, o.phase_current, o.phase_total, o.phase_label"
+)
+
+_OPEN_TODO_IN_WORKSPACE = """
+    p.id = o.project_id
+    AND p.workspace_id = %s
+    AND o.id = %s
+    AND o.horizon = 'todo'
+    AND o.resolved_at IS NULL
+    AND o.deleted_at IS NULL
+    AND o.superseded_by IS NULL
+"""
+
+PHASE_OUT_OF_BOUNDS = "phase_current must be between 1 and phase_total"
+
+
+def find_todo_ids_by_prefix(prefix: str, workspace_id: str) -> list[str]:
+    rows = (
+        get_connection()
+        .execute(
+            """
+        SELECT o.id FROM observations o
+        JOIN projects p ON p.id = o.project_id
+        WHERE p.workspace_id = %s
+          AND o.horizon = 'todo'
+          AND o.deleted_at IS NULL
+          AND o.superseded_by IS NULL
+          AND o.id::text LIKE %s
+        LIMIT 2
+        """,
+            (workspace_id, f"{prefix}%"),
+        )
+        .fetchall()
+    )
+    return [str(r["id"]) for r in rows]
+
+
+def get_todo_state(observation_id: str, workspace_id: str) -> dict | None:
+    row = (
+        get_connection()
+        .execute(
+            f"""
+        SELECT {_TODO_STATE}, o.claimed_until > now() AS claim_active
+        FROM observations o
+        JOIN projects p ON p.id = o.project_id
+        WHERE p.workspace_id = %s
+          AND o.id = %s
+          AND o.horizon = 'todo'
+          AND o.deleted_at IS NULL
+          AND o.superseded_by IS NULL
+        """,
+            (workspace_id, observation_id),
+        )
+        .fetchone()
+    )
+    return dict(row) if row else None
+
+
+def _write_todo(sql: str, params: tuple) -> dict | None:
+    conn = get_connection()
+    try:
+        row = conn.execute(sql, params).fetchone()
+    except CheckViolation as e:
+        conn.rollback()
+        raise ValueError(PHASE_OUT_OF_BOUNDS) from e
+    conn.commit()
+    return dict(row) if row else None
+
+
+def claim_todo(
+    observation_id: str,
+    workspace_id: str,
+    owner: str,
+    lease_minutes: int,
+    label: str | None = None,
+    plan_ref: str | None = None,
+    phase_total: int | None = None,
+) -> dict | None:
+    return _write_todo(
+        f"""
+        UPDATE observations o
+        SET claimed_label = COALESCE(
+                %s, CASE WHEN o.claimed_by = %s THEN o.claimed_label END
+            ),
+            claimed_by = %s,
+            claim_minutes = %s,
+            claimed_until = now() + make_interval(mins => %s),
+            plan_ref = COALESCE(%s, o.plan_ref),
+            phase_total = COALESCE(%s, o.phase_total)
+        FROM projects p
+        WHERE {_OPEN_TODO_IN_WORKSPACE}
+          AND (
+              o.claimed_by IS NULL
+              OR o.claimed_by = %s
+              OR o.claimed_until <= now()
+          )
+        RETURNING {_TODO_STATE}
+        """,
+        (
+            label,
+            owner,
+            owner,
+            lease_minutes,
+            lease_minutes,
+            plan_ref,
+            phase_total,
+            workspace_id,
+            observation_id,
+            owner,
+        ),
+    )
+
+
+def update_todo_progress(
+    observation_id: str,
+    workspace_id: str,
+    owner: str,
+    lease_minutes: int,
+    phase_current: int | None = None,
+    phase_total: int | None = None,
+    phase_label: str | None = None,
+    plan_ref: str | None = None,
+) -> dict | None:
+    return _write_todo(
+        f"""
+        UPDATE observations o
+        SET claimed_until = now()
+                + make_interval(mins => COALESCE(o.claim_minutes, %s)),
+            phase_current = COALESCE(%s, o.phase_current),
+            phase_total = COALESCE(%s, o.phase_total),
+            phase_label = COALESCE(%s, o.phase_label),
+            plan_ref = COALESCE(%s, o.plan_ref)
+        FROM projects p
+        WHERE {_OPEN_TODO_IN_WORKSPACE}
+          AND o.claimed_by = %s
+          AND o.claimed_until > now()
+        RETURNING {_TODO_STATE}
+        """,
+        (
+            lease_minutes,
+            phase_current,
+            phase_total,
+            phase_label,
+            plan_ref,
+            workspace_id,
+            observation_id,
+            owner,
+        ),
+    )
+
+
+def release_todo(observation_id: str, workspace_id: str, owner: str) -> dict | None:
+    return _write_todo(
+        f"""
+        UPDATE observations o
+        SET claimed_by = NULL,
+            claimed_label = NULL,
+            claimed_until = NULL,
+            claim_minutes = NULL
+        FROM projects p
+        WHERE {_OPEN_TODO_IN_WORKSPACE}
+          AND o.claimed_by = %s
+        RETURNING {_TODO_STATE}
+        """,
+        (workspace_id, observation_id, owner),
+    )
 
 
 def get_recent_observations(

@@ -476,18 +476,139 @@ def memodi_workspace_forget(ctx: Context, path: str) -> str:
 
 
 @mcp.tool()
-def memodi_resolve_todo(ctx: Context, path: str, observation_id: str) -> str:
+def memodi_resolve_todo(
+    ctx: Context, path: str, observation_id: str, outcome: str | None = None
+) -> str:
     """Close a todo-horizon observation once the pending work is done.
 
     The todo stops surfacing in memodi_context and the session-start
     digest; it stays readable with memodi_get_observation and searchable.
-    Only observations saved with horizon="todo" can be resolved.
+    Only observations saved with horizon="todo" can be resolved, and
+    resolving releases any claim on it.
+
+    Before resolving, save the results and conclusions as NEW observations
+    with their own horizon (a gotcha is long, a decision medium), writing
+    [[<this todo's topic_key>]] in their content. Then pass outcome: one
+    line saying what happened and where the conclusions live, for example
+    "Rotated; see [[ops/staging-key-rotation]]".
+
+    observation_id takes the full id or at least 4 hex characters of it,
+    as shown in brackets in the session-start digest.
     """
     caller = _caller(ctx)
     if isinstance(caller, str):
         return caller
     return memory.resolve_todo(
-        path, caller["user_id"], caller["machine"], observation_id
+        path, caller["user_id"], caller["machine"], observation_id, outcome=outcome
+    )
+
+
+@mcp.tool()
+def memodi_claim_todo(
+    ctx: Context,
+    path: str,
+    observation_id: str,
+    client_session_id: str,
+    holder_label: str | None = None,
+    lease_minutes: int | None = None,
+    plan_ref: str | None = None,
+    phase_total: int | None = None,
+) -> str:
+    """Take an open todo before working on it, so no other session works
+    on the same one.
+
+    A claim means "I am looking at this", never "I have permission to
+    act": approvals still come from the owner, exactly as without a claim.
+
+    Atomic: when two sessions claim the same todo at once, exactly one
+    gets claimed=true. The other gets claimed=false with reason
+    "held_by_another", who holds it (claimed_by, claimed_label) and until
+    when (claimed_until) — pick another todo instead. The claim lasts
+    lease_minutes (default MEMODI_TODO_CLAIM_MINUTES, 120; at most 1440)
+    and every memodi_todo_progress call renews it for that same length.
+    Ask for a longer lease when a phase waits on something slow, such as
+    a pipeline and a deploy. An expired claim can be taken by anyone, so
+    a crashed session never locks a todo forever. Claiming again from the
+    same session renews it.
+
+    client_session_id is this session's id (the one the SessionStart
+    protocol gives you); claims are held per machine and session.
+    holder_label is a readable name for who holds it, such as
+    "Mi Todo Slack · worker compliance"; the digest shows it instead of
+    machine/session.
+    plan_ref is where the plan lives (a file path or a URL). A path only
+    opens on the machine that wrote it, which claimed_by names.
+    phase_total is the number of phases in the plan.
+
+    observation_id takes the full id or at least 4 hex characters of it,
+    as shown in brackets in the session-start digest.
+    """
+    caller = _caller(ctx)
+    if isinstance(caller, str):
+        return caller
+    return memory.claim_todo(
+        path,
+        caller["user_id"],
+        caller["machine"],
+        observation_id,
+        client_session_id,
+        holder_label=holder_label,
+        lease_minutes=lease_minutes,
+        plan_ref=plan_ref,
+        phase_total=phase_total,
+    )
+
+
+@mcp.tool()
+def memodi_todo_progress(
+    ctx: Context,
+    path: str,
+    observation_id: str,
+    client_session_id: str,
+    phase_current: int | None = None,
+    phase_total: int | None = None,
+    phase_label: str | None = None,
+    plan_ref: str | None = None,
+) -> str:
+    """Record which phase of its plan a claimed todo is in, shown as
+    "F-2/5 (fix)" in the session-start digest and on memodi_context.
+
+    Only the session holding the claim can update it; anyone else gets
+    updated=false with the reason. Every call renews the claim. Omitted
+    fields keep their stored value. phase_current must be between 1 and
+    phase_total.
+    """
+    caller = _caller(ctx)
+    if isinstance(caller, str):
+        return caller
+    return memory.todo_progress(
+        path,
+        caller["user_id"],
+        caller["machine"],
+        observation_id,
+        client_session_id,
+        phase_current=phase_current,
+        phase_total=phase_total,
+        phase_label=phase_label,
+        plan_ref=plan_ref,
+    )
+
+
+@mcp.tool()
+def memodi_release_todo(
+    ctx: Context, path: str, observation_id: str, client_session_id: str
+) -> str:
+    """Give up a claimed todo without finishing it.
+
+    The todo becomes free for another session. Its plan_ref and phase
+    stay, so whoever claims it next sees where the work stopped. Only the
+    session holding the claim can release it.
+    """
+    caller = _caller(ctx)
+    if isinstance(caller, str):
+        return caller
+    return memory.release_todo(
+        path, caller["user_id"], caller["machine"], observation_id, client_session_id
     )
 
 

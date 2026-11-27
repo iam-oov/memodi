@@ -70,6 +70,14 @@ OBSERVATION_READ_ALLOWLIST = {
     "supersedes",
     "horizon",
     "resolved_at",
+    "claimed_by",
+    "claimed_label",
+    "claimed_until",
+    "plan_ref",
+    "phase_current",
+    "phase_total",
+    "phase_label",
+    "outcome",
 }
 
 _NON_PERSISTED_READ_FIELDS = {
@@ -83,7 +91,19 @@ _NON_PERSISTED_READ_FIELDS = {
 }
 
 
-_CONDITIONALLY_EXPOSED_READ_FIELDS = {"superseded_by", "supersedes", "resolved_at"}
+_CONDITIONALLY_EXPOSED_READ_FIELDS = {
+    "superseded_by",
+    "supersedes",
+    "resolved_at",
+    "claimed_by",
+    "claimed_label",
+    "claimed_until",
+    "plan_ref",
+    "phase_current",
+    "phase_total",
+    "phase_label",
+    "outcome",
+}
 
 OBSERVATION_ROW_FIELDS = (
     OBSERVATION_READ_ALLOWLIST
@@ -549,6 +569,13 @@ def test_context_fields_allowlist_is_pinned():
         "created_at",
         "occurred_at",
         "horizon",
+        "claimed_by",
+        "claimed_label",
+        "claimed_until",
+        "plan_ref",
+        "phase_current",
+        "phase_total",
+        "phase_label",
     } == _CONTEXT_OBSERVATION_FIELDS
 
 

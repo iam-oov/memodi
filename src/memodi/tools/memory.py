@@ -477,19 +477,63 @@ def digest_for_session_start(path: str, user_id: str, machine: str) -> str:
     sections = _summary_sections((last_session or {}).get("summary") or "")
     steps = sections.get("next steps", [])[:DIGEST_MAX_STEPS]
 
+    now = datetime.now(UTC)
     lines = []
     if todos:
         lines.append(f"memodi — {workspace['name']} · open todos")
-        lines.extend(_numbered(todo["title"] for todo in todos))
+        lines.extend(
+            _numbered((_todo_line(todo, now) for todo in todos), _TODO_LINE_WIDTH)
+        )
     if steps:
-        age = _relative_age(last_session["ended_at"], datetime.now(UTC))
+        age = _relative_age(last_session["ended_at"], now)
         lines.append(f"memodi — {workspace['name']} · pending ({age})")
         lines.extend(_numbered(steps))
     return json.dumps({"digest": "\n".join(lines)})
 
 
-def _numbered(items) -> list[str]:
-    return [f"  {i}. {_clip(item)}" for i, item in enumerate(items, start=1)]
+def _numbered(items, width: int = _DIGEST_LINE_WIDTH) -> list[str]:
+    return [f"  {i}. {_clip(item, width)}" for i, item in enumerate(items, start=1)]
+
+
+_TODO_LINE_WIDTH = 240
+_TODO_TITLE_WIDTH = 70
+
+
+def _phase_text(row: dict) -> str | None:
+    current, total = row.get("phase_current"), row.get("phase_total")
+    if current is None and total is None:
+        return None
+    text = f"F-{current or 0}/{total}" if total else f"F-{current}"
+    label = row.get("phase_label")
+    return f"{text} ({label})" if label else text
+
+
+def _holder(todo: dict) -> str:
+    if todo.get("claimed_label"):
+        return todo["claimed_label"]
+    machine, _, session = todo["claimed_by"].rpartition("/")
+    return f"{machine}/{session[:8]}" if machine else todo["claimed_by"][:8]
+
+
+def _time_left(until: datetime, now: datetime) -> str:
+    minutes = max(int((until - now).total_seconds() // 60), 0)
+    hours, mins = divmod(minutes, 60)
+    return f"{hours}h{mins:02d}m" if hours else f"{mins}m"
+
+
+def _todo_line(todo: dict, now: datetime) -> str:
+    short_id = str(todo["id"])[:TODO_PREFIX_MIN]
+    parts = [f"[{short_id}] {_clip(todo['title'], _TODO_TITLE_WIDTH)}"]
+    phase = _phase_text(todo)
+    until = todo.get("claimed_until")
+    if todo.get("claimed_by") and until and until > now:
+        parts.append(f"in progress {phase}" if phase else "in progress")
+        parts.append(f"{_holder(todo)}, {_time_left(until, now)} left")
+    elif phase:
+        parts.append(f"free, last progress {phase}")
+    if todo.get("plan_ref"):
+        parts.append(f"plan: {todo['plan_ref']}")
+    return " · ".join(parts)
 
 
 @handle_errors
@@ -564,14 +608,217 @@ def get_observation(path: str, user_id: str, machine: str, observation_id: str) 
     return json.dumps(serialize_observation(obs), default=str)
 
 
+TODO_PREFIX_MIN = 4
+_HEX_PREFIX = re.compile(r"^[0-9a-f]{4,32}$")
+MAX_PLAN_REF = 1000
+MAX_PHASE_LABEL = 80
+MAX_OUTCOME = 2000
+MAX_SESSION_ID = 128
+MAX_HOLDER_LABEL = 80
+MAX_CLAIM_MINUTES = 24 * 60
+
+
+def _todo_id(value: object, workspace_id: str) -> str | None:
+    full = _observation_id(value)
+    if full is not None:
+        return full
+    prefix = str(value or "").strip().lower()
+    if not _HEX_PREFIX.match(prefix):
+        raise ValueError(
+            f"{INVALID_OBSERVATION_ID}: pass the full id or at least "
+            f"{TODO_PREFIX_MIN} hex characters of it"
+        )
+    matches = repository.find_todo_ids_by_prefix(prefix, workspace_id)
+    rollback()
+    if len(matches) > 1:
+        raise ValueError(
+            f"id prefix '{prefix}' matches more than one todo; pass more characters"
+        )
+    return matches[0] if matches else None
+
+
+def _owner(machine: str, client_session_id: str) -> str:
+    session = (client_session_id or "").strip()
+    if not session or len(session) > MAX_SESSION_ID:
+        raise ValueError(
+            f"client_session_id is required (at most {MAX_SESSION_ID} characters)"
+        )
+    return f"{machine}/{session}"
+
+
+def _phase(name: str, value: int | None) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError(f"{name} must be a whole number of 1 or more")
+    return value
+
+
+def _text(name: str, value: str | None, limit: int) -> str | None:
+    if value is None:
+        return None
+    text = value.strip()
+    if not text or len(text) > limit:
+        raise ValueError(f"{name} must be 1 to {limit} characters")
+    return text
+
+
+def _lease(minutes: int | None) -> int:
+    if minutes is None:
+        return settings.todo_claim_minutes
+    if (
+        isinstance(minutes, bool)
+        or not isinstance(minutes, int)
+        or not 1 <= minutes <= MAX_CLAIM_MINUTES
+    ):
+        raise ValueError(f"lease_minutes must be between 1 and {MAX_CLAIM_MINUTES}")
+    return minutes
+
+
+def _todo_view(row: dict) -> dict:
+    view = {
+        "id": str(row["id"]),
+        "title": row["title"],
+        "claimed_by": row.get("claimed_by"),
+        "claimed_label": row.get("claimed_label"),
+        "claimed_until": row.get("claimed_until"),
+        "plan_ref": row.get("plan_ref"),
+        "phase_current": row.get("phase_current"),
+        "phase_total": row.get("phase_total"),
+        "phase_label": row.get("phase_label"),
+    }
+    return {k: v for k, v in view.items() if v is not None}
+
+
+def _todo_refusal(key: str, obs_id: str | None, workspace_id: str) -> str:
+    state = repository.get_todo_state(obs_id, workspace_id) if obs_id else None
+    rollback()
+    if state is None or state["resolved_at"] is not None:
+        return json.dumps(
+            {key: False, "reason": "not_found", "error": "No open todo with that id"}
+        )
+    if state["claim_active"]:
+        return json.dumps(
+            {
+                key: False,
+                "reason": "held_by_another",
+                "claimed_by": state["claimed_by"],
+                "claimed_label": state["claimed_label"],
+                "claimed_until": state["claimed_until"],
+            },
+            default=str,
+        )
+    return json.dumps({key: False, "reason": "not_holder"})
+
+
 @handle_errors
-def resolve_todo(path: str, user_id: str, machine: str, observation_id: str) -> str:
+def claim_todo(
+    path: str,
+    user_id: str,
+    machine: str,
+    observation_id: str,
+    client_session_id: str,
+    holder_label: str | None = None,
+    lease_minutes: int | None = None,
+    plan_ref: str | None = None,
+    phase_total: int | None = None,
+) -> str:
     _ensure()
-    obs_id = _observation_id(observation_id)
-    if obs_id is None:
-        raise ValueError(INVALID_OBSERVATION_ID)
+    owner = _owner(machine, client_session_id)
+    holder_label = _text("holder_label", holder_label, MAX_HOLDER_LABEL)
+    lease = _lease(lease_minutes)
+    plan_ref = _text("plan_ref", plan_ref, MAX_PLAN_REF)
+    phase_total = _phase("phase_total", phase_total)
     workspace = require_workspace(user_id, machine, path)
-    resolved = repository.resolve_todo(obs_id, workspace["id"])
+    obs_id = _todo_id(observation_id, workspace["id"])
+    row = (
+        repository.claim_todo(
+            obs_id,
+            workspace["id"],
+            owner,
+            lease,
+            label=holder_label,
+            plan_ref=plan_ref,
+            phase_total=phase_total,
+        )
+        if obs_id
+        else None
+    )
+    if row is None:
+        return _todo_refusal("claimed", obs_id, workspace["id"])
+    return json.dumps({"claimed": True, **_todo_view(row)}, default=str)
+
+
+@handle_errors
+def todo_progress(
+    path: str,
+    user_id: str,
+    machine: str,
+    observation_id: str,
+    client_session_id: str,
+    phase_current: int | None = None,
+    phase_total: int | None = None,
+    phase_label: str | None = None,
+    plan_ref: str | None = None,
+) -> str:
+    _ensure()
+    owner = _owner(machine, client_session_id)
+    phase_current = _phase("phase_current", phase_current)
+    phase_total = _phase("phase_total", phase_total)
+    phase_label = _text("phase_label", phase_label, MAX_PHASE_LABEL)
+    plan_ref = _text("plan_ref", plan_ref, MAX_PLAN_REF)
+    workspace = require_workspace(user_id, machine, path)
+    obs_id = _todo_id(observation_id, workspace["id"])
+    row = (
+        repository.update_todo_progress(
+            obs_id,
+            workspace["id"],
+            owner,
+            settings.todo_claim_minutes,
+            phase_current=phase_current,
+            phase_total=phase_total,
+            phase_label=phase_label,
+            plan_ref=plan_ref,
+        )
+        if obs_id
+        else None
+    )
+    if row is None:
+        return _todo_refusal("updated", obs_id, workspace["id"])
+    return json.dumps({"updated": True, **_todo_view(row)}, default=str)
+
+
+@handle_errors
+def release_todo(
+    path: str, user_id: str, machine: str, observation_id: str, client_session_id: str
+) -> str:
+    _ensure()
+    owner = _owner(machine, client_session_id)
+    workspace = require_workspace(user_id, machine, path)
+    obs_id = _todo_id(observation_id, workspace["id"])
+    row = repository.release_todo(obs_id, workspace["id"], owner) if obs_id else None
+    if row is None:
+        return _todo_refusal("released", obs_id, workspace["id"])
+    return json.dumps({"released": True, **_todo_view(row)}, default=str)
+
+
+@handle_errors
+def resolve_todo(
+    path: str,
+    user_id: str,
+    machine: str,
+    observation_id: str,
+    outcome: str | None = None,
+) -> str:
+    _ensure()
+    outcome = _text("outcome", outcome, MAX_OUTCOME)
+    workspace = require_workspace(user_id, machine, path)
+    obs_id = _todo_id(observation_id, workspace["id"])
+    resolved = (
+        repository.resolve_todo(obs_id, workspace["id"], outcome=outcome)
+        if obs_id
+        else None
+    )
     if resolved is None:
         return json.dumps(
             {
@@ -585,11 +832,9 @@ def resolve_todo(path: str, user_id: str, machine: str, observation_id: str) -> 
 @handle_errors
 def reopen_todo(path: str, user_id: str, machine: str, observation_id: str) -> str:
     _ensure()
-    obs_id = _observation_id(observation_id)
-    if obs_id is None:
-        raise ValueError(INVALID_OBSERVATION_ID)
     workspace = require_workspace(user_id, machine, path)
-    reopened = repository.reopen_todo(obs_id, workspace["id"])
+    obs_id = _todo_id(observation_id, workspace["id"])
+    reopened = repository.reopen_todo(obs_id, workspace["id"]) if obs_id else None
     if reopened is None:
         return json.dumps(
             {
