@@ -13,6 +13,7 @@ from starlette.responses import HTMLResponse, RedirectResponse
 from memodi.config import settings
 from memodi.database import auth_repository
 from memodi.database.connection import ensure_schema
+from memodi.web import session
 
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -26,6 +27,10 @@ PORT_RE = re.compile(r"\A[1-9][0-9]{3,4}\Z")
 PORT_MIN = 1024
 PORT_MAX = 65535
 LOOPBACK_HOST = "127.0.0.1"
+WEB_MODE = "web"
+NEXT_RE = re.compile(
+    r"\A/o/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z"
+)
 
 
 def _page(title: str, body: str) -> str:
@@ -120,17 +125,35 @@ def _valid_dest(port_raw: str | None, nonce: str | None) -> int | None:
     return port
 
 
-def _parse_state_cookie(raw: str) -> tuple[str, int | None, str | None]:
+def valid_next(path: str | None) -> str | None:
+    return path if path and NEXT_RE.fullmatch(path) else None
+
+
+def _parse_state_cookie(raw: str) -> tuple[str, int | None, str | None, str | None]:
     parts = raw.split("|")
-    if len(parts) != 3:
-        return raw, None, None
-    token, port_raw, nonce = parts
-    if not token:
-        return raw, None, None
-    port = _valid_dest(port_raw, nonce)
+    if len(parts) != 3 or not parts[0]:
+        return raw, None, None, None
+    token, middle, last = parts
+    if middle == WEB_MODE:
+        next_path = valid_next(last)
+        return (token, None, None, next_path) if next_path else (raw, None, None, None)
+    port = _valid_dest(middle, last)
     if port is None:
-        return raw, None, None
-    return token, port, nonce
+        return raw, None, None, None
+    return token, port, last, None
+
+
+def _web_redirect(email: str, next_path: str) -> HTMLResponse | RedirectResponse:
+    user = auth_repository.get_user_by_email(email)
+    if user is None:
+        return _error_page(
+            403, "No memodi account for this email. Log in from your terminal first."
+        )
+    response = RedirectResponse(next_path, status_code=302)
+    response.headers["Cache-Control"] = "no-store"
+    response.delete_cookie(STATE_COOKIE)
+    session.set_cookie(response, str(user["id"]))
+    return response
 
 
 def _loopback_redirect(
@@ -150,11 +173,17 @@ async def get_login(request: Request) -> HTMLResponse | RedirectResponse:
 
     port_raw = request.query_params.get("port")
     nonce = request.query_params.get("nonce")
+    next_raw = request.query_params.get("next")
     loopback_port: int | None = None
     if port_raw is not None or nonce is not None:
         loopback_port = _valid_dest(port_raw, nonce)
         if loopback_port is None:
             return _error_page(400, "Invalid loopback port or nonce.")
+    next_path: str | None = None
+    if next_raw is not None:
+        next_path = valid_next(next_raw)
+        if next_path is None or loopback_port is not None or not session.enabled():
+            return _error_page(400, "Invalid page to return to.")
 
     state = secrets.token_urlsafe(32)
     params = {
@@ -167,9 +196,12 @@ async def get_login(request: Request) -> HTMLResponse | RedirectResponse:
     }
     url = f"{GOOGLE_AUTH_URL}?{urllib.parse.urlencode(params)}"
 
-    cookie_value = (
-        state if loopback_port is None else f"{state}|{loopback_port}|{nonce}"
-    )
+    if next_path is not None:
+        cookie_value = f"{state}|{WEB_MODE}|{next_path}"
+    elif loopback_port is not None:
+        cookie_value = f"{state}|{loopback_port}|{nonce}"
+    else:
+        cookie_value = state
 
     response = RedirectResponse(url, status_code=302)
     response.set_cookie(
@@ -249,7 +281,7 @@ async def get_oauth_callback(request: Request) -> HTMLResponse | RedirectRespons
 
     state = request.query_params.get("state") or ""
     cookie_raw = request.cookies.get(STATE_COOKIE) or ""
-    cookie_token, port, nonce = _parse_state_cookie(cookie_raw)
+    cookie_token, port, nonce, next_path = _parse_state_cookie(cookie_raw)
     if (
         not state
         or not cookie_token
@@ -277,6 +309,9 @@ async def get_oauth_callback(request: Request) -> HTMLResponse | RedirectRespons
         return _error_page(400, str(e))
 
     ensure_schema()
+    if next_path is not None:
+        return _web_redirect(email, next_path)
+
     user = auth_repository.login_with_email(email)
 
     if port is not None:
