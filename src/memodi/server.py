@@ -126,8 +126,9 @@ def memodi_save(
     """Persist an observation to memory.
 
     type must be one of: decision, discovery, bugfix, pattern,
-    config, preference, architecture, or session (an
-    end-of-session summary).
+    config, preference, architecture, session (an end-of-session
+    summary), or incident (a tracked case such as a production bug,
+    open until resolved).
 
     horizon says how long the observation stays in front of the agent —
     type says what it is, horizon says how long it lives:
@@ -138,10 +139,10 @@ def memodi_save(
     - short: the work diary — current status, MR numbers, what another
       session is doing. Loaded only while recent, then found only by search.
     - todo: pending work recorded on purpose for later. Loaded until closed
-      with memodi_resolve_todo.
+      with memodi_resolve_todo; memodi_reopen_todo brings it back.
     Omitted, it follows type: preference/pattern -> long,
-    decision/architecture -> medium, anything else -> short. A topic_key
-    upsert keeps the stored horizon unless you pass one.
+    decision/architecture -> medium, incident -> todo, anything else ->
+    short. A topic_key upsert keeps the stored horizon unless you pass one.
 
     Call PROACTIVELY after any significant event — don't wait
     to be asked. path is the caller's cwd — memodi resolves it to a
@@ -196,7 +197,9 @@ def memodi_save(
     names. Names with no project yet are created and listed back as
     projects_created, so a typo shows up immediately instead of
     silently swallowing the memory. On a topic_key upsert, omitting
-    affects keeps the stored list while affects=[] clears it. Over 20
+    affects keeps the stored list while affects=[] clears it; the same
+    goes for metadata, whose stored keys survive an omitted metadata
+    and are replaced as a whole when one is passed. Over 20
     names the list is refused with affects_reason "too_many" and the
     observation still saves. Primary ownership always stays with path
     — affects widens who can find an observation, it never moves it,
@@ -484,6 +487,24 @@ def memodi_resolve_todo(ctx: Context, path: str, observation_id: str) -> str:
     if isinstance(caller, str):
         return caller
     return memory.resolve_todo(
+        path, caller["user_id"], caller["machine"], observation_id
+    )
+
+
+@mcp.tool()
+def memodi_reopen_todo(ctx: Context, path: str, observation_id: str) -> str:
+    """Reopen a resolved todo-horizon observation, such as an incident
+    that came back.
+
+    The todo surfaces again in memodi_context and the session-start
+    digest. A topic_key upsert never reopens a resolved todo on its own;
+    this is the only way back. Only observations with horizon="todo"
+    can be reopened.
+    """
+    caller = _caller(ctx)
+    if isinstance(caller, str):
+        return caller
+    return memory.reopen_todo(
         path, caller["user_id"], caller["machine"], observation_id
     )
 

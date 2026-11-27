@@ -206,6 +206,60 @@ def test_topic_key_upsert_without_affects_preserves_the_stored_list(
     ]
 
 
+def _case_revision(registered_workspace, repos, **extra) -> dict:
+    common = dict(
+        path=registered_workspace["root"],
+        user_id=registered_workspace["user_id"],
+        machine=registered_workspace["machine"],
+        topic_key="cases/BUG-test",
+        type="incident",
+        title="Vendor quota storm",
+    )
+    first = json.loads(
+        save(
+            **common,
+            content="Opened",
+            affects=[repos["load_matching"]],
+            metadata={"status": "open", "vendor": "123LB"},
+        )
+    )
+    second = json.loads(save(**common, content="Next phase", **extra))
+    assert second["id"] == first["id"]
+    return _stored_metadata(second["id"])
+
+
+def test_topic_key_upsert_without_metadata_preserves_the_stored_keys(
+    registered_workspace, repos
+):
+    # The case-registry trap: a phase update that forgets metadata used to
+    # wipe status/vendor, the very keys the duplicate check filters on.
+    stored = _case_revision(registered_workspace, repos)
+
+    assert stored == {
+        "status": "open",
+        "vendor": "123LB",
+        "affects": [repos["load_matching"]],
+    }
+
+
+def test_topic_key_upsert_with_metadata_replaces_the_keys_but_keeps_affects(
+    registered_workspace, repos
+):
+    stored = _case_revision(
+        registered_workspace, repos, metadata={"status": "diagnosed"}
+    )
+
+    assert stored == {"status": "diagnosed", "affects": [repos["load_matching"]]}
+
+
+def test_topic_key_upsert_with_empty_metadata_clears_the_keys_but_keeps_affects(
+    registered_workspace, repos
+):
+    stored = _case_revision(registered_workspace, repos, metadata={})
+
+    assert stored == {"affects": [repos["load_matching"]]}
+
+
 def test_topic_key_upsert_with_empty_affects_clears_the_stored_list(
     registered_workspace, repos
 ):
