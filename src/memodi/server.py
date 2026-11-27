@@ -4,7 +4,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import Tool as MCPTool
 
 from memodi.config import settings
-from memodi.database import auth_repository
+from memodi.database import auth_repository, repository
 from memodi.database.connection import ensure_schema
 from memodi.tools import graph, memory, session, workflow
 from memodi.tools.context import client_context
@@ -19,6 +19,7 @@ from memodi.web.hooks import (
     post_session_start,
 )
 from memodi.web.login import get_login, get_oauth_callback
+from memodi.web.viewer import get_observation_page, get_web_logout
 
 # Tools always loaded into Claude's context. All others are deferred
 # and loaded on-demand via ToolSearch to save tokens.
@@ -50,6 +51,8 @@ mcp = FastMCP(
 
 mcp.custom_route("/login", methods=["GET"])(get_login)
 mcp.custom_route("/oauth/callback", methods=["GET"])(get_oauth_callback)
+mcp.custom_route("/o/{observation_id}", methods=["GET"])(get_observation_page)
+mcp.custom_route("/web/logout", methods=["GET"])(get_web_logout)
 
 # --- Web (hooks — plain HTTP counterpart to MCP, for Claude Code shell hooks) ---
 
@@ -492,6 +495,12 @@ def memodi_resolve_todo(
     line saying what happened and where the conclusions live, for example
     "Rotated; see [[ops/staging-key-rotation]]".
 
+    A plan stored on the todo (plan_md) is deleted
+    MEMODI_PLAN_GRACE_DAYS after resolving; the response says when
+    (plan_deleted_after). Every resolve also deletes every other plan on
+    the server whose grace period is over. Only the outcome and the
+    conclusion observations survive.
+
     observation_id takes the full id or at least 4 hex characters of it,
     as shown in brackets in the session-start digest.
     """
@@ -569,6 +578,7 @@ def memodi_todo_progress(
     phase_total: int | None = None,
     phase_label: str | None = None,
     plan_ref: str | None = None,
+    plan_md: str | None = None,
 ) -> str:
     """Record which phase of its plan a claimed todo is in, shown as
     "F-2/5 (fix)" in the session-start digest and on memodi_context.
@@ -577,6 +587,14 @@ def memodi_todo_progress(
     updated=false with the reason. Every call renews the claim. Omitted
     fields keep their stored value. phase_current must be between 1 and
     phase_total.
+
+    plan_md stores the plan itself (markdown, up to 64 KB) on the todo,
+    replacing the previous one, so any session on any machine can
+    continue it: memodi_get_observation returns it as plan_md, and the
+    owner can read it in a browser at plan_url. The plan is scaffolding,
+    not knowledge: it is never searched, and it is deleted
+    MEMODI_PLAN_GRACE_DAYS (default 7) after the todo is resolved; a
+    memodi_reopen_todo within that window brings it back.
     """
     caller = _caller(ctx)
     if isinstance(caller, str):
@@ -591,6 +609,7 @@ def memodi_todo_progress(
         phase_total=phase_total,
         phase_label=phase_label,
         plan_ref=plan_ref,
+        plan_md=plan_md,
     )
 
 
@@ -1172,6 +1191,7 @@ def main():
     # before serving. Otherwise ensure_schema() would run lazily on the first
     # tool call and a broken deploy would still pass the health check.
     ensure_schema()
+    repository.purge_expired_plans(settings.plan_grace_days)
 
     if "--http" in sys.argv:
         mcp.run(transport="streamable-http")

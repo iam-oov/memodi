@@ -20,6 +20,10 @@ class Settings(BaseSettings):
 
     short_horizon_days: int = 7
     todo_claim_minutes: int = 120
+    plan_grace_days: int = 7
+    session_secret: str | None = None
+    session_days: int = 14
+    public_url: str | None = None
 
     @property
     def db_url(self) -> str:

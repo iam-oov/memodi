@@ -1,7 +1,7 @@
 import json
 import re
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from memodi.config import settings
 from memodi.database import graph_repository, repository
@@ -531,9 +531,18 @@ def _todo_line(todo: dict, now: datetime) -> str:
         parts.append(f"{_holder(todo)}, {_time_left(until, now)} left")
     elif phase:
         parts.append(f"free, last progress {phase}")
-    if todo.get("plan_ref"):
-        parts.append(f"plan: {todo['plan_ref']}")
+    plan = todo.get("plan_ref")
+    if not plan and todo.get("has_plan"):
+        plan = plan_url(todo["id"])
+    if plan:
+        parts.append(f"plan: {plan}")
     return " · ".join(parts)
+
+
+def plan_url(observation_id: object) -> str:
+    if settings.public_url:
+        return f"{settings.public_url.rstrip('/')}/o/{observation_id}"
+    return f"memodi_get_observation {observation_id}"
 
 
 @handle_errors
@@ -605,7 +614,10 @@ def get_observation(path: str, user_id: str, machine: str, observation_id: str) 
     obs = repository.get_observation(obs_id, workspace_id=workspace["id"])
     if obs is None:
         return json.dumps({"error": f"Observation '{observation_id}' not found"})
-    return json.dumps(serialize_observation(obs), default=str)
+    payload = serialize_observation(obs)
+    if repository.plan_is_live(obs, settings.plan_grace_days):
+        payload["plan_md"] = obs["plan_md"]
+    return json.dumps(payload, default=str)
 
 
 TODO_PREFIX_MIN = 4
@@ -616,6 +628,7 @@ MAX_OUTCOME = 2000
 MAX_SESSION_ID = 128
 MAX_HOLDER_LABEL = 80
 MAX_CLAIM_MINUTES = 24 * 60
+MAX_PLAN_MD = 64 * 1024
 
 
 def _todo_id(value: object, workspace_id: str) -> str | None:
@@ -686,6 +699,7 @@ def _todo_view(row: dict) -> dict:
         "phase_current": row.get("phase_current"),
         "phase_total": row.get("phase_total"),
         "phase_label": row.get("phase_label"),
+        "plan_url": plan_url(row["id"]) if row.get("has_plan") else None,
     }
     return {k: v for k, v in view.items() if v is not None}
 
@@ -731,6 +745,7 @@ def claim_todo(
     phase_total = _phase("phase_total", phase_total)
     workspace = require_workspace(user_id, machine, path)
     obs_id = _todo_id(observation_id, workspace["id"])
+    repository.purge_expired_plans(settings.plan_grace_days)
     row = (
         repository.claim_todo(
             obs_id,
@@ -760,6 +775,7 @@ def todo_progress(
     phase_total: int | None = None,
     phase_label: str | None = None,
     plan_ref: str | None = None,
+    plan_md: str | None = None,
 ) -> str:
     _ensure()
     owner = _owner(machine, client_session_id)
@@ -767,6 +783,7 @@ def todo_progress(
     phase_total = _phase("phase_total", phase_total)
     phase_label = _text("phase_label", phase_label, MAX_PHASE_LABEL)
     plan_ref = _text("plan_ref", plan_ref, MAX_PLAN_REF)
+    plan_md = _text("plan_md", plan_md, MAX_PLAN_MD)
     workspace = require_workspace(user_id, machine, path)
     obs_id = _todo_id(observation_id, workspace["id"])
     row = (
@@ -779,6 +796,7 @@ def todo_progress(
             phase_total=phase_total,
             phase_label=phase_label,
             plan_ref=plan_ref,
+            plan_md=plan_md,
         )
         if obs_id
         else None
@@ -819,6 +837,7 @@ def resolve_todo(
         if obs_id
         else None
     )
+    repository.purge_expired_plans(settings.plan_grace_days)
     if resolved is None:
         return json.dumps(
             {
@@ -826,7 +845,19 @@ def resolve_todo(
                 "error": f"No todo '{observation_id}' found in this workspace",
             }
         )
-    return json.dumps({"resolved": True, **resolved}, default=str)
+    had_plan = resolved.pop("had_plan", False)
+    ack = {"resolved": True, **resolved}
+    if had_plan:
+        ack["plan_deleted_after"] = resolved["resolved_at"] + timedelta(
+            days=settings.plan_grace_days
+        )
+        if not resolved.get("outcome"):
+            ack["warning"] = (
+                "This todo had a plan, which will be deleted. Save the results "
+                "and conclusions as observations now, then resolve again with "
+                "an outcome pointing to them."
+            )
+    return json.dumps(ack, default=str)
 
 
 @handle_errors

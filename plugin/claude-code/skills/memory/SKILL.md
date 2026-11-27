@@ -284,12 +284,18 @@ every future session with stale status. Pick it deliberately:
    Every call renews the claim. The claim lasts 120 minutes by default; ask for a longer
    `lease_minutes` (up to 1440) when a phase waits on something slow, like a pipeline and a
    deploy.
-4. **Giving up** without finishing: `memodi_release_todo`. The plan and phase stay, so the
+4. **Store the plan on the todo** with `memodi_todo_progress(..., plan_md="<the plan in
+   markdown>")` (up to 64 KB; each call replaces it). Any session on any machine reads it
+   back as `plan_md` from `memodi_get_observation`, and the owner reads it in a browser at
+   the `plan_url` the ack returns. A plan is scaffolding, not knowledge: it is never
+   searched and it is deleted 7 days after the todo is resolved.
+5. **Giving up** without finishing: `memodi_release_todo`. The plan and phase stay, so the
    next session continues from there.
-5. **Finishing**: first save the results and conclusions as NEW observations, each with its own
+6. **Finishing**: first save the results and conclusions as NEW observations, each with its own
    horizon (a gotcha → `long`, a decision → `medium`) and `[[<the todo's topic_key>]]` in the
-   content. Then `memodi_resolve_todo(path, observation_id, outcome="<one line: what happened,
-   where the conclusions live>")`. Never turn the todo itself into the conclusion.
+   content — the plan will be deleted, so anything worth keeping must be in them. Then
+   `memodi_resolve_todo(path, observation_id, outcome="<one line: what happened, where the
+   conclusions live>")`. Never turn the todo itself into the conclusion.
 
 The session-start digest shows each open todo with a short id in brackets (`[be37]`), its
 holder, phase (`F-2/4 (Fix)`) and plan; the todo tools accept that short id (4+ hex

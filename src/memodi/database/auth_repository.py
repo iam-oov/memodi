@@ -65,6 +65,19 @@ def create_user(email: str) -> dict:
     return result
 
 
+def get_user_by_email(email: str) -> dict | None:
+    row = (
+        get_connection()
+        .execute(
+            "SELECT id, email FROM users WHERE email = %s",
+            (email.strip().lower(),),
+        )
+        .fetchone()
+    )
+    get_connection().rollback()
+    return dict(row) if row else None
+
+
 def login_with_email(email: str) -> dict:
     normalized = email.strip().lower()
     conn = get_connection()

@@ -1091,7 +1091,8 @@ def get_open_todos_by_workspace(
         f"""
         SELECT o.id, o.title, p.name AS project, o.claimed_by, o.claimed_label,
                o.claimed_until,
-               o.plan_ref, o.phase_current, o.phase_total, o.phase_label
+               o.plan_ref, o.phase_current, o.phase_total, o.phase_label,
+               (o.plan_md IS NOT NULL) AS has_plan
         FROM observations o
         JOIN projects p ON p.id = o.project_id
         WHERE p.workspace_id = %s
@@ -1186,7 +1187,8 @@ def resolve_todo(
           AND p.workspace_id = %s
           AND o.horizon = 'todo'
           AND o.deleted_at IS NULL
-        RETURNING o.id, o.title, o.resolved_at, o.outcome
+        RETURNING o.id, o.title, o.resolved_at, o.outcome,
+                  (o.plan_md IS NOT NULL) AS had_plan
         """,
         (outcome, observation_id, workspace_id),
     ).fetchone()
@@ -1222,7 +1224,8 @@ def reopen_todo(observation_id: str, workspace_id: str) -> dict | None:
 
 _TODO_STATE = (
     "o.id, o.title, o.resolved_at, o.claimed_by, o.claimed_label, "
-    "o.claimed_until, o.plan_ref, o.phase_current, o.phase_total, o.phase_label"
+    "o.claimed_until, o.plan_ref, o.phase_current, o.phase_total, o.phase_label, "
+    "(o.plan_md IS NOT NULL) AS has_plan"
 )
 
 _OPEN_TODO_IN_WORKSPACE = """
@@ -1344,6 +1347,7 @@ def update_todo_progress(
     phase_total: int | None = None,
     phase_label: str | None = None,
     plan_ref: str | None = None,
+    plan_md: str | None = None,
 ) -> dict | None:
     return _write_todo(
         f"""
@@ -1353,7 +1357,8 @@ def update_todo_progress(
             phase_current = COALESCE(%s, o.phase_current),
             phase_total = COALESCE(%s, o.phase_total),
             phase_label = COALESCE(%s, o.phase_label),
-            plan_ref = COALESCE(%s, o.plan_ref)
+            plan_ref = COALESCE(%s, o.plan_ref),
+            plan_md = COALESCE(%s, o.plan_md)
         FROM projects p
         WHERE {_OPEN_TODO_IN_WORKSPACE}
           AND o.claimed_by = %s
@@ -1366,11 +1371,60 @@ def update_todo_progress(
             phase_total,
             phase_label,
             plan_ref,
+            plan_md,
             workspace_id,
             observation_id,
             owner,
         ),
     )
+
+
+def purge_expired_plans(grace_days: int) -> int:
+    conn = get_connection()
+    cursor = conn.execute(
+        """
+        UPDATE observations
+        SET plan_md = NULL
+        WHERE plan_md IS NOT NULL
+          AND (
+              deleted_at IS NOT NULL
+              OR resolved_at < now() - make_interval(days => %s)
+          )
+        """,
+        (grace_days,),
+    )
+    conn.commit()
+    return cursor.rowcount
+
+
+def plan_is_live(row: dict, grace_days: int) -> bool:
+    if not row.get("plan_md"):
+        return False
+    resolved = row.get("resolved_at")
+    if resolved is None:
+        return True
+    return (datetime.now(UTC) - resolved).total_seconds() < grace_days * 86400
+
+
+def get_observation_for_owner(observation_id: str, user_id: str) -> dict | None:
+    row = (
+        get_connection()
+        .execute(
+            """
+            SELECT o.*, p.name AS project, w.name AS workspace
+            FROM observations o
+            JOIN projects p ON p.id = o.project_id
+            JOIN workspaces w ON w.id = p.workspace_id
+            WHERE o.id = %s
+              AND w.owner_user_id = %s
+              AND o.deleted_at IS NULL
+            """,
+            (observation_id, user_id),
+        )
+        .fetchone()
+    )
+    get_connection().rollback()
+    return dict(row) if row else None
 
 
 def release_todo(observation_id: str, workspace_id: str, owner: str) -> dict | None:
