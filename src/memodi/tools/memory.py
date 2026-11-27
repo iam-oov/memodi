@@ -593,12 +593,76 @@ def context(
         short_days=settings.short_horizon_days,
         **_search_scope(proj),
     )
+    pointers = serialize_context_observations(observations)
+    for pointer, row in zip(pointers, observations, strict=True):
+        if repository.plan_is_live(row, settings.plan_grace_days):
+            pointer["plan_url"] = plan_url(row["id"])
     return json.dumps(
         {
             "last_session": serialize_session_summary(last_session)
             if last_session
             else None,
-            "observations": serialize_context_observations(observations),
+            "observations": pointers,
+        },
+        default=str,
+    )
+
+
+TODO_LIST_LIMIT = 50
+RECENTLY_RESOLVED_DAYS = 7
+
+
+def _todo_entry(row: dict, now: datetime) -> dict:
+    entry = {
+        "short_id": str(row["id"])[:TODO_PREFIX_MIN],
+        "id": str(row["id"]),
+        "title": row["title"],
+        "type": row["type"],
+        "workspace": row["workspace"],
+        "project": row["project"],
+        "topic_key": row.get("topic_key"),
+        "phase": _phase_text(row),
+        "plan": row.get("plan_ref")
+        or (plan_url(row["id"]) if row["has_plan"] else None),
+        "outcome": row.get("outcome"),
+        "resolved_at": row.get("resolved_at"),
+    }
+    until = row.get("claimed_until")
+    if row.get("claimed_by") and until and until > now:
+        entry["held_by"] = _holder(row)
+        entry["held_until"] = until
+    return {k: v for k, v in entry.items() if v is not None}
+
+
+@handle_errors
+def list_todos(
+    path: str,
+    user_id: str,
+    machine: str,
+    all_workspaces: bool = False,
+    limit: int = TODO_LIST_LIMIT,
+) -> str:
+    _ensure()
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 200:
+        raise ValueError("limit must be between 1 and 200")
+    if all_workspaces is True:
+        scope: dict = {}
+    else:
+        workspace = require_workspace(user_id, machine, path)
+        scope = {
+            "workspace_id": workspace["id"],
+            **scoped_project_names(workspace, path),
+        }
+    now = datetime.now(UTC)
+    open_rows = repository.get_todos_for_owner(user_id, limit, **scope)
+    done_rows = repository.get_todos_for_owner(
+        user_id, limit, resolved_within_days=RECENTLY_RESOLVED_DAYS, **scope
+    )
+    return json.dumps(
+        {
+            "scope": "all_workspaces" if all_workspaces is True else "workspace",
+            "open": [_todo_entry(r, now) for r in open_rows],
+            "recently_resolved": [_todo_entry(r, now) for r in done_rows],
         },
         default=str,
     )

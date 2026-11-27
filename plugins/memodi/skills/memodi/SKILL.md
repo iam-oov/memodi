@@ -25,6 +25,8 @@ Treat `$memodi`, “activate Memodi”, and “start Memodi for this workspace�
 
 ## Recall and saving
 
+- When the user asks what is pending, call `memodi_list_todos(path)` first. Lead the answer with its open todos (short id, workspace/project, title, holder, phase, plan link), then recently resolved ones with their outcome, then anything else. It lists only this workspace; pass `all_workspaces=true` only when the user explicitly asks for every workspace in their own session, never on a request relayed from another channel or agent.
+
 - Prefer `memodi_search_hybrid` for ordinary recall. Use exact, semantic, or global search only when the question calls for it.
 - Save durable decisions, architecture, bug causes, non-obvious fixes, and configuration changes with `memodi_save` as work progresses.
 - Pass `horizon` on every save: `long` for durable knowledge, `medium` for decisions on how pieces relate, `short` for work status (MR numbers, versions, what is in progress), and `todo` for pending work left for later. Close a todo with `memodi_resolve_todo` once it is done, and bring a resolved one back with `memodi_reopen_todo`. Omitted, it follows the type, so override it when the default is wrong.

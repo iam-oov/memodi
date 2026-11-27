@@ -271,7 +271,7 @@ Real per-user accounts, not a shared key:
 - Unregistered path → `{"type": "not_started"}`; missing or invalid key → `{"type": "not_authenticated"}`
 - Switching accounts on the same machine needs no new code: a different user's key resolves to its own memories, never the previous user's. Run `/memodi:logout` to revoke this machine's key before logging in as someone else
 
-## MCP Tools (47)
+## MCP Tools (48)
 
 Every project-scoped tool takes `path` (the caller's cwd) and resolves it against a registered workspace.
 
@@ -316,6 +316,7 @@ Every project-scoped tool takes `path` (the caller's cwd) and resolves it agains
 | `memodi_set_coordinator`  | Let one project read every project in its workspace; no other project reads it |
 | `memodi_resolve_todo`     | Close a `todo` observation once the pending work is done        |
 | `memodi_reopen_todo`      | Reopen a resolved `todo`, such as an incident that came back    |
+| `memodi_list_todos`       | This workspace's open todos (all with `all_workspaces`) + last 7 days resolved |
 | `memodi_claim_todo`       | Take a `todo` so no other session works on it (atomic, expires)  |
 | `memodi_todo_progress`    | Record the current phase of a claimed `todo`'s plan             |
 | `memodi_release_todo`     | Give a claimed `todo` up without finishing it                   |
